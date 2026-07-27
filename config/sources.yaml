@@ -72,6 +72,20 @@ sources:
       libinvent prior specifically is required. Which prior is a decision worth
       recording, not a default.
 
+  gnina:
+    description: "gnina covalent docking binary — the ONE tool T_3 and T_4 share"
+    kind: http
+    url: "https://github.com/gnina/gnina/releases/download/v1.3.3/gnina.cuda12.8.static"
+    dest: /data/lab_vm/immutable/inhibition/bin/gnina
+    required_by: [shared, t3, t4]
+    license: Apache-2.0
+    notes: >
+      Static binary, CUDA 12.8 runtime bundled; needs only a recent driver.
+      Covalent docking requires gnina >= 1.3 for --covalent_rec_atom and
+      --covalent_lig_atom_pattern. Pinned by release tag AND content hash:
+      control S3 requires T_3 and T_4 to use the IDENTICAL tool, and "we both
+      ran gnina" is not the same claim as "we both ran this binary".
+
   crem_fragment_db:
     description: "CReM fragment database mined from ChEMBL (T_2 expansion)"
     kind: http
@@ -101,5 +115,6 @@ directories:
     - /data/lab_vm/immutable/inhibition/weights
     - /data/lab_vm/immutable/inhibition/fragment_db
     - /data/lab_vm/immutable/inhibition/decoys
+    - /data/lab_vm/immutable/inhibition/bin
   append_only:
     - /data/lab_vm/append_only/inhibition

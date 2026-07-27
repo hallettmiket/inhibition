@@ -94,6 +94,17 @@ build_amber_md() {
     _log "WARN: gmx_MMPBSA pip install failed — may need ambertools=21; see plan 2.x"
 }
 
+build_gnina() {
+  # gnina is a BINARY, not a python package — but its "static" build still
+  # needs libcudnn.so.9. This env exists only to supply the CUDA runtime libs;
+  # nothing imports from it. Borrowing them from another approach's env would
+  # break docking whenever that env was rebuilt.
+  local p="$ENV_ROOT/dwi_gnina"
+  _log "building gnina runtime -> $p"
+  conda create --prefix "$p" "${CONDA_SOLVER_ARGS[@]}" -c conda-forge python=3.11
+  "$p/bin/pip" install --no-input nvidia-cudnn-cu12
+}
+
 build_gui() {
   # The artist's Streamlit app. Read-only over the four Di_top10.csv, so it
   # stays light and never needs a docking or MD dependency.
@@ -120,14 +131,15 @@ main() {
     diffsbdd)  build_diffsbdd  2>&1 | tee "$LOG_DIR/diffsbdd.log" ;;
     reinvent4) build_reinvent4 2>&1 | tee "$LOG_DIR/reinvent4.log" ;;
     amber_md)  build_amber_md  2>&1 | tee "$LOG_DIR/amber_md.log" ;;
+    gnina)     build_gnina     2>&1 | tee "$LOG_DIR/gnina.log" ;;
     gui)       build_gui       2>&1 | tee "$LOG_DIR/gui.log" ;;
     admet)     build_admet     2>&1 | tee "$LOG_DIR/admet.log" ;;
     all)
-      for e in cheminf gui admet diffsbdd reinvent4 amber_md; do
+      for e in cheminf gui admet gnina diffsbdd reinvent4 amber_md; do
         main "$e"
       done ;;
     *)
-      echo "usage: $0 {cheminf|diffsbdd|reinvent4|amber_md|gui|admet|all}" >&2
+      echo "usage: $0 {cheminf|diffsbdd|reinvent4|amber_md|gui|admet|gnina|all}" >&2
       exit 2 ;;
   esac
   _log "done: $what"
