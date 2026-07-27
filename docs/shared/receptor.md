@@ -21,15 +21,35 @@ the exact ligand attachment atom.
 
 | Artifact | Contents |
 |---|---|
-| `6VAJ_prepared.pdb` | protonated at pH 7.4, ligand and solvent stripped |
+| `6VAJ_prepared.pdb` | protonated with `reduce`, ligand and solvent stripped |
 | `6VAJ_prepared.pdbqt` | rigid receptor for Vina/smina |
 | `box.json` | 20 Å covalent box (T_3, T_4) |
 | `box_expanded.json` | 26 Å expanded box (T_1, T_2) |
 | `prep_log.json` | input/output SHA-256s, atom counts, box derivation |
 
 Result on 6VAJ: **1,215 protein atoms kept**; 16 ligand and 173 solvent atoms
-removed; **0 unrecognized heteroatoms retained**. Cys113 SG sits 4.26 Å from the
-box centre, inside both boxes.
+removed; **0 unrecognized heteroatoms retained**. All **150 residues preserved**
+in both the PDB and the PDBQT, chain A only, **Cys113 SG present in both**.
+Cys113 SG sits 4.26 Å from the box centre, inside both boxes.
+
+## Protonation: reduce, never `obabel -p`
+
+!!! danger "`obabel -p` destroys the structure"
+    On 6VAJ it dropped **28 of 150 residues including Cys113**, renamed
+    residues (`LYS A 6` became `TRP`), and invented four extra chain IDs — while
+    still producing something that looks like a protein and docks without
+    error. Protonation uses `reduce -BUILD` (AmberTools). `obabel -xr` without
+    `-p` is safe for the PDBQT conversion. See [D0009](../decisions/index.md).
+
+## Post-conditions
+
+`receptor_prep.py` refuses to emit a receptor unless the **outputs** pass:
+residue count preserved, chain set unchanged, no residue renamed, catalytic
+residue present with the right name in both artifacts.
+
+This exists because the original module verified the catalytic residue in the
+*input* and never re-checked the result. **Verify the artifact you produced,
+not the one you consumed.**
 
 ## Two boxes, not one
 

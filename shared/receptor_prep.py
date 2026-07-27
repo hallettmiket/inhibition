@@ -189,13 +189,110 @@ def _run(cmd: list[str]) -> str:
     return proc.stdout
 
 
+# `reduce` lives in the amber_md env, not cheminf. Searched rather than assumed
+# so a caller in either env works.
+_REDUCE_CANDIDATES = (
+    "/data/lab_vm/envs/dwi_amber_md/bin/reduce",
+    "reduce",
+)
+
+
+def _find_reduce() -> str:
+    """Locate the `reduce` binary, or raise with what was tried."""
+    for c in _REDUCE_CANDIDATES:
+        if Path(c).is_file() or shutil.which(c):
+            return c
+    raise ReceptorPrepError(
+        "`reduce` not found (tried: " + ", ".join(_REDUCE_CANDIDATES) + "). "
+        "It ships with AmberTools; install the amber_md env."
+    )
+
+
 def protonate(src: Path, dst: Path, ph: float) -> None:
-    """Add hydrogens at a given pH with Open Babel."""
-    if shutil.which("obabel") is None:
-        raise ReceptorPrepError("obabel not on PATH — activate the cheminf env")
-    _run(["obabel", str(src), "-O", str(dst), "-p", str(ph)])
-    if not dst.is_file() or dst.stat().st_size == 0:
-        raise ReceptorPrepError(f"protonation produced no output at {dst}")
+    """Add hydrogens with `reduce`, preserving residue identity.
+
+    DO NOT use ``obabel -p`` here. It renumbers residues from 1, RENAMES them
+    (LYS 6 became ALA 1), invents chain IDs, and silently drops residues — on
+    6VAJ it discarded 28 of 150 including **Cys113**, the catalytic residue the
+    entire covalent campaign targets. The output still looked like a protein and
+    would have docked happily, producing plausible and meaningless scores.
+
+    `reduce` (Word et al. 1999) is the Richardson-lab hydrogen placer that
+    AmberTools ships. It optimizes His/Asn/Gln flips and OH rotamers and leaves
+    the heavy-atom record alone.
+
+    Parameters
+    ----------
+    src, dst : Path
+        Input (stripped) and output (protonated) PDB.
+    ph : float
+        Recorded for provenance. `reduce -BUILD` protonates at physiological
+        pH by its own rules rather than taking a pH argument, so this is not
+        passed through — it is logged so the discrepancy is visible rather
+        than implied.
+    """
+    exe = _find_reduce()
+    # reduce writes the structure to stdout and its commentary to stderr;
+    # a non-zero exit is common even on success, so validate the OUTPUT.
+    proc = subprocess.run([exe, "-BUILD", str(src)], capture_output=True, text=True)
+    if not proc.stdout.strip():
+        raise ReceptorPrepError(
+            f"reduce produced no structure:\n{proc.stderr[:1000]}")
+    dst.write_text(proc.stdout, encoding="utf-8")
+    log.info("protonated with reduce (nominal pH %.1f) -> %s", ph, dst.name)
+
+
+def residue_map(path: Path) -> dict[tuple[str, str], str]:
+    """{(chain, resid): resname} for every ATOM record — the preservation check."""
+    out: dict[tuple[str, str], str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("ATOM"):
+            out[(line[21], line[22:26].strip())] = line[17:20].strip()
+    return out
+
+
+def assert_preserved(reference: Path, produced: Path, *, catalytic: tuple[str, int, str],
+                     label: str) -> dict:
+    """Fail loudly if preparation altered the protein it was meant to protonate.
+
+    These are POST-CONDITIONS, checked on the output. The original module
+    verified the catalytic residue in the *input* and never re-checked the
+    result, which is exactly how a corrupt receptor reached disk and got
+    hash-pinned into a manifest.
+
+    Raises
+    ------
+    ReceptorPrepError
+        If residues were dropped, renamed, renumbered, or the catalytic residue
+        is missing.
+    """
+    ref, got = residue_map(reference), residue_map(produced)
+    chain, resid, resname = catalytic
+
+    problems: list[str] = []
+    if len(got) != len(ref):
+        problems.append(f"residue count {len(got)} != reference {len(ref)} "
+                        f"({len(ref) - len(got)} lost)")
+    ref_chains, got_chains = sorted({k[0] for k in ref}), sorted({k[0] for k in got})
+    if got_chains != ref_chains:
+        problems.append(f"chain set {got_chains} != reference {ref_chains}")
+    renamed = [f"{c}:{r} {ref[(c, r)]}->{got[(c, r)]}"
+               for (c, r) in ref if (c, r) in got and ref[(c, r)] != got[(c, r)]]
+    if renamed:
+        problems.append(f"{len(renamed)} residue(s) renamed, e.g. {renamed[:3]}")
+    if got.get((chain, str(resid))) != resname:
+        problems.append(
+            f"catalytic {resname}{resid} missing or renamed in {label} "
+            f"(found {got.get((chain, str(resid)))!r})")
+
+    if problems:
+        raise ReceptorPrepError(
+            f"{label} failed structure-preservation checks:\n  - "
+            + "\n  - ".join(problems)
+            + "\nThe prepared receptor is NOT usable; nothing should dock against it."
+        )
+    return {"residues": len(got), "chains": got_chains,
+            "catalytic_present": f"{resname}{resid}"}
 
 
 def to_pdbqt(src: Path, dst: Path) -> None:
@@ -252,22 +349,36 @@ def prepare(config_path: Path | str | None = None, *, force: bool = False) -> di
     log.info("reference ligand %s: %d atoms, centroid %.3f %.3f %.3f",
              het, len(lig_coords), *center)
 
-    cys = cfg["receptor"]["catalytic_residue"] if "catalytic_residue" in cfg["receptor"] else None
-    cys_sg = None
+    cys = cfg.get("receptor", {}).get("catalytic_residue")
     if cys is None:
-        # catalytic residue lives in choreography.yaml; fall back to 6VAJ's.
-        cys_sg = find_atom(raw, "A", 113, "SG")
-    else:
-        cys_sg = find_atom(raw, cys["chain"], cys["resid"], cys["atom"])
+        # Authoritative source is choreography.yaml; receptor.yaml may omit it.
+        chor = yaml.safe_load(
+            (_REPO_ROOT / "config" / "choreography.yaml").read_text(encoding="utf-8"))
+        cys = chor["target"]["catalytic_residue"]
+    cys_sg = find_atom(raw, cys["chain"], cys["resid"], cys["atom"])
     if cys_sg is None:
         raise ReceptorPrepError(
-            "Cys113 SG not found — the covalent approaches have nothing to attack."
+            f"{cys['resname']}{cys['resid']} {cys['atom']} not found in the raw "
+            "structure — the covalent approaches have nothing to attack."
         )
 
     stripped_tmp = out_pdb.with_suffix(".stripped.pdb")
     counts = strip_structure(raw, stripped_tmp, ligand_het=het)
     protonate(stripped_tmp, out_pdb, rc["preparation"]["protonation_ph"])
     to_pdbqt(out_pdb, out_pdbqt)
+
+    # POST-CONDITIONS, checked on the OUTPUTS against the stripped input.
+    # The original module verified the catalytic residue in the *input* and
+    # never re-checked the result — which is exactly how a receptor missing
+    # Cys113 reached disk and got hash-pinned into a manifest.
+    catalytic = (cys["chain"], cys["resid"], cys["resname"])
+    checks = {
+        "prepared_pdb": assert_preserved(stripped_tmp, out_pdb,
+                                         catalytic=catalytic, label="prepared_pdb"),
+        "prepared_pdbqt": assert_preserved(stripped_tmp, out_pdbqt,
+                                           catalytic=catalytic, label="prepared_pdbqt"),
+    }
+    log.info("post-conditions passed: %s", checks)
     stripped_tmp.unlink(missing_ok=True)
 
     boxes = {}
@@ -296,6 +407,8 @@ def prepare(config_path: Path | str | None = None, *, force: bool = False) -> di
         "cys113_sg": list(cys_sg),
         "protonation_ph": rc["preparation"]["protonation_ph"],
         "structure_counts": counts,
+        "preservation_checks": checks,
+        "protonation_tool": "reduce -BUILD (AmberTools; Word et al. 1999)",
         "boxes": boxes,
     }
     out_log.write_text(json.dumps(prep_log, indent=2) + "\n", encoding="utf-8")
