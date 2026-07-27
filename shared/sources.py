@@ -150,9 +150,46 @@ def stage(config_path: Path | str | None = None, *, only: str | None = None,
     results: dict[str, dict] = {}
     changed = False
 
+    # One source must NOT abort the rest. A transient git failure on an
+    # unrelated repo previously blocked a 281 MB database download that had
+    # nothing to do with it, and the whole run exited having staged nothing.
+    # Failures are collected and reported together at the end, so a run either
+    # stages everything it can or tells you exactly what it could not.
+    failures: dict[str, str] = {}
+
     for name, spec in (cfg.get("sources") or {}).items():
         if only and name != only:
             continue
+        try:
+            changed |= _stage_one(name, spec, pins, results, mf, write_back)
+        except Exception as exc:  # noqa: BLE001 - collected, not swallowed
+            failures[name] = str(exc)[:300]
+            results[name] = {"status": "failed", "error": str(exc)[:300]}
+            log.error("source %r FAILED (continuing with the rest): %s",
+                      name, str(exc)[:200])
+
+    if changed and write_back:
+        written = write_lock(lock, lock_path)
+        log.info("wrote newly-observed pins to %s", written)
+
+    append_only = (cfg.get("directories") or {}).get("append_only") or []
+    if append_only:
+        mf.write(Path(append_only[0]) / "00_shared_substrate",
+                 filename="stage_sources_manifest.json")
+
+    if failures:
+        raise SourceError(
+            f"{len(failures)} of {len(results)} source(s) failed; the rest were "
+            "staged:\n  - " + "\n  - ".join(f"{k}: {v[:160]}"
+                                            for k, v in failures.items()))
+    return results
+
+
+def _stage_one(name: str, spec: dict, pins: dict, results: dict,
+               mf, write_back: bool) -> bool:
+    """Acquire one declared source. Returns True if a new pin was recorded."""
+    changed = False
+    if True:  # preserved indentation for the original body
         kind = spec.get("kind")
         dest = Path(spec["dest"]) if spec.get("dest") else None
         url = spec.get("url")
@@ -162,7 +199,7 @@ def stage(config_path: Path | str | None = None, *, only: str | None = None,
                              "reason": spec.get("notes", "not yet acquired").strip()}
             mf.note(f"{name}: pending — {results[name]['reason'][:120]}")
             log.warning("source %r pending: %s", name, results[name]["reason"][:120])
-            continue
+            return changed
 
         if kind == "git":
             pin = pins.get(name, {})
@@ -177,7 +214,7 @@ def stage(config_path: Path | str | None = None, *, only: str | None = None,
             results[name] = {"status": "pinned" if pinned else "fetched",
                              "commit": head}
             mf.add_input(name, dest)
-            continue
+            return changed
 
         # http
         if dest.is_file():
@@ -208,16 +245,7 @@ def stage(config_path: Path | str | None = None, *, only: str | None = None,
                 changed = True
             results[name] = {"status": "fetched", "sha256": observed}
         mf.add_input(name, dest)
-
-    if changed and write_back:
-        written = write_lock(lock, lock_path)
-        log.info("wrote newly-observed pins to %s", written)
-
-    append_only = (cfg.get("directories") or {}).get("append_only") or []
-    if append_only:
-        mf.write(Path(append_only[0]) / "00_shared_substrate",
-                 filename="stage_sources_manifest.json")
-    return results
+    return changed
 
 
 def main() -> None:

@@ -1,5 +1,11 @@
 {
   "sources": {
+    "crem_fragment_db_chembl33": {
+      "sha256": "e863c5de768df66d3bdf371895f24bf4fc0f1e0a534ca0fbde45fc0111f87283"
+    },
+    "crem_fragment_db_enamine": {
+      "sha256": "ce0b380903b825534a68110e57860041963c2acdee2ae8ab2242e27b7f6d21f2"
+    },
     "diffsbdd_checkpoint": {
       "sha256": "07f86764bf569aafbc40a9c15fc02de8e2550437dd0f17f657eab3abe66c372c"
     },

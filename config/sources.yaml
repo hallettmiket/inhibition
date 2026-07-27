@@ -86,16 +86,35 @@ sources:
       control S3 requires T_3 and T_4 to use the IDENTICAL tool, and "we both
       ran gnina" is not the same claim as "we both ran this binary".
 
-  crem_fragment_db:
-    description: "CReM fragment database mined from ChEMBL (T_2 expansion)"
+  # NOTE ON "RADIUS": it is NOT a property of these files. The databases differ
+  # by SOURCE, synthetic-accessibility filter and minimum fragment frequency;
+  # the context radius is a RUNTIME argument to grow_mol/mutate_mol. An earlier
+  # version of this file conflated the two.
+  crem_fragment_db_chembl33:
+    description: "CReM fragment DB — ChEMBL33, SA<=2, min fragment frequency 5"
     kind: http
-    url: null               # set once the radius variant is chosen
-    dest: /data/lab_vm/immutable/inhibition/fragment_db/
+    url: "https://zenodo.org/records/16909329/files/chembl33_sa2_f5.db.gz?download=1"
+    dest: /data/lab_vm/immutable/inhibition/fragment_db/chembl33_sa2_f5.db.gz
     required_by: [t2]
     notes: >
-      NOT YET ACQUIRED. Separate ~GB download; the radius variant must be
-      chosen and pinned before T_2 can enumerate, because a different radius
-      is a different neighbourhood definition, not a tuning knob.
+      Hosted on Zenodo (doi 10.5281/zenodo.16909329), not on qsar4u itself —
+      the qsar4u page only links out. T_2's PRIMARY fragment source. f5 matches the spec's stated --min-freq 5
+      default exactly, and sa2 restricts to synthetically accessible fragments,
+      which serves condition (iii) at enumeration time rather than discovering
+      unmakeable derivatives after labelling 10^4-10^5 of them.
+
+  crem_fragment_db_enamine:
+    description: "CReM fragment DB — Enamine stock 2025, SA<=2, min frequency 5"
+    kind: http
+    url: "https://zenodo.org/records/16909329/files/enamine2025_sa2_f5.db.gz?download=1"
+    dest: /data/lab_vm/immutable/inhibition/fragment_db/enamine2025_sa2_f5.db.gz
+    required_by: [t2]
+    notes: >
+      SECONDARY, kept for a purchasable-chemistry comparison. Enamine stock
+      biases the neighbourhood toward fragments that can actually be bought,
+      which is a different scientific stance from ChEMBL's "what has been
+      published". Staged now so the comparison is a config change later rather
+      than a fresh acquisition.
 
   decoys:
     description: "Property-matched decoys for the docking-enrichment gate"

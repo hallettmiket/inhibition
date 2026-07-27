@@ -1,0 +1,65 @@
+# T_2 — derivative neighborhood of ATRA (non-covalent)
+#
+# Purpose: T_2's parameters, including the fragment source and context radius.
+# Author:  Mike Hallett (with Claude Code)
+# Date:    2026-07-27
+
+approach:
+  id: t2
+  name: "derivative neighborhood of ATRA"
+  seed: atra
+  mechanism: non_covalent
+  inhibition_proxy_strength: weak     # reversible occupancy; see D0016
+
+expansion:
+  engine: crem
+
+  # PRIMARY fragment source (D0018). Both databases are hash-pinned in
+  # sources.lock.json; switching to Enamine is a one-line change here.
+  fragment_db: /data/lab_vm/immutable/inhibition/fragment_db/chembl33_sa2_f5.db
+  fragment_db_alternatives:
+    - /data/lab_vm/immutable/inhibition/fragment_db/enamine2025_sa2_f5.db
+
+  # THE parameter that defines the neighbourhood (D0018). Larger radius = more
+  # surrounding context required for a swap = fewer but more chemically sensible
+  # replacements.
+  #
+  # 2, NOT 3. Radius 3 was chosen first and refuted by a smoke test against the
+  # actual seed: ATRA yields ZERO mutations and ZERO grows at radius 3, 4 and 5,
+  # while giving 43/38 at radius 2. A control (benzoic acid, 47 mutations at
+  # radius 3 from the same DB) rules out a broken setup — the cause is ATRA
+  # itself, a conjugated polyene whose 3-bond context has no precedent in
+  # ChEMBL33. At radius 3 T_2 would enumerate an empty frontier and report
+  # success.
+  #
+  # THE USABLE RADIUS IS A PROPERTY OF THE SEED, NOT THE METHOD. Any new seed
+  # needs this smoke test before its radius is pinned.
+  radius: 2
+
+  # Degree-bounded, NOT exhaustive (adversary finding B3). Degree-1 yields
+  # 10^4-10^5; naive degree-2 reaches 10^8-10^10 and would feed ADMET, Vina and
+  # MD and never finish.
+  max_degree: 1
+  frontier_cap: 200000
+  max_replacements: null          # null = take every valid replacement
+  replace_cycles: true            # ring systems may be swapped, not only chains
+  protected_ids: null             # nothing anchored: the whole graph is mutable
+  min_freq: 5                     # matches the f5 database
+
+  # Dedupe each frontier by InChIKey BEFORE it seeds the next. Path multiplicity
+  # is high — the same molecule is reachable by many edit sequences — so an
+  # undeduped frontier explodes on the next breadth-first step.
+  dedupe_by: inchikey
+
+labelling:
+  # Docking is demoted to a displayed label unless the enrichment gate says
+  # otherwise. On this target it currently barely enriches (D0016: ROC-AUC
+  # 0.535), so T_2's dock-based ranking is weakly supported.
+  respect_enrichment_gate: true
+  dock_subset_max: 2000
+
+ranking:
+  # T_2's rank_score is INTERNAL and never crosses the join (Rev 3 section 7).
+  rank_metric: rank_score
+  internal_only: true
+  displayed_comparables: [vina_affinity, MW, cLogP, TPSA, QED, SAscore, novelty_external]
