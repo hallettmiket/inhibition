@@ -11,6 +11,7 @@ site_name: Dance with Inhibition
 site_description: >
   Four approaches to finding an inhibitor of human Pin1, and the choreography
   that organizes them.
+site_url: https://hallettmiket.github.io/inhibition/
 repo_url: https://github.com/hallettmiket/inhibition
 edit_uri: edit/main/
 
