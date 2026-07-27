@@ -1,0 +1,125 @@
+# Gates, controls and kill thresholds.
+#
+# Purpose: every control the adversary audit made mandatory, plus the compute
+#          kill thresholds, in one place so a gate cannot be quietly skipped.
+# Author:  Mike Hallett (with Claude Code)
+# Date:    2026-07-27
+#
+# These are CONTROLS, not preferences. A pipeline that reaches a gate it cannot
+# evaluate must stop, not proceed with a default.
+
+# ---------------------------------------------------------------------------
+# Control 1 (B2) — the docking-enrichment gate.
+#
+# Docking is not trusted to RANK anything until it is shown to enrich on THIS
+# receptor. The failure mode this blocks is real and common: a docking protocol
+# that produces plausible scores while ordering actives no better than chance.
+# On FAIL the choreography does NOT stall — dock_score is demoted to a displayed
+# label in every approach and the approaches lean on their other evidence.
+# ---------------------------------------------------------------------------
+enrichment_gate:
+  required_before: [any_dock_based_ranking]
+  receptor: 6VAJ
+  decoys:
+    style: property_matched      # DUD-E / DEKOIS-style
+    n_per_active: 50
+    matched_on: [MW, cLogP, TPSA, rot_bonds, formal_charge]
+    out_path: /data/lab_vm/immutable/inhibition/decoys/
+  actives:
+    source: data/reference/pin1_covalent_cys113_anchors_1.csv
+    verified_only: true
+  # Run the EXACT downstream protocols, not a proxy — a gate that validates a
+  # different protocol than the one used downstream validates nothing.
+  protocols:
+    non_covalent: vina
+    covalent: gnina_covalent
+  thresholds:
+    roc_auc_min: 0.70
+    ef_1pct_min: 5.0
+    bedroc_alpha: 20.0
+    bedroc_min: 0.30
+    known_active_recovery_min: 0.50
+  token_path: /data/lab_vm/append_only/inhibition/00_shared_substrate/enrichment_gate.token
+  on_fail:
+    action: demote_dock_score_to_label
+    halt_choreography: false
+
+# ---------------------------------------------------------------------------
+# Control 2 (B4/B5) — the frozen reference set. See data/reference/.provenance.md
+# ---------------------------------------------------------------------------
+reference_set_control:
+  novelty_computed_against: external_master_set   # NEVER against the seed
+  fingerprint: ECFP4
+  novelty_formula: "1 - max_tanimoto_to_master_set"
+  reactivity_window_anchors: covalent_cys113_verified_only
+  refuse_unverified_in_window: true
+  exclude_project_own_leads_as_anchors: true
+
+# ---------------------------------------------------------------------------
+# Control 3 (S2) — warhead-electrophilicity validity gate.
+#
+# In the real prior run 6 of 16 warhead classes, once attached to the core,
+# formed an inert formamide or sulfonamide instead of a reactive electrophile.
+# That is invisible as a crash and produces perfectly plausible docking output.
+# This gate runs BEFORE covalent docking so the compute is never spent.
+# ---------------------------------------------------------------------------
+warhead_validity_gate:
+  applies_to: [t4]
+  runs_before: covalent_docking
+  method: rdkit_reactive_substructure_per_class
+  corroborated_by: gfn2_xtb_lumo
+  on_more_than_half_classes_dead:
+    action: flag_and_stop_for_review
+
+# ---------------------------------------------------------------------------
+# Control 4 (S3) — covalent-protocol parity.
+#
+# T_3 and T_4 must import shared/covalent_protocol.py UNCHANGED. If their
+# recorded protocol hashes differ, the within-covalent-stratum re-score in the
+# GUI is disabled rather than silently comparing incomparable numbers.
+# ---------------------------------------------------------------------------
+covalent_parity:
+  applies_to: [t3, t4]
+  shared_module: shared/covalent_protocol.py
+  must_match: [tool_version, image_digest, reactive_atom_protocol, per_class_smarts]
+  on_mismatch:
+    action: disable_within_covalent_rescore
+
+# ---------------------------------------------------------------------------
+# Compute kill thresholds (S6). Each approach stops rather than overrunning.
+# ---------------------------------------------------------------------------
+kill_thresholds:
+  t1:
+    stop_before_docking_if:
+      valid_novel_yield_below: 0.01
+      enrichment_gate: FAIL
+    n_samples: 10000
+    smoke_test_samples: 20        # run before committing to 10k
+  t2:
+    crem_max_degree: 1            # degree 2 ONLY behind a hard population cap
+    crem_frontier_cap: 200000
+    stop_if_frontier_exceeds_cap: true
+    dock_subset_max: 2000
+    md_top_k: 10
+    md_replicas: 3
+    md_ns_per_replica: 5
+  t3:
+    rl_max_epochs: 200
+    final_batch_max: 500
+    # The RL reward uses a CHEAP proxy. Covalent docking inside the RL loop
+    # would be ~10^5-10^6 scoring calls at minutes each — thousands of GPU-hours.
+    covalent_dock_in_rl_loop: false
+  t4:
+    library_size: 7104            # 16 warhead classes x 444 R-groups
+    mmgbsa_max_representatives: 36
+    mmgbsa_ns: 20
+    stop_if_warhead_classes_dead_fraction_above: 0.5
+
+# ---------------------------------------------------------------------------
+# What each approach must produce before the GUI will pool it.
+# ---------------------------------------------------------------------------
+output_contract:
+  per_approach_top_n: 10
+  required_files: [Di.parquet, Di_top10.csv, manifest.json]
+  schema_module: shared/schema.py
+  stamp_do_not_delete: true       # rejected rows stay in Di.parquet

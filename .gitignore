@@ -1,0 +1,59 @@
+# Dance with Inhibition — only small, public-safe code and the frozen reference
+# set belong in git. Everything the pipeline produces is large and governed, and
+# lives under /data/lab_vm/{immutable,append_only}/inhibition instead.
+#
+# Risk R9 in the plan: large data leaking into GitHub. security_guard gates
+# every push; this file is the first line of that defence.
+
+# --- generated candidate frames and shortlists (governed data root) ---
+*.parquet
+*.sdf
+*.mol2
+*.pdbqt
+D[1-4].csv
+D[1-4]_top10.csv
+
+# --- structures, poses, trajectories ---
+*.pdb
+*.xtc
+*.trr
+*.dcd
+*.rst7
+*.prmtop
+*.inpcrd
+poses/
+trajectories/
+
+# --- model weights and fragment databases (immutable/) ---
+*.ckpt
+*.pt
+*.pth
+*.db
+weights/
+fragment_db/
+
+# --- tool scratch ---
+*.log
+manifest.json
+enrichment_gate.token
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+
+# --- environments ---
+.conda/
+.venv/
+env/
+
+# --- machine-specific ---
+.DS_Store
+*.local.yaml
+.env
+
+# --- EXPLICIT ALLOW: the frozen reference set is the ONLY data committed. ---
+# It is small, published, and must travel with the code so a run pins an exact
+# version. Negations come last so they win over the patterns above.
+!data/reference/
+!data/reference/*.csv
+!data/reference/.provenance.md

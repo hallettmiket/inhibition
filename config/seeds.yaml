@@ -1,0 +1,68 @@
+# Seed molecules — an explicit parameter, not a hardcoded assumption.
+#
+# Purpose: declare the starting molecule for each seeded approach so that
+#          running from an additional seed is a config change, not a redesign.
+# Author:  Mike Hallett (with Claude Code)
+# Date:    2026-07-27
+#
+# WHY ONLY TWO SEEDS (Rev 3 design decision): the frozen reference set was
+# checked for other candidate seeds and the remaining validated binders are
+# either promiscuous aggregators (EGCG, PiB, juglone, KPT-6566) or non-drug-like
+# peptidomimetics (BJP-06-005-3, the reversible active-site peptides). Both make
+# poor starting points. Strategy diversity in this choreography comes from the
+# four different approaches, NOT from multiplying seeds.
+
+seeds:
+  atra:
+    used_by: [t2]
+    name: ATRA
+    full_name: "all-trans retinoic acid"
+    canonical_smiles: "CC1=C(C(CCC1)(C)C)/C=C/C(=C/C=C/C(=C/C(=O)O)/C)/C"
+    mechanism: non_covalent
+    potency: "low-uM (binds + degrades Pin1)"
+    promiscuity_flag: true
+    citation: "Wei 2015, Nat Med, 10.1038/nm.3839"
+    notes: >
+      A known WEAK non-covalent Pin1 inhibitor. T_2 holds nothing fixed — the
+      whole graph is mutable — so no protected substructure is declared here.
+
+  sulfopin:
+    used_by: [t3, t4]
+    name: Sulfopin
+    canonical_smiles: "CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)CCl"
+    mechanism: covalent_cys113
+    warhead_class: chloroacetamide
+    potency: "nanomolar (covalent)"
+    promiscuity_flag: false
+    pdb: 6VAJ
+    citation: "Dubiella 2021, Nat Chem Biol, 10.1038/s41589-021-00786-7"
+
+    # "Protection" here means ONE thing: encoding a substructure as a hard
+    # constraint the expansion method cannot alter. Nothing is physically
+    # installed or removed, unlike the synthetic-chemistry sense of the word.
+    protected_core:
+      # Sulfolane core with two isotope-labelled attachment points:
+      #   [1*] -> covalent warhead site
+      #   [2*] -> R-group site
+      smiles: "N([1*])([2*])[C@@H]1CCS(=O)(=O)C1"
+      attachment_points:
+        warhead_site: "[1*]"
+        rgroup_site: "[2*]"
+      # T_3 fixes core + warhead and varies ONLY the R-group (one-point).
+      # T_4 fixes only the core and varies BOTH (two-point) — which is exactly
+      # why T_4 needs a warhead-reactivity triage that T_3 does not.
+      t3_fixes: [core, warhead]
+      t4_fixes: [core]
+
+# T_1 is deliberately absent from this file: it is the zero-seed approach. Its
+# only input is the pocket. Do not add a seed for it.
+unseeded_approaches: [t1]
+
+# Documented extension point. Adding a curated, drug-like, non-promiscuous seed
+# here and listing an approach under used_by re-runs that approach from the new
+# start point with no code change.
+extension_note: >
+  To run an approach from an additional seed, add a block above with a verified
+  canonical SMILES and a citation, then list the approach in its used_by. Do not
+  add a seed drawn from the promiscuous or non-drug-like entries in the frozen
+  reference set without recording why.

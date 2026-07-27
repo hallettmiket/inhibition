@@ -1,0 +1,120 @@
+# Dance with Inhibition — choreography-level configuration
+#
+# Purpose: single source of truth for the target, the shared receptor, the frozen
+#          reference set, and the tool versions every approach pins against.
+# Author:  Mike Hallett (with Claude Code)
+# Date:    2026-07-27
+# Spec:    issue #108, Rev 3 (comment 5083543621) + implementation plan (5083611947)
+
+choreography:
+  name: dance_with_inhibition
+  working_title: "Dance with Inhibition"
+  project: inhibition
+  lab: mh
+  spec_revision: 3
+  spec_source: "https://github.com/hallettmiket/murmurent/issues/108"
+
+target:
+  name: Pin1
+  full_name: "human peptidyl-prolyl cis-trans isomerase NIMA-interacting 1"
+  # The goal is an INHIBITOR, not an activator. No approach here resolves
+  # inhibition-vs-activation computationally; catalytic-site occupancy is the
+  # working proxy, and the proxy is NOT equally strong across approaches
+  # (see inhibition_proxy_strength per approach).
+  catalytic_residue:
+    chain: A
+    resname: CYS
+    resid: 113
+    atom: SG
+
+# ---------------------------------------------------------------------------
+# Frozen reference set (adversary controls B4 + B5).
+# Hash-pinned: pipelines fail loudly on drift rather than silently using a
+# different set than the one a result was produced under.
+# ---------------------------------------------------------------------------
+reference_set:
+  master: data/reference/pin1_reference_binders_1.csv
+  covalent_anchors: data/reference/pin1_covalent_cys113_anchors_1.csv
+  provenance: data/reference/.provenance.md
+  # Set by scripts/freeze_reference.sh once the introducing commit is tagged.
+  pinned_git_tag: null
+  pinned_commit: null
+  # reference_set.py refuses to feed an UNVERIFIED row into T_4's window.
+  allow_unverified_in_reactivity_window: false
+
+# ---------------------------------------------------------------------------
+# Metric directions. There is NO global "more-negative-better" rule — that is
+# false for the covalent tools (adversary finding M3). Every metric declares
+# its own direction, and the GUI reads it from here.
+# ---------------------------------------------------------------------------
+metrics:
+  vina_dock_score:
+    units: kcal/mol
+    direction: lower_is_better
+    tool: vina
+  smina_dock_score:
+    units: kcal/mol
+    direction: lower_is_better
+    tool: smina
+  gnina_cnn_affinity:
+    units: dimensionless        # NOT kcal/mol — never mixed with Vina
+    direction: higher_is_better
+    tool: gnina
+  mmgbsa_dg_bind:
+    units: kcal/mol
+    direction: lower_is_better
+    scope: within_approach_only  # covalent adduct vs non-covalent complex are
+                                 # different physical quantities
+  rank_score:
+    units: dimensionless
+    direction: higher_is_better
+    scope: internal_to_t2_only   # never crosses the join
+
+# Axes computed identically (same RDKit call) for every approach, and therefore
+# the only numerically comparable cross-approach signals besides structural
+# convergence.
+cross_approach_comparable_axes:
+  - MW
+  - cLogP
+  - TPSA
+  - QED
+  - HBD
+  - HBA
+  - rot_bonds
+  - frac_sp3
+  - SAscore
+
+# ---------------------------------------------------------------------------
+# Tool version pins. blacksmith confirms each at M0/M2; a null means
+# "not yet confirmed on this machine" and downstream code must refuse to run.
+# ---------------------------------------------------------------------------
+tools:
+  rdkit:            {version: null, channel: conda-forge, env: cheminf}
+  crem:             {version: null, env: cheminf}
+  admet_ai:         {version: null, env: cheminf, expected_endpoints: 41}
+  vina:             {version: null, env: cheminf}
+  smina:            {version: null, env: cheminf}
+  meeko:            {version: null, env: cheminf}
+  posebusters:      {version: null, env: cheminf}
+  xtb:              {version: null, env: cheminf, method: GFN2-xTB}
+  gnina:            {version: null, min_version: "1.3", invocation: binary_or_docker,
+                     image_digest: null}
+  diffsbdd:         {version: null, env: diffsbdd,
+                     checkpoint: crossdocked_fullatom_cond.ckpt,
+                     zenodo_record: "8183747"}
+  reinvent:         {version: null, env: reinvent4, mode: libinvent}
+  ambertools:       {version: null, env: amber_md}
+  gmx_mmpbsa:       {version: null, env: amber_md}
+  openmm:           {version: null, env: amber_md}
+  streamlit:        {version: null, env: gui}
+
+compute:
+  # 8x A100-80GB, 224 cores on biodatsci. Long jobs run under tmux and
+  # checkpoint so a killed run resumes rather than restarts.
+  tmux_required_for_long_jobs: true
+  max_gpus: 8
+  nice_level: 19
+  data_root: /data/lab_vm
+  immutable_subdir: immutable/inhibition
+  append_only_subdir: append_only/inhibition
+  env_prefix_root: /data/lab_vm/envs

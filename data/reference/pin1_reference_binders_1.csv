@@ -1,0 +1,12 @@
+name,canonical_smiles,mechanism,warhead_class,potency,promiscuity_flag,pdb,citation
+Sulfopin,CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)CCl,covalent_cys113,chloroacetamide,nanomolar (covalent),n,6VAJ,"Dubiella 2021, Nat Chem Biol, 10.1038/s41589-021-00786-7"
+KPT-6566,CC(C)(C)C1=CC=C(C=C1)S(=O)(=O)N=C2C=C(C(=O)C3=CC=CC=C32)SCC(=O)O,covalent_cys113,aryl-sulfonyl-acetate (self-immolative -> 1;4-naphthoquinone),IC50 ~0.3-1.4 uM,y,,"Campaner 2017, Nat Commun, 10.1038/ncomms15772"
+Juglone,C1=CC2=C(C(=O)C=CC2=O)C(=C1)O,covalent_cys113,1;4-naphthoquinone (Michael acceptor),kinact 5.3e-4-4.5e-3 s^-1,y,,"Hennig 1998, Biochemistry, 10.1021/bi973162p"
+BJP-06-005-3,CCOC(=O)[C@H](CCCNC(=N)N)NC(=O)[C@H](Cc1c[nH]c2ccccc12)NC(=O)[C@@H]1CCCCN1C(=O)[C@H](Cc1ccccc1)N(C)C(=O)CCl,covalent_cys113,chloroacetamide (N-methyl peptidomimetic),potent/selective,n,,"Pinch 2020, Nat Chem Biol, 10.1038/s41589-020-0550-9"
+Reddi-sulfamate-acetamide,UNVERIFIED,covalent_cys113,sulfamate acetamide,potent/selective,n,,"Reddi 2023, JACS, 10.1021/jacs.2c08853"
+Byun-BDHI-fragment,UNVERIFIED,covalent_cys113,3-bromo-4;5-dihydroisoxazole (BDHI),fragment-level,n,,"Byun 2023, JACS, 10.1021/jacs.3c00598"
+ATRA,CC1=C(C(CCC1)(C)C)/C=C/C(=C/C=C/C(=C/C(=O)O)/C)/C,non_covalent,,low-uM (binds + degrades Pin1),y,,"Wei 2015, Nat Med, 10.1038/nm.3839"
+EGCG,C1[C@H]([C@H](OC2=CC(=CC(=C21)O)O)C3=CC(=C(C(=C3)O)O)O)OC(=O)C4=CC(=C(C(=C4)O)O)O,non_covalent,,direct binding; PPIase inhibition,y,,"Urusova 2011, Cancer Prev Res, 10.1158/1940-6207.CAPR-11-0301"
+PiB,CCOC(=O)CN1C(=O)c2ccc3c4c(ccc(c24)C1=O)C(=O)N(CC(=O)OCC)C3=O,non_covalent,,low-uM PPIase inhibition,y,,"Uchida 2003, Chem Biol (ChEMBL2409076)"
+reversible-Thr-sulfonamide-quinazoline,C[C@@H](O)[C@H](N)C(=O)NS(=O)(=O)c1cccc(-c2ccc3c(N)nc(Cl)nc3c2)c1,non_covalent,,Ki 1.2 nM (non-drug-like),n,,"ChEMBL CHEMBL2311920 (target CHEMBL3391)"
+reversible-Thr-sulfamate-adenosine,C[C@@H](O)[C@H](N)C(=O)NS(=O)(=O)OC[C@H]1O[C@@H](n2cnc3c(N)ncnc32)[C@H](O)[C@@H]1O,non_covalent,,IC50 15 nM (non-drug-like),n,,"ChEMBL CHEMBL1163068 (target CHEMBL3391)"

@@ -1,0 +1,7 @@
+anchor_id,name,warhead_class,canonical_smiles,smiles_status,potency_kinetics,promiscuity_flag,citation
+1,Sulfopin,chloroacetamide,CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)CCl,verified,nanomolar (covalent),n,"Dubiella 2021, Nat Chem Biol, 10.1038/s41589-021-00786-7"
+2,BJP-06-005-3,chloroacetamide (N-methyl; peptidomimetic),CCOC(=O)[C@H](CCCNC(=N)N)NC(=O)[C@H](Cc1c[nH]c2ccccc12)NC(=O)[C@@H]1CCCCN1C(=O)[C@H](Cc1ccccc1)N(C)C(=O)CCl,verified,potent/selective,n,"Pinch 2020, Nat Chem Biol, 10.1038/s41589-020-0550-9"
+3,KPT-6566,aryl-sulfonyl-acetate -> 1;4-naphthoquinone,CC(C)(C)C1=CC=C(C=C1)S(=O)(=O)N=C2C=C(C(=O)C3=CC=CC=C32)SCC(=O)O,verified,IC50 ~0.3-1.4 uM,y,"Campaner 2017, Nat Commun, 10.1038/ncomms15772"
+4,Juglone,1;4-naphthoquinone Michael acceptor,C1=CC2=C(C(=O)C=CC2=O)C(=C1)O,verified,kinact 5e-4-4.5e-3 s^-1,y,"Hennig 1998, Biochemistry, 10.1021/bi973162p"
+5,Reddi-2023-sulfamate-acetamide,sulfamate acetamide,UNVERIFIED,UNVERIFIED,potent/selective,n,"Reddi 2023, JACS, 10.1021/jacs.2c08853"
+6,Byun-2023-BDHI-fragment,3-bromo-4;5-dihydroisoxazole (BDHI),UNVERIFIED,UNVERIFIED,fragment-level,n,"Byun 2023, JACS, 10.1021/jacs.3c00598"

@@ -1,0 +1,64 @@
+# Shared receptor + docking boxes — the load-bearing artifact for the join.
+#
+# Purpose: one prepared receptor and two boxes, used unchanged by all four
+#          approaches. Switching receptors mid-choreography invalidates every
+#          cross-approach comparison, so this file is written once.
+# Author:  Mike Hallett (with Claude Code)
+# Date:    2026-07-27
+
+receptor:
+  pdb_id: 6VAJ
+  # Verified (adversary finding M6, closed): human Pin1 + sulfopin (ligand QT7),
+  # covalent at Cys113, 1.42 A.
+  description: "human Pin1 + sulfopin (QT7), covalent at Cys113, 1.42 A"
+  resolution_angstrom: 1.42
+  source_url: "https://files.rcsb.org/download/6VAJ.pdb"
+  raw_path: /data/lab_vm/immutable/inhibition/receptor/6VAJ.pdb
+
+  ligand:
+    # Stripped before docking, but its coordinates DEFINE the box — so the
+    # coordinates are retained, not discarded with the ligand.
+    het_code: QT7
+    strip_before_docking: true
+    retain_coords_for_box: true
+
+  preparation:
+    protonation_ph: 7.4
+    add_hydrogens: true
+    # Cys113 must stay a reactive thiol (not thiolate-locked, not capped) or the
+    # covalent docking in T_3/T_4 has nothing to attack.
+    cys113_state: reactive_thiol
+    outputs:
+      prepared_pdb: /data/lab_vm/immutable/inhibition/receptor/6VAJ_prepared.pdb
+      prepared_pdbqt: /data/lab_vm/immutable/inhibition/receptor/6VAJ_prepared.pdbqt
+      prep_log: /data/lab_vm/immutable/inhibition/receptor/prep_log.json
+
+# ---------------------------------------------------------------------------
+# TWO boxes, not one (adversary finding M5).
+#
+# The reference ligand is COVALENT at Cys113, so a box drawn tightly around it
+# is centred on the warhead sub-pocket. That is correct for T_3/T_4, which are
+# attacking exactly that atom. For the non-covalent approaches it would bias
+# generation and docking toward a sub-pocket they have no reason to prefer, so
+# T_1/T_2 get a box expanded to the full PPIase pocket.
+# ---------------------------------------------------------------------------
+boxes:
+  covalent:
+    used_by: [t3, t4]
+    # center is computed from the retained QT7 coordinates by receptor_prep.py;
+    # null until M1 has run, and downstream code must refuse a null centre.
+    center: null
+    size: [20.0, 20.0, 20.0]
+    out_path: /data/lab_vm/immutable/inhibition/receptor/box.json
+
+  expanded:
+    used_by: [t1, t2]
+    center: null
+    size: [26.0, 26.0, 26.0]
+    padding_over_covalent_angstrom: 6.0
+    out_path: /data/lab_vm/immutable/inhibition/receptor/box_expanded.json
+
+# The covalent attachment point, shared verbatim by T_3 and T_4 (parity, S3).
+covalent_attachment:
+  receptor_atom: "A:113:SG"
+  gnina_flag: "--covalent_rec_atom A:113:SG"
