@@ -43,8 +43,8 @@ enumeration:
   core_smiles: "N([1*])([2*])[C@@H]1CCS(=O)(=O)C1"
   # library_size is DERIVED and pinned by the enumeration stage, never inherited.
   # With 8 enumerable classes it is 8 x |R-group library|.
-  library_size: null
-  rgroup_library: null      # not yet built (see decisions D0004)
+  library_size: 1782   # 9 warhead classes x 198 R-groups; pinned by 01_enumerate.py
+  rgroup_library: data/reference/rgroup_library_1.csv
 
 reporting:
   # If the two BDHI regiochemistries (or the two naphthoquinone ones) survive to

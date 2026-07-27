@@ -17,6 +17,8 @@ deleting a file that a manifest names makes that run unverifiable.
 
 | `decoys/decoys_covalent_1.csv` | `_2` | 2026-07-27 | Only 32 of 302 decoys (10.6%) carried any electrophile, so ~90% could not be covalently docked at all — gnina needs a reactive atom to bond to. The surviving comparison would have been "electrophiles vs inert molecules", which docking wins trivially. `_2` requires every decoy to carry a warhead motif. | not yet — no runs consumed it |
 
+| `append_only/.../D4_1.parquet` | `D4_2` | 2026-07-27 | Enumerated with a broken `snar_chloroazine` fragment that omitted the chlorine, so the warhead-validity gate correctly killed all 198 of that class. `D4_2` has the corrected fragment. | not yet |
+
 ## Note on the governed data root
 
 Large derived outputs live under `/data/lab_vm/append_only/inhibition/` and are
