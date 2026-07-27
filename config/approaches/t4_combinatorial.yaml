@@ -1,0 +1,53 @@
+# T_4 — sulfopin, warhead x R-group combinatorial (covalent)
+#
+# Purpose: T_4's parameters, including which warhead evidence tiers it enumerates.
+# Author:  Mike Hallett (with Claude Code)
+# Date:    2026-07-27
+
+approach:
+  id: t4
+  name: "warhead x R-group combinatorial"
+  seed: sulfopin           # core fixed, BOTH attachment points open (two-point)
+  mechanism: covalent
+  inhibition_proxy_strength: strong
+
+warheads:
+  library: data/reference/warhead_classes_3.csv
+
+  # OPT-IN BEYOND VERIFIED (PI decision, 2026-07-27).
+  #
+  # Four classes carry a verified chemotype but an UNTESTED attachment
+  # regiochemistry: BDHI can attach at C4 or C5 (C3 bears the Br and is where
+  # Cys attacks, so it is unavailable), and 1,4-naphthoquinone at C2 or on the
+  # benzo ring (C2/C3 are the Michael acceptor positions).
+  #
+  # Rather than choose by intuition, all four are enumerated as SEPARATE classes
+  # and the gates decide. This is cheap: the discriminating evidence arrives
+  # from steps we were running anyway.
+  allow_statuses: [VERIFIED, DESIGNED_UNTESTED]
+
+  # What actually distinguishes the competing regiochemistries:
+  #   step 5b  — is the attached warhead still a genuine electrophile of its
+  #              class, or did coupling kill it?
+  #   step 6   — can Cys113 SG reach the reactive atom with the core in the way?
+  #              A blocked approach shows up as poor covalent docking geometry.
+  #   step 7   — is its LUMO inside the window bounded by real actives?
+  # A regiochemistry that fails 5b is not a chemistry opinion, it is a fact.
+  discriminated_by: [warhead_validity_gate_5b, covalent_docking_geometry, lumo_window]
+
+  # DESIGNED_UNTESTED classes are exploratory: they may NOT anchor the
+  # reactivity window (control B5) no matter how well they dock.
+  anchor_eligible_statuses: [VERIFIED, VERIFIED_CLASS_ONLY]
+
+enumeration:
+  core_smiles: "N([1*])([2*])[C@@H]1CCS(=O)(=O)C1"
+  # library_size is DERIVED and pinned by the enumeration stage, never inherited.
+  # With 8 enumerable classes it is 8 x |R-group library|.
+  library_size: null
+  rgroup_library: null      # not yet built (see decisions D0004)
+
+reporting:
+  # If the two BDHI regiochemistries (or the two naphthoquinone ones) survive to
+  # ranking, report them SEPARATELY rather than merging. Which attachment works
+  # is a finding worth carrying, not an implementation detail to collapse.
+  keep_regiochemistries_separate: true
