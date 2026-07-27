@@ -1,0 +1,16 @@
+{
+  "sources": {
+    "diffsbdd_checkpoint": {
+      "sha256": "07f86764bf569aafbc40a9c15fc02de8e2550437dd0f17f657eab3abe66c372c"
+    },
+    "diffsbdd_repo": {
+      "commit": "5d0d38d16c8932a0339fd2ce3f67ade98bbdff27"
+    },
+    "receptor_6vaj": {
+      "sha256": "820fd5969131bef8f757817abfd86c83d5071c7a3bf373323e077fb6dc811b7e"
+    },
+    "reinvent4_repo": {
+      "commit": "04de385d33f95e97f3960b5c4184a0c0bd3ad7f8"
+    }
+  }
+}

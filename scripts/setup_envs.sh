@@ -67,8 +67,12 @@ build_reinvent4() {
   conda create --prefix "$p" "${CONDA_SOLVER_ARGS[@]}" -c conda-forge python=3.10
   mkdir -p "$ENV_ROOT/_src"
   [ -d "$src" ] || git clone https://github.com/MolecularAI/REINVENT4.git "$src"
-  "$p/bin/pip" install --no-input -r "$src/requirements-linux-64.lock"
-  "$p/bin/pip" install --no-input "$src"
+  # Upstream dropped requirements-linux-64.lock (which the implementation plan
+  # named) and moved to pyproject + uv.lock + install.py. `uv sync` would build
+  # its own venv and fight this conda prefix, so we use install.py, which only
+  # computes the right pip arguments (it picks the PyTorch CUDA index for us).
+  ( cd "$src" && "$p/bin/python" install.py none )
+  "$p/bin/python" -c "import reinvent; print('reinvent', reinvent.__version__)"
 }
 
 build_amber_md() {
