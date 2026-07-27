@@ -110,7 +110,13 @@ kill_thresholds:
     # would be ~10^5-10^6 scoring calls at minutes each — thousands of GPU-hours.
     covalent_dock_in_rl_loop: false
   t4:
-    library_size: 7104            # 16 warhead classes x 444 R-groups
+    # Library size is DERIVED, not inherited. The warhead classes are designed
+    # against the verified covalent-Cys113 anchors (Rev 3 section 6), and the
+    # R-group set is built here rather than lifted from any prior run — a
+    # library assembled before the reference set existed cannot have been
+    # grounded in it, which is what the grounding requirement asks for.
+    library_size: null            # set by the enumeration stage, then pinned
+    warhead_classes_min_precedented: 2   # chloroacetamide + 1,4-naphthoquinone
     mmgbsa_max_representatives: 36
     mmgbsa_ns: 20
     stop_if_warhead_classes_dead_fraction_above: 0.5
