@@ -15,6 +15,8 @@ deleting a file that a manifest names makes that run unverifiable.
 
 | `reference/pin1_reference_binders_1.csv` | `_2` | 2026-07-27 | Two rows were attributed to ChEMBL **CHEMBL3391**, which is *Threonine—tRNA ligase 1*, **not Pin1** (Pin1 is CHEMBL2288) — verified directly against the ChEMBL API. Both removed. Eight new actives added from CHEMBL2288 + literature; the resolved Reddi 4d/4g structures folded in. 11 rows → 18. | not yet — no runs consumed it |
 
+| `decoys/decoys_covalent_1.csv` | `_2` | 2026-07-27 | Only 32 of 302 decoys (10.6%) carried any electrophile, so ~90% could not be covalently docked at all — gnina needs a reactive atom to bond to. The surviving comparison would have been "electrophiles vs inert molecules", which docking wins trivially. `_2` requires every decoy to carry a warhead motif. | not yet — no runs consumed it |
+
 ## Note on the governed data root
 
 Large derived outputs live under `/data/lab_vm/append_only/inhibition/` and are
