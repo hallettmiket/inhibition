@@ -5,8 +5,9 @@
 # Author:  Mike Hallett (with Claude Code)
 # Date:    2026-07-27
 #
-# These are CONTROLS, not preferences. A pipeline that reaches a gate it cannot
-# evaluate must stop, not proceed with a default.
+# These are CONTROLS, not preferences. But a control reports evidence; it does
+# not adjudicate (D0012). A pipeline that reaches a gate it cannot evaluate says
+# so — it neither fabricates a verdict nor silently vetoes.
 
 # ---------------------------------------------------------------------------
 # Control 1 (B2) — the docking-enrichment gate.
@@ -26,23 +27,61 @@ enrichment_gate:
     matched_on: [MW, cLogP, TPSA, rot_bonds, formal_charge]
     out_path: /data/lab_vm/immutable/inhibition/decoys/
   actives:
-    source: data/reference/pin1_covalent_cys113_anchors_1.csv
+    source: data/reference/pin1_covalent_cys113_anchors_2.csv
     verified_only: true
   # Run the EXACT downstream protocols, not a proxy — a gate that validates a
   # different protocol than the one used downstream validates nothing.
   protocols:
     non_covalent: vina
     covalent: gnina_covalent
+  # GRADED, not binary (D0012). Validated Pin1 chemistry is genuinely scarce,
+  # so the statistics will never be strong here — that is a fact about the
+  # target, not a defect to engineer around. A gate that emitted a confident
+  # PASS from a handful of actives would manufacture precision; one that vetoed
+  # on thin statistics would discard real signal. It does neither: it reports
+  # evidence strength and lets a human weigh it, which is what the rest of the
+  # choreography already does (Rev 3 section 7).
+  verdicts:
+    STRONG:       "enriches, and the actives set can support the claim"
+    WEAK:         "enriches, but within noise of not enriching"
+    UNDERPOWERED: "too few independent chemotypes to tell — carry forward WITH the uncertainty displayed"
+    FAIL:         "demonstrably anti-correlated with known actives"
+
   thresholds:
     roc_auc_min: 0.70
     ef_1pct_min: 5.0
     bedroc_alpha: 20.0
     bedroc_min: 0.30
     known_active_recovery_min: 0.50
+    # Below this many INDEPENDENT CHEMOTYPES (not molecules), no verdict above
+    # UNDERPOWERED can be claimed regardless of the point estimates.
+    min_independent_chemotypes_for_verdict: 6
+
+  # Analog bias: six actives that are three chemotypes must be reported as
+  # three. Leave-one-chemotype-out prevents a cluster of close analogs ranking
+  # well from being counted as several independent successes.
+  evaluation:
+    scheme: leave_one_chemotype_out
+    cluster_by: ecfp4_tanimoto
+    cluster_threshold: 0.4
+    report_confidence_intervals: true
+    bootstrap_n: 2000
+
+  # D0011: the gate also settles which covalent metric ranks, by measuring both.
+  covalent_metric_comparison:
+    candidates: [gnina_cnn_affinity, gnina_affinity_kcal]
+    note: >
+      gnina warns CNN scoring is uncalibrated for covalent docking. If the
+      comparison comes back UNDERPOWERED that is a real answer: choose on
+      mechanistic grounds and the tool's own warning, not on a handful of points.
+
   token_path: /data/lab_vm/append_only/inhibition/00_shared_substrate/enrichment_gate.token
-  on_fail:
-    action: demote_dock_score_to_label
-    halt_choreography: false
+  on_verdict:
+    STRONG:       {dock_score_ranks: true}
+    WEAK:         {dock_score_ranks: true,  display_uncertainty: true}
+    UNDERPOWERED: {dock_score_ranks: true,  display_uncertainty: true}
+    FAIL:         {dock_score_ranks: false, action: demote_dock_score_to_label}
+  halt_choreography: false
 
 # ---------------------------------------------------------------------------
 # Control 2 (B4/B5) — the frozen reference set. See data/reference/.provenance.md
