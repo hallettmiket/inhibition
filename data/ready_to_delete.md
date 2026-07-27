@@ -13,6 +13,8 @@ deleting a file that a manifest names makes that run unverifiable.
 | `reference/pin1_covalent_cys113_anchors_1.csv` | `_2` | 2026-07-27 | The Reddi 2023 sulfamate-acetamide anchor was `UNVERIFIED`; Figure 5 of the paper resolved it into two verified anchors (4d, 4g). Anchor count 6 → 7, verified 4 → 6. | not yet — no runs consumed it, but keep until M0 is git-tagged |
 | `reference/warhead_classes_1.csv` | `_2` | 2026-07-27 | `sulfamate_acetamide` moved `UNVERIFIED` → `VERIFIED`; `sulfonate_acetamide` (compound 4a) added. Enumerable classes 1 → 3. | not yet — same reason |
 
+| `reference/pin1_reference_binders_1.csv` | `_2` | 2026-07-27 | Two rows were attributed to ChEMBL **CHEMBL3391**, which is *Threonine—tRNA ligase 1*, **not Pin1** (Pin1 is CHEMBL2288) — verified directly against the ChEMBL API. Both removed. Eight new actives added from CHEMBL2288 + literature; the resolved Reddi 4d/4g structures folded in. 11 rows → 18. | not yet — no runs consumed it |
+
 ## Note on the governed data root
 
 Large derived outputs live under `/data/lab_vm/append_only/inhibition/` and are

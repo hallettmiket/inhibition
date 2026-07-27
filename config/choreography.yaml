@@ -33,7 +33,7 @@ target:
 # different set than the one a result was produced under.
 # ---------------------------------------------------------------------------
 reference_set:
-  master: data/reference/pin1_reference_binders_1.csv
+  master: data/reference/pin1_reference_binders_2.csv
   covalent_anchors: data/reference/pin1_covalent_cys113_anchors_2.csv
   warhead_classes: data/reference/warhead_classes_2.csv
   # Measured second-order rate constants for the covalent anchors. Preferred

@@ -2,8 +2,8 @@
 Purpose: Loader + validator for the frozen Pin1 reference binder set.
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-27
-Input: data/reference/pin1_reference_binders_1.csv and
-       data/reference/pin1_covalent_cys113_anchors_1.csv
+Input: data/reference/pin1_reference_binders_2.csv and
+       data/reference/pin1_covalent_cys113_anchors_2.csv
 Output: validated frames for the novelty axis and T_4's reactivity window
 
 This module exists to enforce two adversary controls that are easy to violate
@@ -21,8 +21,8 @@ B5 — T_4's reactivity window must be anchored on real, wet-lab-validated
      control.
 
 Accordingly `covalent_anchors()` REFUSES to return UNVERIFIED rows by default.
-Two anchors (Reddi 2023, Byun 2023) have SI-only structures and are gated out
-until the bookworm resolves their SMILES.
+One anchor (Byun 2023 BDHI fragment) still has an SI-only structure and is
+gated out until its SMILES is resolved. Reddi 2023 was resolved from Figure 5.
 """
 
 from __future__ import annotations
@@ -42,8 +42,8 @@ UNVERIFIED = "UNVERIFIED"
 
 # Repo root, resolved from this file's location so callers need no cwd contract.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MASTER = _REPO_ROOT / "data" / "reference" / "pin1_reference_binders_1.csv"
-DEFAULT_ANCHORS = _REPO_ROOT / "data" / "reference" / "pin1_covalent_cys113_anchors_1.csv"
+DEFAULT_MASTER = _REPO_ROOT / "data" / "reference" / "pin1_reference_binders_2.csv"
+DEFAULT_ANCHORS = _REPO_ROOT / "data" / "reference" / "pin1_covalent_cys113_anchors_2.csv"
 
 
 class ReferenceSetError(RuntimeError):
