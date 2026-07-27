@@ -59,20 +59,27 @@ build_diffsbdd() {
 }
 
 build_reinvent4() {
-  # T_3's generator. REINVENT ships its own Linux lockfile pinning torch+CUDA;
-  # we honour it rather than resolving ourselves.
+  # T_3's generator. Three things the implementation plan got wrong, all because
+  # upstream moved: (1) requirements-linux-64.lock no longer exists; (2) REINVENT
+  # now needs python >= 3.11, not 3.10; (3) install.py's FIRST positional is the
+  # PyTorch processor type (cu124/cpu/mac), NOT the optional-dependency set —
+  # passing "none" there yields a bogus --extra-index-url .../whl/none.
+  #
+  # CRITICAL: install.py shells out to a BARE `pip`. Without this env's bin
+  # first on PATH it resolves to whatever pip comes first — which on this
+  # machine was base conda's, installing REINVENT and ~30 chemistry packages
+  # into the base environment and upgrading pandas and pydantic out from under
+  # streamlit, anndata and anaconda-cloud-auth.
   local p="$ENV_ROOT/dwi_reinvent4"
   local src="$ENV_ROOT/_src/REINVENT4"
   _log "building reinvent4 -> $p"
-  conda create --prefix "$p" "${CONDA_SOLVER_ARGS[@]}" -c conda-forge python=3.10
+  conda create --prefix "$p" "${CONDA_SOLVER_ARGS[@]}" -c conda-forge python=3.11
   mkdir -p "$ENV_ROOT/_src"
   [ -d "$src" ] || git clone https://github.com/MolecularAI/REINVENT4.git "$src"
-  # Upstream dropped requirements-linux-64.lock (which the implementation plan
-  # named) and moved to pyproject + uv.lock + install.py. `uv sync` would build
-  # its own venv and fight this conda prefix, so we use install.py, which only
-  # computes the right pip arguments (it picks the PyTorch CUDA index for us).
-  ( cd "$src" && "$p/bin/python" install.py none )
-  "$p/bin/python" -c "import reinvent; print('reinvent', reinvent.__version__)"
+  ( cd "$src" && PATH="$p/bin:$PATH" "$p/bin/python" install.py cu124 -d none )
+  # Not declared by REINVENT's own metadata, but its CLI imports it.
+  "$p/bin/pip" install --no-input scipy
+  "$p/bin/reinvent" --help >/dev/null && _log "reinvent CLI OK"
 }
 
 build_amber_md() {

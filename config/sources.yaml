@@ -59,6 +59,19 @@ sources:
       plan named) in favour of pyproject + uv.lock + install.py. Recorded here
       because the plan's install note is stale.
 
+  reinvent_priors:
+    description: "REINVENT 4 prior models — libinvent prior needed by T_3"
+    kind: http
+    url: null               # pick the libinvent prior from the Zenodo record
+    dest: /data/lab_vm/immutable/inhibition/weights/reinvent_priors/
+    required_by: [t3]
+    license: Apache-2.0
+    notes: >
+      NOT YET ACQUIRED. Priors are NOT bundled with the REINVENT repo; they live
+      on Zenodo (doi 10.5281/zenodo.15641296). T_3 runs libinvent mode, so the
+      libinvent prior specifically is required. Which prior is a decision worth
+      recording, not a default.
+
   crem_fragment_db:
     description: "CReM fragment database mined from ChEMBL (T_2 expansion)"
     kind: http
