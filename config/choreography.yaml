@@ -66,6 +66,19 @@ metrics:
     units: dimensionless        # NOT kcal/mol — never mixed with Vina
     direction: higher_is_better
     tool: gnina
+    # ADVISORY ONLY (D0015). The enrichment gate measured it against gnina's
+    # Vina-style affinity on the same 6 actives / 294 decoys: CNNaffinity's
+    # ROC-AUC CI includes 0.5 and its EF1% is 0.0 — not one known active in the
+    # top 1%. gnina itself warns CNN scoring is uncalibrated for covalent
+    # docking; the measurement agrees. Never used to rank.
+    role: advisory_annotation
+  gnina_affinity_kcal:
+    units: kcal/mol
+    direction: lower_is_better
+    tool: gnina
+    # THE covalent rank metric for T_3 and T_4 (D0015). ROC-AUC 0.815 with a
+    # CI [0.667, 0.931] that excludes 0.5, EF1% 16.7.
+    role: covalent_rank_metric
   mmgbsa_dg_bind:
     units: kcal/mol
     direction: lower_is_better

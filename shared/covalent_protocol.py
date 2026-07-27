@@ -155,13 +155,16 @@ def load_warhead_smarts() -> dict[str, str]:
     applied uniformly would be chemically wrong for most classes, so the SMARTS
     is carried per class in the reference data and read from there.
     """
-    import pandas as pd
+    # Read through warhead_library rather than naming a version here. A
+    # hardcoded `warhead_classes_2.csv` silently desynchronised this module from
+    # the library when v3 introduced the regiochemistry classes, and 168 of 192
+    # covalent docks failed with "no reactive-atom SMARTS for class
+    # naphthoquinone_c2" — a version skew, invisible until it ran.
+    from . import warhead_library as wl
 
-    lib = _REPO_ROOT / "data" / "reference" / "warhead_classes_2.csv"
-    if not lib.is_file():
-        raise CovalentProtocolError(f"warhead library not found: {lib}")
-    df = pd.read_csv(lib)
-    return {r["class_id"]: r["reactive_atom_smarts"] for _, r in df.iterrows()
+    df = wl.load()
+    return {str(r["class_id"]): str(r["reactive_atom_smarts"])
+            for _, r in df.iterrows()
             if str(r.get("reactive_atom_smarts", "")).strip()}
 
 
