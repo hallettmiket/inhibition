@@ -2,7 +2,7 @@
 id: D0011
 title: gnina CNN scoring is uncalibrated for covalent docking
 date: 2026-07-27
-status: proposed
+status: accepted
 approach: shared
 decided_by: '@mhallet'
 origin: implementation
@@ -40,8 +40,15 @@ a ranking signal, which the evidence says is not one.
 
 ## Decision
 
-**PROPOSED, not yet accepted — this changes a spec-level metric choice and
-wants the PI's call.** Options, in the order I would rank them:
+**ACCEPTED 2026-07-27: option 2 below — let M3 decide empirically.**
+
+The question is settled by measurement rather than judgement: the enrichment
+gate runs the covalent stratum with BOTH candidate metrics and the one that
+enriches known actives is the one that ranks. If neither enriches, docking is
+demoted to a displayed label in T_3 and T_4, which is the gate's existing
+FAIL branch.
+
+Options as weighed:
 
 1. **Rank covalent candidates by gnina's Vina-style `affinity` (kcal/mol,
    lower better) and carry `CNNaffinity` as an advisory annotation.** Keeps the
@@ -54,7 +61,9 @@ wants the PI's call.** Options, in the order I would rank them:
    ranks on a number the tool says is uncalibrated.
 
 Option 2 subsumes option 1 and is the honest route, at the cost of needing M3
-before T_3 can rank anything.
+before T_3 can rank anything. **This is the accepted path.** Consequence: the
+protocol's `cnn_scoring` pin — and therefore the protocol fingerprint — must be
+settled by M3 BEFORE T_3 or T_4 produce any results, not after.
 
 Interim, already implemented: `dock()` detects the warning, logs it, and
 returns `cnn_uncalibrated_for_covalent` so it reaches the manifest and the GUI
