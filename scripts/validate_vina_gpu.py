@@ -47,8 +47,9 @@ log = logging.getLogger("vgpu-validate")
 
 M3_DIR = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate/"
               "m3_enrichment/non_covalent")
-OUT_DIR = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate/"
-               "vina_gpu_validation")
+OUT_ROOT = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate/"
+                "vina_gpu_validation")
+OUT_DIR = OUT_ROOT  # rebound per search_depth in main()
 VINA_GPU = Path("/data/lab_vm/envs/dwi_vinagpu/bin/vina-gpu")
 RECEPTOR = Path("/data/lab_vm/immutable/inhibition/receptor/6VAJ_prepared.pdbqt")
 BOX = Path("/data/lab_vm/immutable/inhibition/receptor/box_expanded.json")
@@ -169,6 +170,10 @@ def main() -> None:
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # Separate output per search_depth: the whole point of sweeping it is to
+    # compare runs, which needs their artifacts kept apart.
+    global OUT_DIR
+    OUT_DIR = OUT_ROOT / f"sd{args.search_depth}"
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     lig_dir, out_dir = OUT_DIR / "ligands", OUT_DIR / "poses"

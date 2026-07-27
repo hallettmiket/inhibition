@@ -48,6 +48,10 @@ seeds:
       attachment_points:
         warhead_site: "[1*]"
         rgroup_site: "[2*]"
+      # For ALERT SCOPING (shared/alerts.py) the core must be written WITHOUT
+      # attachment wildcards: a [*] matches an atom, so it would consume the
+      # first atom of each substituent and truncate the R-group being screened.
+      alert_scoping_smarts: "N[CH]1CCS(=O)(=O)C1"
       # T_3 fixes core + warhead and varies ONLY the R-group (one-point).
       # T_4 fixes only the core and varies BOTH (two-point) — which is exactly
       # why T_4 needs a warhead-reactivity triage that T_3 does not.
