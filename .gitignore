@@ -57,3 +57,6 @@ env/
 !data/reference/
 !data/reference/*.csv
 !data/reference/.provenance.md
+
+# --- mkdocs build output (regenerate with `mkdocs build`) ---
+site/

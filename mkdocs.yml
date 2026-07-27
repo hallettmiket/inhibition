@@ -1,0 +1,77 @@
+# MkDocs site for the Dance with Inhibition choreography.
+#
+# Build:  mkdocs build      (or `mkdocs serve` for live preview on :8000)
+# Env:    /data/lab_vm/envs/dwi_gui
+#
+# DERIVED PAGES ARE GENERATED, NOT HAND-MAINTAINED. decisions/*.md and the
+# reference CSVs are the source of truth; scripts/gen_docs.py renders them into
+# the site at build time. Never edit the generated pages — edit the record.
+
+site_name: Dance with Inhibition
+site_description: >
+  Four approaches to finding an inhibitor of human Pin1, and the choreography
+  that organizes them.
+repo_url: https://github.com/hallettmiket/inhibition
+edit_uri: edit/main/
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/weather-night, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/weather-sunny, name: Light mode}
+
+plugins:
+  - search
+  - gen-files:
+      scripts:
+        - scripts/gen_docs.py
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.superfences
+  - pymdownx.details
+
+nav:
+  - Overview:
+      - index.md
+      - overview/framing.md
+      - overview/status.md
+  - Shared substrate:
+      - shared/index.md
+      - shared/receptor.md
+      - shared/reference_set.md
+      - shared/gates.md
+      - shared/provenance.md
+  - Approaches:
+      - approaches/index.md
+      - "T_1 de novo": approaches/t1.md
+      - "T_2 ATRA neighborhood": approaches/t2.md
+      - "T_3 REINVENT R-groups": approaches/t3.md
+      - "T_4 combinatorial": approaches/t4.md
+  - Integration:
+      - integration/index.md
+  - Decisions:
+      - decisions/index.md
+  - Runbooks:
+      - runbooks/index.md
+      - runbooks/receptor_selection.md
+      - runbooks/resolving_unverified_structures.md
+      - runbooks/adding_a_source.md
+  - Operations:
+      - ops/environments.md
+      - ops/running.md
