@@ -123,29 +123,74 @@ def lumo_ev(smiles: str, *, charge: int = 0) -> dict | None:
         return {"homo_ev": homo, "lumo_ev": lumo, "gap_ev": lumo - homo}
 
 
-def anchor_window() -> dict:
-    """LUMO span of the VERIFIED covalent anchors — the window's bounds.
+def anchor_window(mode: str = "clean_kinetics") -> dict:
+    """LUMO span of the anchors — the window's bounds.
 
-    Control B5: the window is bounded by real wet-lab-validated actives, and the
-    project's own leads are excluded as anchors. `covalent_anchors` already
-    refuses UNVERIFIED rows.
+    Control B5: bounded by real wet-lab-validated actives, with the project's own
+    leads excluded. `covalent_anchors` already refuses UNVERIFIED rows.
+
+    Parameters
+    ----------
+    mode : str
+        ``all``            every verified anchor, including promiscuous quinones.
+        ``clean``          non-promiscuous anchors only.
+        ``clean_kinetics`` (default) non-promiscuous anchors PLUS the compounds
+                           with MEASURED rate constants.
+
+    WHY THE DEFAULT IS NOT ``all``. With every anchor included the window spanned
+    ~4 eV, because it was bounded at one end by mild chloroacetamides (-7.5 eV)
+    and at the other by highly reactive quinones (-9.7 eV). A window that wide
+    excluded ZERO warhead classes — a filter that does not filter, reported as
+    though everything had passed a safety check.
+
+    The quinones are the problem, and they are flagged in the reference data as
+    the problem: juglone and KPT-6566 both carry ``promiscuity_flag = y``. They
+    are genuine covalent Cys113 actives, which is why they are anchors at all,
+    but they are promiscuous — so bounding a SAFETY window with them admits
+    reactivity nobody would accept in a lead.
+
+    Adding the measured-kinetics compounds does the complementary job: they are
+    real molecules with real second-order rate constants spanning 0.005-0.068
+    M-1 s-1, so the window is calibrated against measured chemistry rather than
+    resting on computed LUMO alone (D0005).
     """
     anchors = rs.covalent_anchors()
-    results = {}
+    if mode in ("clean", "clean_kinetics"):
+        before = len(anchors)
+        anchors = anchors[anchors.get("promiscuity_flag", "n") != "y"]
+        log.info("dropped %d promiscuous anchor(s); a safety window bounded by "
+                 "promiscuous quinones is not a safety window",
+                 before - len(anchors))
+
+    results, provenance = {}, {}
     for _, a in anchors.iterrows():
         r = lumo_ev(str(a["canonical_smiles"]))
         if r:
             results[str(a["name"])] = r["lumo_ev"]
+            provenance[str(a["name"])] = "verified anchor"
             log.info("anchor %-28s LUMO %+.3f eV", a["name"], r["lumo_ev"])
-        else:
-            log.warning("anchor %s: LUMO failed", a["name"])
+
+    if mode == "clean_kinetics":
+        kin = pd.read_csv(REPO / "data" / "reference" / "pin1_reactivity_kinetics_1.csv")
+        for _, k in kin.iterrows():
+            name = f"kinetics:{k['compound']}"
+            if str(k["canonical_smiles"]) == "UNVERIFIED":
+                continue
+            r = lumo_ev(str(k["canonical_smiles"]))
+            if r:
+                results[name] = r["lumo_ev"]
+                provenance[name] = f"measured k = {k['k_M-1_s-1']} M-1 s-1"
+                log.info("kinetics %-26s LUMO %+.3f eV  (k=%.3f)",
+                         k["compound"], r["lumo_ev"], k["k_M-1_s-1"])
+
     if len(results) < 2:
         raise ReactivityError(
             f"only {len(results)} anchor LUMO(s) computed; a window bounded by "
             "fewer than two real actives is the n~1 problem control B5 exists to "
             "prevent.")
     lo, hi = min(results.values()), max(results.values())
-    return {"anchors": results, "lumo_min": lo, "lumo_max": hi,
+    return {"mode": mode, "anchors": results, "provenance": provenance,
+            "lumo_min": lo, "lumo_max": hi,
             "window_lo": lo - WINDOW_TOLERANCE_EV,
             "window_hi": hi + WINDOW_TOLERANCE_EV,
             "caveat": rs.window_caveat()}
@@ -154,6 +199,9 @@ def anchor_window() -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--frame", default=None, help="D4 parquet (default: latest)")
+    ap.add_argument("--anchor-mode", default="clean_kinetics",
+                    choices=["all", "clean", "clean_kinetics"],
+                    help="which anchors bound the window (default: clean_kinetics)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -166,7 +214,7 @@ def main() -> None:
     log.info("loaded %s (%d candidates)", frame_path.name, len(df))
 
     log.info("computing the anchor window from VERIFIED covalent actives")
-    window = anchor_window()
+    window = anchor_window(args.anchor_mode)
     log.info("anchor LUMO span %.3f .. %.3f eV; window %.3f .. %.3f eV",
              window["lumo_min"], window["lumo_max"],
              window["window_lo"], window["window_hi"])
@@ -199,10 +247,30 @@ def main() -> None:
     df["reactivity_in_window"] = df["warhead_class"].map(
         lambda c: per_class.get(c, {}).get("in_window"))
 
-    # Stamp only rows not already stamped — a candidate keeps the reason it was
-    # FIRST set aside. And note this stamps, it does not delete.
-    stamp = df["reactivity_in_window"].eq(False) & df["rejected_at"].isna()
-    df.loc[stamp, "rejected_at"] = "reactivity_window"
+    # FLAG AND CARRY, do not reject (D0019). A class outside the window is
+    # marked and carried forward with its docking evidence, not stamped
+    # rejected. Two reasons:
+    #
+    #   1. The window is chemotype-narrow BY CONSTRUCTION. Every clean anchor and
+    #      every kinetics compound is chloroacetamide/sulfamate/sulfonate — one
+    #      chemical family. A window built from one family excludes other
+    #      families almost by definition, whether or not they are actually
+    #      unsafe.
+    #   2. LUMO is a weak proxy. D0005 measured reactivity against Pin1 labelling
+    #      at r = 0.396. This is a SAFETY filter for condition (ii), not evidence
+    #      a warhead will not work.
+    #
+    # Consistent with D0012: gates report evidence strength, they do not
+    # adjudicate. The GUI must display this flag beside those candidates.
+    df["reactivity_flag"] = df["reactivity_in_window"].map(
+        {True: "in_window", False: "OUTSIDE_WINDOW"}).fillna("not_assessed")
+    n_out = int(df["reactivity_in_window"].eq(False).sum())
+    if n_out:
+        log.warning("%d candidate(s) in %d class(es) fall OUTSIDE the reactivity "
+                    "window and are FLAGGED, not rejected — their docking "
+                    "evidence is still collected (D0019)",
+                    n_out, df.loc[df["reactivity_in_window"].eq(False),
+                                  "warhead_class"].nunique())
 
     out_json = OUT_DIR / "reactivity_window.json"
     out_json.write_text(json.dumps({"window": window, "per_class": per_class},
@@ -210,7 +278,7 @@ def main() -> None:
 
     out = dio.write_full_frame(
         df, approach="t4", experiment=EXPERIMENT, stage="t4_reactivity_triage",
-        params={"reference_rgroup": REFERENCE_RGROUP,
+        params={"reference_rgroup": REFERENCE_RGROUP, "anchor_mode": args.anchor_mode,
                 "window_tolerance_ev": WINDOW_TOLERANCE_EV,
                 "window_lo": window["window_lo"], "window_hi": window["window_hi"]},
         inputs={"d4_frame": frame_path})
@@ -229,8 +297,9 @@ def main() -> None:
         mark = "in " if v["in_window"] else "OUT"
         print(f"    {mark} {cls:22s} LUMO {v['lumo_ev']:+.3f} eV")
     outside = [c for c, v in per_class.items() if not v["in_window"]]
-    print(f"\n  classes outside the window: {outside or 'none'}")
-    print(f"  candidates surviving        : {int(df['rejected_at'].isna().sum())}")
+    print(f"\n  classes FLAGGED outside the window: {outside or 'none'}")
+    print(f"     (flagged, NOT rejected — D0019; docking evidence still collected)")
+    print(f"  candidates still un-stamped       : {int(df['rejected_at'].isna().sum())}")
     print(f"\n  {window['caveat'][:200]}")
 
 

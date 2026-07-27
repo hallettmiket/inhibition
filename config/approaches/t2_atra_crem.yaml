@@ -42,6 +42,31 @@ expansion:
   max_degree: 1
   frontier_cap: 200000
   max_replacements: null          # null = take every valid replacement
+
+  # PINNED, not inherited (D0018). CReM defaults max_size to 10 heavy atoms.
+  # ATRA has 22, so the default would permit swapping nearly half the molecule —
+  # hard to call a DERIVATIVE neighbourhood. An unstated default is exactly the
+  # kind of parameter that turns out to have been doing the work.
+  #
+  # Measured effect on ATRA at radius 2: mutate gives 203 with these pins vs 239
+  # at the defaults, and grow gives 1,679 — so grow dominates the frontier
+  # (union 1,882). Worth knowing which operator is actually generating the
+  # neighbourhood before tuning either.
+  #
+  # NOTE the naming trap: `radius` is the context that must MATCH (larger =
+  # STRICTER = FEWER variants), while `max_size` is the size of the incoming
+  # fragment (larger = MORE variants). They pull in opposite directions.
+  # mutate_mol and grow_mol take DIFFERENT size parameters — grow_mol sets
+  # min_size/max_size internally (it appends to hydrogens rather than replacing
+  # a fragment) and takes min_atoms/max_atoms instead. Passing max_size to
+  # grow_mol is a TypeError.
+  mutate:
+    max_size: 8                   # heavy atoms in the fragment being REPLACED
+    min_size: 1
+    max_inc: 4                    # cap net heavy-atom growth per edit
+  grow:
+    max_atoms: 8                  # heavy atoms in the fragment being ADDED
+    min_atoms: 1
   replace_cycles: true            # ring systems may be swapped, not only chains
   protected_ids: null             # nothing anchored: the whole graph is mutable
   min_freq: 5                     # matches the f5 database

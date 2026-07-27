@@ -20,6 +20,10 @@ evidence:
   - 'ATRA at radius 3, 4 and 5 yields ZERO mutations and ZERO grows'
   - 'ATRA at radius 2 yields 43 mutations / 38 grows; radius 1 yields 45 / 50'
   - 'control: benzoic acid at radius 3 yields 47 mutations — so radius 3 works in general, just not for this seed'
+  - "CReM docstring: 'radius: radius of context which will be considered for replacement. Default: 3.'"
+  - 'benzoic acid replacements by radius: 1449 / 593 / 584 / 530 / 526 for r=1..5 — MONOTONICALLY DECREASING'
+  - 'benzoic acid by max_size at fixed radius 2: 40 / 204 / 593 / 593 for max_size=2/4/8/12 — INCREASING'
+  - 'max_size defaults to 10 and was never set; ATRA has 22 heavy atoms'
 runbook: docs/runbooks/adding_a_source.md
 ---
 
@@ -68,6 +72,72 @@ ChEMBL33.
 So radius 3 is not "conservative" here, it is inoperable: T_2 would have
 enumerated an empty frontier and reported success. Radius 2 retains more context
 than radius 1 while still being productive, and is the operative choice.
+
+## What `radius` actually means — a naming trap worth recording
+
+The natural reading is that a larger radius permits larger changes and so yields
+MORE variants. It is the opposite. CReM's own docstring:
+
+> `radius: radius of context which will be considered for replacement.`
+
+The radius is the amount of surrounding structure that must **match** between
+the query molecule and a database fragment before a swap is permitted. A larger
+radius is a STRICTER constraint, so it yields FEWER replacements. Measured on
+benzoic acid, where every radius works:
+
+| radius | replacements |
+|---|---|
+| 1 | 1,449 |
+| 2 | 593 |
+| 3 | 584 |
+| 4 | 530 |
+| 5 | 526 |
+
+The parameter that behaves the way the name suggests is **`max_size`** — heavy
+atoms in the fragment being swapped in. At fixed radius 2: 40 / 204 / 593 / 593
+for `max_size` 2 / 4 / 8 / 12. Two distinct knobs; conflating them is easy.
+
+This also sharpens what happened with ATRA. Benzoic acid only drifts 593 → 526
+from radius 2 to 5, a gentle decline. ATRA goes 43 → **0**. That is not a filter
+tightening gradually — it is ATRA's conjugated polyene having NO 3-bond
+precedent anywhere in ChEMBL33 while an ordinary aromatic has plenty. Radius 2
+is not a mild relaxation for this seed; it is the last radius at which the seed
+has any precedent at all.
+
+A related consequence: at radius 1 ATRA gives 45 against 43 at radius 2 — nearly
+identical, unlike benzoic acid's 2.4x jump. So the radius-1-vs-2 choice matters
+far less for ATRA than it would for a typical scaffold.
+
+## `max_size`: pinned, not inherited
+
+`max_size` defaults to **10** heavy atoms and was never set explicitly. ATRA has
+22 heavy atoms, so the default permits swapping nearly half the molecule — hard
+to call a *derivative* neighbourhood. It is now pinned in the T_2 config rather
+than inherited silently, because an unstated default is exactly the kind of
+parameter that turns out to have been doing the work.
+
+## Measured frontier with the pinned parameters
+
+ATRA at radius 2, after pinning:
+
+| operator | parameters | products |
+|---|---|---|
+| `mutate_mol` | `max_size 8, min_size 1, max_inc 4` | 203 |
+| `grow_mol` | `max_atoms 8, min_atoms 1` | 1,679 |
+| union | | **1,882** |
+
+`mutate` at the unpinned defaults gives 239, so the pins cost about 15% of the
+mutation products — a modest price for bounding what "derivative" means.
+
+**`grow` dominates the frontier by roughly 8:1.** Worth knowing before tuning
+either operator: the neighbourhood is mostly ATRA-plus-a-substituent, not
+ATRA-with-a-piece-swapped. Degree-1 over ~1,882 products is a tractable starting
+frontier, well inside the 200,000 cap.
+
+A signature trap alongside the naming one: `grow_mol` does NOT accept
+`max_size`/`min_size`. It sets them internally (it appends to hydrogens rather
+than replacing a fragment) and takes `min_atoms`/`max_atoms`. Passing `max_size`
+to it raises `TypeError`, so the two operators are configured separately.
 
 ## Consequences
 
