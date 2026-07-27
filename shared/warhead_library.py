@@ -115,10 +115,22 @@ def load(path: Path | str | None = None) -> pd.DataFrame:
             raise WarheadLibraryError(
                 f"class {row['class_id']!r}: unparseable fragment SMILES {frag!r}"
             )
-        if "*" not in frag:
+        n_attach = frag.count("*")
+        if n_attach == 0:
             raise WarheadLibraryError(
                 f"class {row['class_id']!r}: fragment {frag!r} has no attachment "
                 "point '[*]' — it cannot be coupled to the core."
+            )
+        if n_attach > 1:
+            # A second attachment point is never filled by the core coupling,
+            # so the product carries a dangling dummy atom: not a real molecule,
+            # yet it passes core verification and reaches docking. This happened
+            # to 198 sulfamate_acetamide candidates.
+            raise WarheadLibraryError(
+                f"class {row['class_id']!r}: fragment {frag!r} has {n_attach} "
+                "attachment points. Exactly one is required — the coupling fills "
+                "only the core bond, so any other '[*]' survives into the product "
+                "as a dangling dummy atom. Fix the substituent in the fragment."
             )
     return df
 

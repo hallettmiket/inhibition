@@ -175,11 +175,25 @@ def main() -> None:
         log.warning("%d ligand(s) failed to dock; their rows keep empty dock columns",
                     len(errs))
 
-    keep = [c for c in ("candidate_id", "cnn_affinity", "cnn_score", "affinity_kcal",
-                        "cnn_uncalibrated_for_covalent", "protocol_fingerprint",
-                        "pose_path") if c in docked.columns]
+    dock_cols = ("cnn_affinity", "cnn_score", "affinity_kcal",
+                 "cnn_uncalibrated_for_covalent", "protocol_fingerprint",
+                 "pose_path")
+    keep = ["candidate_id"] + [c for c in dock_cols if c in docked.columns]
+    # Drop any dock columns already on the frame BEFORE merging. Re-running this
+    # stage on a frame that had been merged once produced affinity_kcal_x and
+    # affinity_kcal_y, so `merged["affinity_kcal"]` did not exist and the
+    # success counter reported 0/1683 on a run that had actually worked.
+    stale = [c for c in dock_cols if c in df.columns]
+    if stale:
+        log.info("dropping %d stale dock column(s) before merge: %s",
+                 len(stale), stale)
+        df = df.drop(columns=stale)
     merged = df.merge(docked[keep].drop_duplicates("candidate_id"),
                       on="candidate_id", how="left")
+    if len(merged) != len(df):
+        raise RuntimeError(
+            f"merge changed row count {len(df)} -> {len(merged)}; duplicate "
+            "candidate_id in the frame or the results")
 
     out = dio.write_full_frame(
         merged, approach="t4", experiment=EXPERIMENT, stage="t4_covalent_dock",

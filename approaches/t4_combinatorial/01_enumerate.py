@@ -149,22 +149,61 @@ def enumerate_library(allow_statuses: tuple[str, ...]) -> pd.DataFrame:
     return df
 
 
-def verify_core(df: pd.DataFrame, core_smarts: str) -> pd.DataFrame:
-    """Step 3: confirm the intact core in EVERY product; drop any that lost it.
+def is_complete_molecule(smiles: str) -> bool:
+    """True when the product is a real molecule — no unfilled attachment points.
 
-    This is the one step that removes rows. A product missing the core is not a
-    member of this library, so retaining it would corrupt the frame rather than
-    preserve information.
+    Core verification alone is NOT enough, and this cost a full docking run to
+    learn. The sulfamate fragment carried two `[*]`; coupling filled only the
+    bond to the core, so 198 products kept a dangling dummy atom. They contained
+    the core, so they passed verification. They passed the alert gate. They
+    passed the warhead-validity gate. They were docked. None of those three
+    gates asks whether the thing is a molecule.
     """
-    keep = [smi.has_substructure(s, core_smarts) for s in df["canonical_smiles"]]
-    lost = len(df) - sum(keep)
-    if lost:
+    m = smi.to_mol(smiles)
+    if m is None:
+        return False
+    return not any(a.GetAtomicNum() == 0 for a in m.GetAtoms())
+
+
+def verify_core(df: pd.DataFrame, core_smarts: str) -> pd.DataFrame:
+    """Step 3: confirm every product is complete AND retains the intact core.
+
+    This is the one step that removes rows. A product missing the core, or
+    carrying an unfilled attachment point, is not a member of this library —
+    retaining it would corrupt the frame rather than preserve information.
+    """
+    has_core = [smi.has_substructure(s, core_smarts) for s in df["canonical_smiles"]]
+    complete = [is_complete_molecule(s) for s in df["canonical_smiles"]]
+    keep = [c and h for c, h in zip(complete, has_core)]
+
+    lost_core = sum(1 for c, h in zip(complete, has_core) if c and not h)
+    incomplete = len(df) - sum(complete)
+    if lost_core:
         log.error("%d product(s) LOST THE CORE and were removed — check the "
-                  "coupling reaction, not the data", lost)
-    else:
-        log.info("core verified intact in all %d products", len(df))
+                  "coupling reaction, not the data", lost_core)
+    if incomplete:
+        log.error("%d product(s) carry an UNFILLED ATTACHMENT POINT and were "
+                  "removed. A fragment with more than one '[*]' leaves a "
+                  "dangling dummy atom that is not a real molecule.", incomplete)
+    if not lost_core and not incomplete:
+        log.info("all %d products verified: core intact and no dangling "
+                 "attachment points", len(df))
+
     out = df[pd.Series(keep, index=df.index)].reset_index(drop=True)
     out["core_verified"] = True
+    out["molecule_complete"] = True
+
+    # candidate_id must be unique. It is derived from the InChIKey, which RDKit
+    # returns EMPTY for un-keyable molecules — so a silent failure collapses
+    # every affected row onto sha256("") and corrupts every later join.
+    if out["candidate_id"].isna().any():
+        n = int(out["candidate_id"].isna().sum())
+        raise RuntimeError(f"{n} product(s) have no candidate_id (unkeyable "
+                           "InChI). Enumeration must not emit them.")
+    dupes = out["candidate_id"].duplicated().sum()
+    if dupes:
+        raise RuntimeError(f"{dupes} duplicate candidate_id(s) after "
+                           "verification — the join key is not unique.")
     return out
 
 

@@ -99,10 +99,15 @@ def inchikey(smiles: str) -> str | None:
     if mol is None:
         return None
     try:
-        return Chem.MolToInchiKey(mol)
+        key = Chem.MolToInchiKey(mol)
     except Exception as exc:  # RDKit raises bare Exception on InChI failures
         log.debug("InChIKey failed for %r: %s", smiles, exc)
         return None
+    # RDKit returns an EMPTY STRING (not None) for molecules it cannot key —
+    # notably anything carrying a dummy atom. Treating "" as success let 198
+    # malformed candidates share one id, because sha256("") is a perfectly
+    # valid-looking hash. Empty is failure.
+    return key or None
 
 
 def candidate_id(smiles: str, *, prefix: str = "") -> str | None:
@@ -125,7 +130,7 @@ def candidate_id(smiles: str, *, prefix: str = "") -> str | None:
         ``<prefix>_<12-hex-chars>``, or None if the SMILES is unparseable.
     """
     key = inchikey(smiles)
-    if key is None:
+    if not key:                      # None OR "" — see inchikey() above
         return None
     digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
     return f"{prefix}_{digest}" if prefix else digest
