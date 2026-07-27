@@ -54,6 +54,35 @@ seeds:
       t3_fixes: [core, warhead]
       t4_fixes: [core]
 
+  # ---------------------------------------------------------------------
+  # sulfopin' — T_3's starting point. The PI's expert warhead choice.
+  # ---------------------------------------------------------------------
+  sulfopin_prime:
+    used_by: [t3]
+    name: "sulfopin'"
+    derived_from: sulfopin
+    warhead_class: acrylamide
+    chosen_by: '@mhallet'
+    chosen_on: '2026-07-27'
+    # Sulfopin with the chloroacetamide replaced by an acrylamide Michael
+    # acceptor. Verified: C12H21NO3S, and the Michael-acceptor SMARTS matches
+    # this but NOT the parent chloroacetamide — i.e. the swap really changed
+    # the mechanism rather than just the formula.
+    reference_smiles: "CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)C=C"
+    # What REINVENT decorates. [*] is the single R-group position; core and
+    # warhead are hard constraints it cannot alter.
+    scaffold_smiles: "[*]N(C(=O)C=C)C1CCS(=O)(=O)C1"
+    mechanism: michael_addition
+    reactive_atom_smarts: "[CX3]=[CX3][CX3]=O"
+    notes: >
+      EXPLORATORY warhead for this target: acrylamide is a standard covalent
+      Michael acceptor but has no validated covalent-Cys113 Pin1 precedent in
+      the frozen reference set. That is acceptable for T_3, whose condition (ii)
+      is addressed by the up-front expert choice rather than by a reactivity
+      window. It is NOT admissible as a reactivity-window anchor for T_4 —
+      control B5 excludes the project's own leads, and the project has prior
+      acrylamide work.
+
 # T_1 is deliberately absent from this file: it is the zero-seed approach. Its
 # only input is the pocket. Do not add a seed for it.
 unseeded_approaches: [t1]

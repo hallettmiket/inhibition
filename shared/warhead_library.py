@@ -2,7 +2,7 @@
 Purpose: Data-driven warhead-class library for T_4 — narrow now, wide later.
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-27
-Input: data/reference/warhead_classes_1.csv
+Input: data/reference/warhead_classes_3.csv
 Output: validated warhead classes, filtered by how well-founded each one is
 
 DESIGN INTENT. The set of warhead chemistries is DATA, not code. Going wide —
@@ -20,8 +20,12 @@ which tiers you are willing to enumerate:
   VERIFIED             structure traced to a public record or derived from a
                        verified anchor. Safe to enumerate.
   VERIFIED_CLASS_ONLY  the warhead CHEMOTYPE is verified, but the specific
-                       literature compound is not, and/or the attachment
-                       regiochemistry to the core is still a design choice.
+                       literature compound is not.
+  DESIGNED_UNTESTED    chemotype verified AND an attachment regiochemistry has
+                       been proposed, but which attachment is right has not been
+                       established. Competing regiochemistries are enumerated as
+                       SEPARATE classes so the 5b validity gate and the LUMO
+                       window decide empirically rather than by intuition.
   NEEDS_DESIGN         the anchor exists but gives no attachable fragment;
                        somebody has to design the attachment. Not enumerable.
   UNVERIFIED           structure unresolved. Never enters the reactivity window.
@@ -41,7 +45,7 @@ from . import smiles as smi
 log = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_LIBRARY = _REPO_ROOT / "data" / "reference" / "warhead_classes_1.csv"
+DEFAULT_LIBRARY = _REPO_ROOT / "data" / "reference" / "warhead_classes_3.csv"
 
 UNRESOLVED = "UNRESOLVED"
 
@@ -50,6 +54,7 @@ UNRESOLVED = "UNRESOLVED"
 STATUS_TIERS: tuple[str, ...] = (
     "VERIFIED",
     "VERIFIED_CLASS_ONLY",
+    "DESIGNED_UNTESTED",
     "NEEDS_DESIGN",
     "UNVERIFIED",
 )
