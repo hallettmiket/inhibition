@@ -1,0 +1,9 @@
+compound,warhead_class,r_substituent,canonical_smiles,k_M-1_s-1,pct_labeling,value_status,source
+Sulfopin,chloroacetamide,,CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)CCl,0.028,55,DIGITIZED_FROM_FIGURE,"Reddi 2023 JACS 10.1021/jacs.2c08853 Figure 5C"
+4a,sulfonate_acetamide,Me (sulfonate),CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)COS(=O)(=O)C,0.030,17,DIGITIZED_FROM_FIGURE,"Reddi 2023 JACS 10.1021/jacs.2c08853 Figure 5C"
+4b,sulfamate_acetamide,Me,CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)COS(=O)(=O)NC,0.005,8,DIGITIZED_FROM_FIGURE,"Reddi 2023 JACS 10.1021/jacs.2c08853 Figure 5C"
+4c,sulfamate_acetamide,Bn,CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)COS(=O)(=O)NCc1ccccc1,0.022,57,DIGITIZED_FROM_FIGURE,"Reddi 2023 JACS 10.1021/jacs.2c08853 Figure 5C"
+4d,sulfamate_acetamide,Ph,CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)COS(=O)(=O)Nc1ccccc1,0.023,95,DIGITIZED_FROM_FIGURE,"Reddi 2023 JACS 10.1021/jacs.2c08853 Figure 5C; selectivity validated by chemoproteomics in Figure 5E"
+4e,sulfamate_acetamide,4-Br-Ph,CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)COS(=O)(=O)Nc1ccc(Br)cc1,0.007,97,DIGITIZED_FROM_FIGURE,"Reddi 2023 JACS 10.1021/jacs.2c08853 Figure 5C"
+4f,sulfamate_acetamide,4-Me-Ph,CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)COS(=O)(=O)Nc1ccc(C)cc1,0.006,28,DIGITIZED_FROM_FIGURE,"Reddi 2023 JACS 10.1021/jacs.2c08853 Figure 5C"
+4g,sulfamate_acetamide,Ph (N-cyclohexylmethyl core),C1CCCCC1CN(C2CCS(=O)(=O)C2)C(=O)COS(=O)(=O)Nc1ccccc1,0.068,93,DIGITIZED_FROM_FIGURE,"Reddi 2023 JACS 10.1021/jacs.2c08853 Figure 5C; +272 Da adduct in Figure 5B (predicted 271.4, MATCH); most potent in cells Figure 5D"

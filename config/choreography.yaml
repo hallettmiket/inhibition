@@ -34,8 +34,14 @@ target:
 # ---------------------------------------------------------------------------
 reference_set:
   master: data/reference/pin1_reference_binders_1.csv
-  covalent_anchors: data/reference/pin1_covalent_cys113_anchors_1.csv
+  covalent_anchors: data/reference/pin1_covalent_cys113_anchors_2.csv
+  warhead_classes: data/reference/warhead_classes_2.csv
+  # Measured second-order rate constants for the covalent anchors. Preferred
+  # over computed LUMO for bounding the reactivity window where available —
+  # these are wet-lab numbers, not predictions.
+  reactivity_kinetics: data/reference/pin1_reactivity_kinetics_1.csv
   provenance: data/reference/.provenance.md
+  retired_versions: data/ready_to_delete.md
   # Set by scripts/freeze_reference.sh once the introducing commit is tagged.
   pinned_git_tag: null
   pinned_commit: null
