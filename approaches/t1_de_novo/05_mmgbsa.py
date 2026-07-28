@@ -1,5 +1,5 @@
 """
-Purpose: T_2 (ATRA analogues, CReM) — T5 physics rescoring (MM-GBSA) on the shortlist.
+Purpose: T_1 (de novo, DiffSBDD) — T5 physics rescoring (MM-GBSA) on the shortlist.
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-28
 Input: the latest frame (post ranking, with `shortlist`)
@@ -12,7 +12,7 @@ honoured — this stage scores and records, it never stamps `rejected_at`.
 
 The run lives in `shared.mmgbsa_run` so T_1 and T_2 execute one function.
 
-THIS APPROACH: ATRA is a retinoic ACID, so most of this neighbourhood is anionic at pH 7.4.
+THIS APPROACH: seed-free, so a dG that agrees with a seeded approach is not agreeing by ancestry.
 
 WHAT IS AND IS NOT DELIVERED. The plan's step 8 lists four things: MM-GBSA,
 short explicit-solvent MD, an AI cofold pose with physics relaxation, and
@@ -45,13 +45,13 @@ sys.path.insert(0, str(REPO))
 
 from shared import mmgbsa_run as runner          # noqa: E402
 
-log = logging.getLogger("t2-mmgbsa")
+log = logging.getLogger("t1-mmgbsa")
 
-EXPERIMENT = "02_t2_atra_crem"
+EXPERIMENT = "01_t1_de_novo"
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="T_2 (ATRA analogues, CReM): MM-GBSA rescoring.")
+    ap = argparse.ArgumentParser(description="T_1 (de novo, DiffSBDD): MM-GBSA rescoring.")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--workers", type=int, default=6)
     args = ap.parse_args()
@@ -59,10 +59,10 @@ def main() -> None:
                         format="%(levelname)s %(name)s: %(message)s")
 
     merged, out, results, failures, changed = runner.run(
-        experiment=EXPERIMENT, approach="t2",
+        experiment=EXPERIMENT, approach="t1",
         workers=args.workers, limit=args.limit)
 
-    print(f"\nT_2 (ATRA analogues, CReM) MM-GBSA (T5 physics rescoring) -> "
+    print(f"\nT_1 (de novo, DiffSBDD) MM-GBSA (T5 physics rescoring) -> "
           f"{out if out else '(no frame written — partial run)'}")
     print(f"  scored {len(results)}, failed {len(failures)}")
     print(f"  {changed} candidate(s) changed charge at pH 7.4\n")
