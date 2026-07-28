@@ -52,11 +52,20 @@ FOUR THINGS THE RECEPTOR PREP HAD TO FIX, each found by tleap refusing to build:
    individual calculation still looks fine.
 
 THE JUNCTION HAS NO PARAMETERS. ff19SB's `S` meets GAFF2's `c3` at the covalent
-bond and no force field covers that pair. `data/params/cys_gaff2_junction_*.frcmod`
-supplies the missing bond, angle and dihedral terms, each taken from its closest
-same-chemistry analogue in the two parent force fields with the source cited on
-the line. This is an approximation at the one bond the whole calculation is
-about, and it is the largest modelling assumption in this module.
+bond and no force field covers that pair. `data/params/cys_gaff2_junction_2.frcmod`
+supplies the missing bond, angle and dihedral terms. Every one is the GAFF2
+parameter for the same geometry with GAFF2's thioether sulfur `ss` in place of
+the protein's `S` — an analogue rather than a convenience, since a Cys SG that
+has bonded a ligand IS a thioether sulfur.
+
+v1 of that file hand-picked analogues from parm19 and covered only sp3 carbon.
+Six of the nine warhead classes attach through sp2 or aromatic carbon, so 18 of
+27 MM-GBSA builds failed on missing `S-c2`, `S-cc` and `S-ca` terms. Deriving
+every term from one source closed the gap and removed the inconsistency of
+mixing parameter sets between classes.
+
+This remains an approximation at the one bond the whole calculation is about,
+and it is the largest modelling assumption in this module.
 """
 
 from __future__ import annotations
@@ -78,7 +87,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 AMBER_ENV = Path("/data/lab_vm/envs/dwi_amber_md")
 RECEPTOR_PDB = Path("/data/lab_vm/immutable/inhibition/receptor/6VAJ_prepared.pdb")
-JUNCTION_FRCMOD = _REPO_ROOT / "data" / "params" / "cys_gaff2_junction_1.frcmod"
+JUNCTION_FRCMOD = _REPO_ROOT / "data" / "params" / "cys_gaff2_junction_2.frcmod"
 
 COVALENT_RESNUM = "113"          # Cys113, in the ORIGINAL PDB numbering
 COVALENT_RESNAME = "CYS"

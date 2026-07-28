@@ -1,0 +1,196 @@
+% -----------------------------------------------------------------------------
+% Purpose: Supplementary Information subsection for the murmurent manuscript,
+%          on why approaches T_1-T_4 of the "Dance with Inhibition"
+%          choreography are developed simultaneously rather than independently.
+% Author:  bookworm agent, for @mhallet
+% Date:    2026-07-28
+% Input:   ~/repos/inhibition/decisions/D0001-D0026 (primary record);
+%          ~/repos/murmurent_manuscript/main-article.tex (voice + labels, READ ONLY)
+% Output:  a \subsection* to be pasted inside \begin{appendices}
+%          \section{Supplementary Information}; cites entries in the companion
+%          file manuscript_supplement_simultaneity_1.bib.
+%
+% NOTE: this file is NOT part of the manuscript repo. It is staged here so the
+% manuscript can be pulled first, per rules/manuscript.md. Nothing in
+% ~/repos/murmurent_manuscript was modified to produce it.
+% -----------------------------------------------------------------------------
+
+\subsection*{Why the four approaches are developed simultaneously}
+\label{supp:simultaneity}
+
+Expanding on \S\ref{results:choreography_pin1}, we set out why the four
+approaches of the \emph{Dance with Inhibition} choreography are built
+concurrently against one shared substrate rather than as four
+independent projects that meet only at integration, and what that
+choice costs.
+The thesis is a trade and we state it as one: simultaneity buys
+comparability and shared-control strength, and it spends error
+independence.
+Several of the choreography's design choices are best read as attempts
+to keep the first while limiting the second.
+
+\emph{Comparability is manufactured, not discovered.}
+The four approaches answer one question with four instruments, so
+integration is a comparison, and a comparison is only as good as the
+axes it is made on; simultaneous development is what allows those axes
+to be defined once.
+$T_3$ and $T_4$ are both covalent, so they share a single covalent
+protocol -- one pinned docking binary~\cite{mcnutt_gnina_2021}, one
+version, one parameter set, one reactive-atom convention -- hashed into
+a \texttt{protocol\_fingerprint} that both approaches carry with their
+results.
+The integration interface compares them only when those fingerprints
+agree, and disables the within-covalent comparison rather than
+displaying numbers produced under different rules; when the ligand form
+changed (below), the fingerprint changed for both approaches together.
+The descriptor, synthetic-accessibility and novelty axes are likewise
+computed by one shared module for all four approaches, because the
+interface pools them on one plot.
+Developed separately, each approach would have arrived with a
+defensible but private definition of ``novelty'' and the pooled plot
+would have been meaningless.
+
+\emph{Shared controls are built once and are stronger for it.}
+Enrichment against property-matched decoys is expensive to do
+well~\cite{mysinger_directory_2012,truchon_evaluating_2007}, and decoy
+sets are known to carry biases that flatter methods which have learned
+the bias rather than the
+biology~\cite{chen_hidden_2019,sieg_need_2019,wallach_most_2018}, so
+building it once on this receptor buys a better control than four
+hurried ones.
+That control then constrains more than one approach at a time: the
+non-covalent gate (ROC-AUC $0.535$, $95\%$ CI $[0.215, 0.855]$,
+EF$_{1\%}$ $0.0$) tells $T_1$ and $T_2$ together that their docking
+rankings are weakly supported on this shallow, solvent-exposed
+pocket~\cite{trott_autodock_2010,warren_critical_2006}, and the covalent
+decoy set -- which we require to carry a warhead, since a decoy without
+one is trivially separable -- serves $T_3$ and $T_4$ together.
+Neither approach pair could have afforded that control alone.
+
+\emph{Defects propagate, and so does their discovery.}
+The strongest empirical argument for simultaneity in this build is that
+a defect found in one approach was already latent in another.
+The structural-alert screen excised the R-group from the scaffold and
+capped the cut bond with hydrogen, which silently converts an amide into
+a formamide and a thioether into a thiol; the alert
+catalogue~\cite{brenk_lessons_2008} then correctly flags an aldehyde
+that exists only in the fragment.
+It surfaced because it rejected $97.7\%$ of $T_3$, whose generator
+attaches decorations through carbonyls.
+Repairing it also moved $T_4$'s gate ($1{,}683 \to 1{,}624$ passing).
+$T_4$ alone would never have found it: its R-groups attach through
+carbon and not one of its $1{,}782$ candidates carried the artefact.
+The shared module is what made one approach's failure mode visible as
+the other's silent one.
+
+\emph{Seed orthogonality is engineered, and measured.}
+The approaches are deliberately not equidistant from the seeds.
+$T_2$ inherits ATRA's chemotype and $T_3$ and $T_4$ both inherit
+sulfopin's, so $T_1$ is kept seed-free precisely so that agreement among
+the others can be read as something other than shared ancestry.
+Measured novelty (one minus maximum Tanimoto similarity to an external
+reference set) has medians $0.87$ for $T_1$, $0.68$ for $T_3$ and $0.39$
+for $T_2$, which is the intended ordering rather than an accident.
+$T_3$ and $T_4$ are, in turn, a designed division of labour over one
+seed: $T_4$ enumerates nine warhead classes against a fixed
+$198$-member R-group library, $T_3$ fixes the warhead and spends its
+whole budget on generative decoration.
+Neither covers the two-dimensional warhead $\times$ R-group space alone;
+the split is only coherent if the two are planned together.
+
+\emph{The cost is correlated failure.}
+Every argument above is an argument for shared infrastructure, and
+shared infrastructure has a shared blast radius.
+Two instances make this concrete.
+Docking the pre-reaction ligand rather than the covalent adduct -- the
+docking engine bonds a ligand atom to the receptor, it does not perform
+reaction chemistry~\cite{scarpino_comparative_2018,bianco_covalent_2015,london_covalent_2014}
+-- invalidated all $1{,}683$ of $T_4$'s covalent docks, and would have
+invalidated $T_3$'s identically, because they share the protocol.
+Earlier, an inappropriate protonation step dropped $28$ of $150$
+receptor residues, Cys113 among them, while producing a file that still
+looked like a protein and would have docked without error; one prepared
+receptor serves all four approaches, so that single defect was capable
+of destroying the entire choreography at once.
+Independent implementations would have failed independently, and the
+disagreement would itself have been a signal -- though the classic
+result on multi-version redundancy is that even independently written
+implementations of one specification do not fail
+independently~\cite{knight_experimental_1986}, and here we have given up
+even the appearance of independence in exchange for comparability.
+The same source yields cheaper failures too: a stale reference to a
+superseded warhead-class table caused $168$ of $192$ covalent docks to
+fail, and shared staging plus contention for the same accelerators makes
+the approaches schedule-coupled as well as method-coupled.
+
+\emph{Coupled parameters force compromises on individual approaches.}
+One protocol means neither covalent approach runs the protocol best
+suited to itself.
+The adduct-form transform is essential for $T_4$ and a no-op for $T_3$'s
+acrylamide, yet $T_3$ carries the code path anyway -- deliberately,
+since a second code path is exactly how two approaches drift apart.
+Ranking within warhead class is necessary for $T_4$, whose classes dock
+under different constraints and differ in size, and vacuous for
+single-warhead $T_3$.
+More seriously, a gate calibrated on one approach's chemistry is not
+neutral toward another.
+The covalent reactivity window is anchored on verified Pin1 covalent
+actives that are all chloroacetamides, sulfamates or sulfonates -- one
+chemical family -- and it excludes acrylamide, $T_3$'s expert-chosen
+warhead, by $0.106$\,eV against a $0.5$\,eV tolerance we chose
+ourselves.
+Since computed electrophilicity is a weak proxy for measured labelling
+kinetics~\cite{flanagan_chemical_2014}, the window flags rather than
+vetoes, and flagged candidates proceed with their evidence attached.
+That resolves the instance; it does not remove the structural hazard,
+which is that shared evidence is never neutral between approaches that
+occupy different regions of chemical space.
+
+\emph{Convergence is weaker evidence than it looks.}
+The deepest cost concerns the very thing simultaneity is supposed to
+deliver.
+Structural convergence -- a molecule surfaced by more than one approach
+-- is offered as soft cross-validation needing no shared units.
+But all four approaches dock into the same receptor under related
+protocols and are annotated against the same reference set, so their
+errors are correlated, and two approaches agreeing may report a shared
+docking bias rather than a real signal.
+This is the known limitation of consensus scoring, whose benefit derives
+from the \emph{independence} of the combined methods: the classic
+idealized analysis attributes consensus gains to the cancellation of
+independent random error~\cite{wang_how_2001,charifson_consensus_1999},
+and subsequent work finds that combining correlated scoring functions
+delivers less than the independence assumption
+implies~\cite{feher_consensus_2006,oda_comparison_2006,houston_consensus_2013}.
+The same result appears in ensemble learning, where accuracy gains track
+the diversity of the base
+learners~\cite{dietterich_ensemble_2000,kuncheva_measures_2003}, and in
+assay practice, where confirmation is sought from an orthogonal readout
+rather than a replicate of the same
+one~\cite{thorne_apparent_2010}.
+Three things preserve part of convergence's value here.
+$T_1$ is seed-free, so its agreement with a seeded approach is not
+ancestral.
+$T_3$ and $T_4$ propose a different mechanism from $T_1$ and $T_2$ --
+covalent engagement of Cys113 rather than reversible occupancy -- so
+agreement across that boundary crosses a real methodological divide.
+And convergence is presented as an aid to a human reader rather than
+folded into a forced consensus ranking; the four approaches report
+incommensurable metrics and are displayed side by side with their gate
+verdicts, which is the honest response to correlated evidence.
+
+\emph{Does simultaneity harm the search?}
+On the evidence of this build it does not harm the \emph{coverage} of
+the search -- the seed allocation and the $T_3$/$T_4$ division of labour
+widen it, and both are only possible under joint planning -- but it does
+weaken the \emph{independence} of the search's internal checks.
+Convergence between approaches is worth less here than the same
+convergence would be worth between four separately implemented
+pipelines, and we do not claim otherwise.
+The mitigations are partial by construction: a seed-free approach and a
+mechanistic split reduce correlation without eliminating it, and no
+arrangement of a shared receptor and a shared scoring function makes
+four approaches independent.
+The choreography trades a weaker cross-validation signal for a stronger
+set of shared controls and a genuinely comparable integration, and the
+shared controls are the part we can measure.
