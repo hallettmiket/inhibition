@@ -237,3 +237,43 @@ def test_shared_identities_rank_as_one_molecule():
     short = s[s.shortlist]
     assert short.dock_id.nunique() == 3, "a quota of 3 must be 3 distinct molecules"
     assert len(short) == 9, "every route to a shortlisted molecule is carried"
+
+
+def test_a_negative_verdict_needs_the_same_power_as_a_positive_one():
+    """The power floor must govern FAIL, not just STRONG.
+
+    It did not. The FAIL branch sat above the floor, so a damning verdict could
+    be returned from evidence the same function would refuse to call STRONG. The
+    MM-GBSA gate hit this with ONE active: ROC-AUC 0.140, CI [0.040, 0.240],
+    graded FAIL — "demonstrably anti-correlated with known actives".
+
+    With one active, ROC-AUC is just that molecule's rank among the decoys and
+    the bootstrap resamples the same active every time, so the interval looks
+    tight precisely because between-active variation cannot enter it.
+    """
+    from shared import enrichment_gate as eg
+
+    underpowered = eg.GateResult(
+        metric="mmgbsa_dG", stratum="covalent", higher_is_better=False,
+        n_actives=1, n_decoys=50, n_chemotypes=1,
+        roc_auc=0.140, roc_auc_ci=(0.040, 0.240), ef_1pct=0.0, bedroc=0.0,
+        per_chemotype_auc={})
+    verdict, reasons = eg._verdict(underpowered, {})
+    assert verdict == "UNDERPOWERED", (
+        "a below-chance point estimate from ONE active must not be graded FAIL")
+    assert any("1 active" in r for r in reasons)
+    # The number is still reported — suppressing it would be the opposite error.
+    assert any("BELOW chance" in r for r in reasons)
+
+
+def test_fail_is_still_reachable_with_adequate_power():
+    """The floor must not make FAIL unreachable — that would be its own defect."""
+    from shared import enrichment_gate as eg
+
+    powered = eg.GateResult(
+        metric="affinity_kcal", stratum="covalent", higher_is_better=False,
+        n_actives=12, n_decoys=500, n_chemotypes=7,
+        roc_auc=0.21, roc_auc_ci=(0.11, 0.32), ef_1pct=0.0, bedroc=0.0,
+        per_chemotype_auc={})
+    verdict, _ = eg._verdict(powered, {})
+    assert verdict == "FAIL"

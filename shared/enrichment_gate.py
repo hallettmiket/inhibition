@@ -194,20 +194,49 @@ class GateResult:
 
 
 def _verdict(res: GateResult, thresholds: dict) -> tuple[str, list[str]]:
-    """Grade the evidence. Power is checked BEFORE the point estimates."""
+    """Grade the evidence. Power is checked BEFORE the point estimates.
+
+    THE POWER FLOOR GOVERNS **FAIL** TOO. It did not: the FAIL branch sat above
+    the floor, so a damning verdict could be returned from evidence the same
+    function would refuse to call STRONG. The MM-GBSA gate hit this with ONE
+    active — ROC-AUC 0.140, CI [0.040, 0.240], graded FAIL, "demonstrably
+    anti-correlated with known actives".
+
+    With a single active that interval is not what it appears to be. ROC-AUC
+    reduces to the fraction of decoys that one molecule beats, and bootstrapping
+    resamples the same active every time, so the CI describes only decoy
+    sampling. It looks tight precisely because the quantity that actually
+    matters — variation between actives — has no way to enter it.
+
+    A negative claim needs at least as much power as a positive one. Below the
+    floor the honest verdict is UNDERPOWERED in BOTH directions.
+    """
     reasons: list[str] = []
     min_ct = thresholds.get("min_independent_chemotypes_for_verdict", 6)
+    min_act = thresholds.get("min_actives_for_verdict", 3)
+
+    underpowered = []
+    if res.n_actives < min_act:
+        underpowered.append(
+            f"{res.n_actives} active(s) < {min_act} required; with so few, "
+            "ROC-AUC is the rank of individual molecules and its bootstrap CI "
+            "reflects only decoy resampling")
+    if res.n_chemotypes < min_ct:
+        underpowered.append(
+            f"{res.n_chemotypes} independent chemotypes < {min_ct} required; "
+            "no verdict above UNDERPOWERED can be claimed regardless of the point estimates")
+    if underpowered:
+        if res.roc_auc < 0.5 and res.roc_auc_ci[1] < 0.5:
+            underpowered.append(
+                f"the point estimate (ROC-AUC {res.roc_auc:.3f}, CI upper bound "
+                f"{res.roc_auc_ci[1]:.3f}) is BELOW chance and would grade FAIL "
+                "with adequate power — reported, not claimed")
+        return "UNDERPOWERED", underpowered
 
     if res.roc_auc < 0.5 and res.roc_auc_ci[1] < 0.5:
         return "FAIL", [
             f"ROC-AUC {res.roc_auc:.3f} with CI upper bound {res.roc_auc_ci[1]:.3f} "
-            "below 0.5 — docking is anti-correlated with known actives, not merely uninformative"]
-
-    if res.n_chemotypes < min_ct:
-        reasons.append(
-            f"{res.n_chemotypes} independent chemotypes < {min_ct} required; "
-            "no verdict above UNDERPOWERED can be claimed regardless of the point estimates")
-        return "UNDERPOWERED", reasons
+            "below 0.5 — anti-correlated with known actives, not merely uninformative"]
 
     if res.roc_auc_ci[0] <= 0.5:
         reasons.append(

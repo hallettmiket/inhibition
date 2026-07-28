@@ -57,6 +57,14 @@ enrichment_gate:
     # UNDERPOWERED can be claimed regardless of the point estimates.
     min_independent_chemotypes_for_verdict: 6
 
+    # A NEGATIVE VERDICT NEEDS THE SAME POWER AS A POSITIVE ONE.
+    # With one active, ROC-AUC is just that molecule's rank among the
+    # decoys, and its bootstrap CI resamples only decoys — so the interval
+    # looks tight because between-active variation cannot enter it. Below
+    # this floor the verdict is UNDERPOWERED in BOTH directions, and a
+    # below-chance point estimate is reported rather than claimed.
+    min_actives_for_verdict: 3
+
   # Analog bias: six actives that are three chemotypes must be reported as
   # three. Leave-one-chemotype-out prevents a cluster of close analogs ranking
   # well from being counted as several independent successes.
