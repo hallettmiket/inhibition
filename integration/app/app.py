@@ -159,12 +159,16 @@ def panel_dossier() -> None:
         a, b = st.columns(2)
         with a:
             st.markdown("**As synthesised** (pre-reaction)")
-            st.markdown(depict.svg(row["canonical_smiles"], highlight_smarts=hl),
-                        unsafe_allow_html=True)
+            _img = depict.png(row["canonical_smiles"], highlight_smarts=hl,
+                              width=420, height=320)
+            if _img:
+                st.image(_img)
             st.caption("Warhead highlighted. This is the molecule a chemist makes.")
         with b:
             st.markdown("**As docked** (adduct form)")
-            st.markdown(depict.svg(row["adduct_smiles"]), unsafe_allow_html=True)
+            _img = depict.png(row["adduct_smiles"], width=420, height=320)
+            if _img:
+                st.image(_img)
             lg = row.get("leaving_group_smiles")
             st.caption(
                 f"Post-reaction species (D0022/D0030). Leaving group `{lg}` is "
@@ -172,8 +176,9 @@ def panel_dossier() -> None:
                 "Post-reaction species (D0022/D0030). Nothing leaves in a "
                 "Michael addition.")
     else:
-        st.markdown(depict.svg(row["canonical_smiles"], width=420, height=320),
-                    unsafe_allow_html=True)
+        _img = depict.png(row["canonical_smiles"], width=520, height=400)
+        if _img:
+            st.image(_img)
 
     # --- SMILES -----------------------------------------------------------
     st.markdown("**SMILES**")
