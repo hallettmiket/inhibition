@@ -68,7 +68,8 @@ def main() -> None:
         experiment=EXPERIMENT, approach="t4", frame_prefix="D4",
         limit=args.limit, results_name=args.results_name, gpus=gpus)
 
-    print(f"\nT_4 covalent docking -> {out}")
+    print(f"\nT_4 covalent docking -> "
+          f"{out if out else '(no frame written — partial run)'}")
     print(f"  docked successfully {n_docked} / {len(survivors)}")
     print(f"  protocol            {proto.version.strip()}")
     print(f"  fingerprint         {proto.fingerprint()[:16]}")

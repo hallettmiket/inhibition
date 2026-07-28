@@ -56,7 +56,8 @@ def main() -> None:
         experiment=EXPERIMENT, approach="t1", frame_prefix="D1",
         gpu=args.gpu, limit=args.limit)
 
-    print(f"\nT_1 (de novo, DiffSBDD) non-covalent docking -> {out}")
+    print(f"\nT_1 (de novo, DiffSBDD) non-covalent docking -> "
+          f"{out if out else '(no frame written — partial run)'}")
     print(f"  docked successfully {n_docked} / {len(survivors)}")
     print(f"  engine              Vina-GPU 2.1, search_depth {runner.SEARCH_DEPTH} (D0017)")
     print(f"  elapsed             {elapsed:.1f} s on GPU {args.gpu}")

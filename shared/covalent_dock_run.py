@@ -249,6 +249,17 @@ def run(*, experiment: str, approach: str, frame_prefix: str,
 
     n_docked = int(merged["affinity_kcal"].notna().sum()) \
         if "affinity_kcal" in merged else 0
+
+    # A --limit run is a smoke test: it docks a handful and nulls every other
+    # row's dock columns. Writing that to the frame series makes it the LATEST
+    # frame, and the next stage reads the latest. A 6-ligand smoke test did
+    # exactly this and broke the MM-GBSA launch three minutes later, which
+    # failed loudly on `None_docked.sdf`. Partial runs report and stop.
+    if limit:
+        log.warning("--limit %d: NOT writing a frame. A partial run must not "
+                    "become the latest frame for the next stage to read.", limit)
+        return merged, None, proto, survivors, n_docked
+
     out = dio.write_full_frame(
         merged, approach=approach, experiment=experiment,
         stage=f"{approach}_covalent_dock",

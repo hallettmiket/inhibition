@@ -54,7 +54,8 @@ def main() -> None:
         experiment=EXPERIMENT, approach="t3", frame_prefix="D3",
         limit=args.limit)
 
-    print(f"\nT_3 covalent docking -> {out}")
+    print(f"\nT_3 covalent docking -> "
+          f"{out if out else '(no frame written — partial run)'}")
     print(f"  docked successfully {n_docked} / {len(survivors)}")
     print(f"  protocol            {proto.version.strip()}")
     print(f"  fingerprint         {proto.fingerprint()[:16]}")

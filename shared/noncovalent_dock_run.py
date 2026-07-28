@@ -209,6 +209,13 @@ def run(*, experiment: str, approach: str, frame_prefix: str, gpu: int,
             "candidate_id in the frame or the results")
 
     n_docked = int(merged["vina_affinity"].notna().sum())
+
+    # See covalent_dock_run: a --limit run must not become the latest frame.
+    if limit:
+        log.warning("--limit %d: NOT writing a frame. A partial run must not "
+                    "become the latest frame for the next stage to read.", limit)
+        return merged, None, survivors, n_docked, elapsed
+
     out = dio.write_full_frame(
         merged, approach=approach, experiment=experiment,
         stage=f"{approach}_noncovalent_dock",

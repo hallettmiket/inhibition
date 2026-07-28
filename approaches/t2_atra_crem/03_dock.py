@@ -56,7 +56,8 @@ def main() -> None:
         experiment=EXPERIMENT, approach="t2", frame_prefix="D2",
         gpu=args.gpu, limit=args.limit)
 
-    print(f"\nT_2 (ATRA analogues, CReM) non-covalent docking -> {out}")
+    print(f"\nT_2 (ATRA analogues, CReM) non-covalent docking -> "
+          f"{out if out else '(no frame written — partial run)'}")
     print(f"  docked successfully {n_docked} / {len(survivors)}")
     print(f"  engine              Vina-GPU 2.1, search_depth {runner.SEARCH_DEPTH} (D0017)")
     print(f"  elapsed             {elapsed:.1f} s on GPU {args.gpu}")
