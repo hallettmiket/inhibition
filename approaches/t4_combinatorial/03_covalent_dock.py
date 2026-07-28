@@ -12,6 +12,25 @@ candidate so the integration phase can verify T_3 and T_4 really did use the
 same setup before offering a within-covalent comparison. "We both ran gnina" is
 not that claim.
 
+THE ADDUCT IS WHAT GETS DOCKED (D0022). gnina replaces an implicit hydrogen on
+the matched atom; it does not remove a leaving group. So each candidate is
+converted to its post-reaction form first — chlorine gone, sulfamate's twelve
+atoms gone — and the attachment SMARTS used is the one valid on that product.
+Docking the pre-reaction molecule scored a species that does not exist — the
+reactive carbon bonded to Cys113 while still holding its leaving group — and,
+where that group sat on a rigid ring, drove the halogen into Cys113's sulfur at
+distances down to 0.89 A.
+
+ONE DOCK PER DISTINCT ADDUCT. chloroacetamide, sulfamate_acetamide and
+sulfonate_acetamide are SN2 at the same CH2 and differ only in what leaves, so
+all three give an IDENTICAL adduct — verified for all 198 R-groups. Docking each
+separately would burn three times the GPU time to produce three copies of one
+number, and any spread between them would be pure search noise masquerading as a
+warhead difference. They are docked once and the result is mapped back to every
+class that shares it. The three classes' scores are then identical BY
+CONSTRUCTION, which is the honest representation: what distinguishes those
+warheads is kinetics, and that is the reactivity window's business, not docking's.
+
 RANK METRIC (D0015). gnina's Vina-style `affinity` (kcal/mol, LOWER better) is
 the rank metric, NOT `CNNaffinity`. The enrichment gate measured both on 6
 actives and 294 warhead-bearing decoys: affinity gave ROC-AUC 0.815 with a CI
@@ -31,6 +50,7 @@ rather than repeating hours of GPU time.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -48,8 +68,10 @@ RDLogger.DisableLog("rdApp.*")
 REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO))
 
+from shared import covalent_adduct as cad         # noqa: E402
 from shared import covalent_protocol as cp        # noqa: E402
 from shared import io as dio                      # noqa: E402
+from shared import warhead_library as wl          # noqa: E402
 
 log = logging.getLogger("t4-dock")
 
@@ -86,9 +108,9 @@ def _dock_one(job: dict) -> dict:
     """Embed and covalently dock one candidate on its assigned GPU."""
     os.environ["CUDA_VISIBLE_DEVICES"] = str(job["gpu"])
     wd = Path(job["workdir"])
-    lig = wd / f"{job['candidate_id']}.sdf"
+    lig = wd / f"{job['dock_id']}.sdf"
     try:
-        m = Chem.MolFromSmiles(job["canonical_smiles"])
+        m = Chem.MolFromSmiles(job["adduct_smiles"])
         if m is None:
             return {**job, "error": "unparseable"}
         m = Chem.AddHs(m)
@@ -102,7 +124,7 @@ def _dock_one(job: dict) -> dict:
         w = Chem.SDWriter(str(lig))
         w.write(m)
         w.close()
-        r = cp.dock(lig, wd / f"{job['candidate_id']}_docked.sdf",
+        r = cp.dock(lig, wd / f"{job['dock_id']}_docked.sdf",
                     job["warhead_class"], timeout_s=900)
         return {**job, **{k: r[k] for k in
                           ("cnn_affinity", "cnn_score", "affinity_kcal",
@@ -134,23 +156,62 @@ def main() -> None:
     survivors = df[df["rejected_at"].isna()].copy()
     if args.limit:
         survivors = survivors.head(args.limit)
-    log.info("%d survivors to dock (of %d in the frame)", len(survivors), len(df))
+    log.info("%d survivors (of %d in the frame)", len(survivors), len(df))
 
-    results_path = OUT_ROOT / "results.jsonl"
+    # --- adduct forms (D0022) -------------------------------------------------
+    lib = wl.load()
+    adduct_rows, adduct_failures = [], []
+    for _, r in survivors.iterrows():
+        try:
+            a = cad.to_adduct_form(r["canonical_smiles"], r["warhead_class"],
+                                   library=lib)
+        except cad.AdductError as exc:
+            adduct_failures.append((r["candidate_id"], str(exc)[:160]))
+            continue
+        adduct_rows.append({"candidate_id": r["candidate_id"],
+                            "warhead_class": r["warhead_class"], **a.as_dict()})
+    if adduct_failures:
+        log.warning("%d candidate(s) have no well-defined adduct form and will "
+                    "not be docked; first: %s", len(adduct_failures),
+                    adduct_failures[0])
+    adducts = pd.DataFrame(adduct_rows)
+    if adducts.empty:
+        raise SystemExit("no candidate produced an adduct form")
+
+    # One dock per (adduct, class). Class is part of the key because it selects
+    # the attachment SMARTS — but the three SN2 acetamides share BOTH the adduct
+    # and the SMARTS, so they collapse to a single dock and the result is mapped
+    # back to all three.
+    adducts["dock_id"] = adducts.apply(
+        lambda r: "d_" + hashlib.sha256(
+            f"{r['adduct_smiles']}|{r['adduct_attachment_smarts']}"
+            .encode("utf-8")).hexdigest()[:12], axis=1)
+    unique = adducts.drop_duplicates("dock_id")
+    log.info("%d survivors -> %d distinct adduct docks (%.1fx saving)",
+             len(adducts), len(unique), len(adducts) / max(len(unique), 1))
+    shared = (adducts.groupby("dock_id")["warhead_class"].nunique() > 1).sum()
+    if shared:
+        log.info("%d dock(s) are shared by more than one warhead class — their "
+                 "adducts are the same molecule", shared)
+
+    # A NEW results file, not a rewrite of the old one. `results.jsonl` holds the
+    # pre-D0022 run keyed on candidate_id; append-only means it stays where it is
+    # and stays readable, and nothing here has to delete under the data root.
+    results_path = OUT_ROOT / "results_adduct.jsonl"
     done: set[str] = set()
     if results_path.is_file():
         for line in results_path.read_text().splitlines():
             try:
-                done.add(json.loads(line)["candidate_id"])
-            except Exception:  # noqa: BLE001
+                done.add(json.loads(line)["dock_id"])
+            except Exception:  # noqa: BLE001 - pre-D0022 rows have no dock_id
                 continue
         log.info("resuming: %d already docked", len(done))
 
-    jobs = [{"candidate_id": r["candidate_id"],
-             "canonical_smiles": r["canonical_smiles"],
+    jobs = [{"dock_id": r["dock_id"],
+             "adduct_smiles": r["adduct_smiles"],
              "warhead_class": r["warhead_class"],
              "workdir": str(OUT_ROOT)}
-            for _, r in survivors.iterrows() if r["candidate_id"] not in done]
+            for _, r in unique.iterrows() if r["dock_id"] not in done]
     log.info("%d ligands to dock", len(jobs))
 
     n = 0
@@ -178,12 +239,22 @@ def main() -> None:
     dock_cols = ("cnn_affinity", "cnn_score", "affinity_kcal",
                  "cnn_uncalibrated_for_covalent", "protocol_fingerprint",
                  "pose_path")
-    keep = ["candidate_id"] + [c for c in dock_cols if c in docked.columns]
+    # Map each dock back onto every candidate that shares its adduct.
+    keep_dock = ["dock_id"] + [c for c in dock_cols if c in docked.columns]
+    adduct_cols = ["candidate_id", "dock_id", "adduct_smiles",
+                   "adduct_attachment_smarts", "leaving_group_smiles",
+                   "adduct_atoms_removed", "adduct_approximation",
+                   "adduct_degenerate_attachment"]
+    docked = (adducts[[c for c in adduct_cols if c in adducts.columns]]
+              .merge(docked[keep_dock].drop_duplicates("dock_id"),
+                     on="dock_id", how="left"))
+    keep = ["candidate_id"] + [c for c in docked.columns if c != "candidate_id"]
     # Drop any dock columns already on the frame BEFORE merging. Re-running this
     # stage on a frame that had been merged once produced affinity_kcal_x and
     # affinity_kcal_y, so `merged["affinity_kcal"]` did not exist and the
     # success counter reported 0/1683 on a run that had actually worked.
-    stale = [c for c in dock_cols if c in df.columns]
+    stale = [c for c in list(dock_cols) + [c for c in keep if c != "candidate_id"]
+             if c in df.columns]
     if stale:
         log.info("dropping %d stale dock column(s) before merge: %s",
                  len(stale), stale)

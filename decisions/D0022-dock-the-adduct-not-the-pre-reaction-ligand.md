@@ -16,8 +16,7 @@ affects:
   - approaches/t4_combinatorial/05_regiochemistry_comparison.py
   - decisions/D0021-regiochemistry-resolved-by-paired-docking.md
 evidence:
-  - 'every docked reactive carbon sits 1.81 A from Cys113 SG while retaining its leaving group — 5 bonds on carbon'
-  - 'chloroacetamide pose t4_5e235921c8c0: reactive C has 2 heavy neighbours + 2 H + the new S bond'
+  - 'every docked reactive carbon sits 1.81 A from Cys113 SG while STILL CARRYING its leaving group — the docked molecule is not the adduct'
   - 'clash rates (leaving-group atom within 2.5 A of SG): bdhi_c5 67.9%, snar_chloroazine 55.6%, bdhi_c4 47.1%, chloroacetamide 0%'
   - 'shortest observed contact 0.89 A (Cl to SG, snar_chloroazine top-ranked pose)'
   - 'chloroacetamide, sulfamate_acetamide and sulfonate_acetamide yield ONE identical adduct — their docking spread is leaving-group artifact'
@@ -35,9 +34,20 @@ documentation says nothing either way about how the ligand should be prepared �
 so the convention had to be established from the output, and the output is
 unambiguous.
 
-We supplied the intact, pre-reaction ligand. The reactive carbon therefore
-already had a full valence, and gnina added the S–C bond on top of it. **Every
-one of the 1,683 docked complexes contains a pentavalent carbon.**
+We supplied the intact, pre-reaction ligand. **Every one of the 1,683 docked
+complexes therefore contains a molecule that does not exist**: the reactive
+carbon sits 1.81 Å from Cys113's sulfur while still carrying the leaving group
+it is supposed to have lost. For chloroacetamide that is an α-chloro thioether;
+the real adduct has no chlorine on that carbon at all.
+
+*Correction, same day.* An earlier version of this record asserted the docked
+carbon was pentavalent. That is not established and should not be relied on.
+gnina writes only polar hydrogens into its output — 1 of 24 survives for
+chloroacetamide `t4_5e235921c8c0`, the imidazoline N–H — and it does not record
+the S–C bond in the SDF at all, so the file cannot say whether a hydrogen was
+displaced. Both readings are wrong molecules and both justify the same remedy,
+but the specific pentavalence claim was not supported by the evidence cited for
+it. What is certain is the retained leaving group and the geometry below.
 
 For a leaving group on a flexible sp3 carbon this is survivable. Chloroacetamide
 puts its chlorine a median 2.93 Å from SG and not one of its 187 poses clashes —

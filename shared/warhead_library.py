@@ -45,7 +45,7 @@ from . import smiles as smi
 log = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_LIBRARY = _REPO_ROOT / "data" / "reference" / "warhead_classes_3.csv"
+DEFAULT_LIBRARY = _REPO_ROOT / "data" / "reference" / "warhead_classes_4.csv"
 
 UNRESOLVED = "UNRESOLVED"
 
@@ -68,6 +68,11 @@ REQUIRED_COLUMNS = {
     "precedent",
     "structure_status",
     "structure_source",
+    # v4 (D0022): what gnina must actually be given. `reactive_atom_smarts`
+    # describes the UNREACTED warhead and names its leaving group, so it cannot
+    # match the adduct; docking needs a pattern valid on the product.
+    "adduct_attachment_smarts",
+    "has_leaving_group",
 }
 
 

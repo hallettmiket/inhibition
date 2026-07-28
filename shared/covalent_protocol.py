@@ -147,13 +147,27 @@ def assert_covalent_flags() -> list[str]:
     return required
 
 
+LIGAND_FORM = "adduct"   # D0022; part of the fingerprint
+
+
 def load_warhead_smarts() -> dict[str, str]:
-    """Per-warhead-class reactive-atom SMARTS, from the warhead library.
+    """Per-warhead-class ADDUCT attachment SMARTS, from the warhead library.
 
     The reactive atom differs by MECHANISM — SN2 displacement, Michael addition,
     SN2 ring-opening each mark a different atom. One generic covalent constraint
     applied uniformly would be chemically wrong for most classes, so the SMARTS
     is carried per class in the reference data and read from there.
+
+    THIS RETURNS `adduct_attachment_smarts`, NOT `reactive_atom_smarts` (D0022).
+    The reactive-atom pattern describes the UNREACTED warhead and names its
+    leaving group — `[CH2][Cl]`, `[c]([Cl])[n]` — so it cannot match the
+    post-reaction ligand. Docking through it meant scoring a molecule that does not
+    exist: the reactive carbon bonded to Cys113 while still carrying its leaving
+    group.
+
+    The reactive-atom pattern is still the right one for the 5b validity gate,
+    which asks whether the *unreacted* warhead is a genuine electrophile. The two
+    patterns answer different questions and both stay in the library.
     """
     # Read through warhead_library rather than naming a version here. A
     # hardcoded `warhead_classes_2.csv` silently desynchronised this module from
@@ -163,9 +177,9 @@ def load_warhead_smarts() -> dict[str, str]:
     from . import warhead_library as wl
 
     df = wl.load()
-    return {str(r["class_id"]): str(r["reactive_atom_smarts"])
+    return {str(r["class_id"]): str(r["adduct_attachment_smarts"])
             for _, r in df.iterrows()
-            if str(r.get("reactive_atom_smarts", "")).strip()}
+            if str(r.get("adduct_attachment_smarts", "")).strip()}
 
 
 def receptor_atom() -> str:
@@ -196,6 +210,7 @@ class CovalentProtocol:
             "binary_sha256": self.binary_sha256,
             "receptor_atom": self.receptor_atom,
             "warhead_smarts": dict(sorted(self.warhead_smarts.items())),
+            "ligand_form": LIGAND_FORM,
             "params": self.params.__dict__,
         }, sort_keys=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -203,6 +218,7 @@ class CovalentProtocol:
     def to_dict(self) -> dict:
         return {"version": self.version, "binary_sha256": self.binary_sha256,
                 "receptor_atom": self.receptor_atom,
+                "ligand_form": LIGAND_FORM,
                 "warhead_smarts": self.warhead_smarts,
                 "params": self.params.__dict__,
                 "fingerprint": self.fingerprint()}
