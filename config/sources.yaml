@@ -60,17 +60,27 @@ sources:
       because the plan's install note is stale.
 
   reinvent_priors:
-    description: "REINVENT 4 prior models — libinvent prior needed by T_3"
+    description: "REINVENT 4 libinvent prior — the generative model behind T_3"
     kind: http
-    url: null               # pick the libinvent prior from the Zenodo record
-    dest: /data/lab_vm/immutable/inhibition/weights/reinvent_priors/
+    url: "https://zenodo.org/api/records/20701824/files/libinvent.prior/content"
+    dest: /data/lab_vm/immutable/inhibition/weights/reinvent_priors/libinvent.prior
     required_by: [t3]
     license: Apache-2.0
     notes: >
-      NOT YET ACQUIRED. Priors are NOT bundled with the REINVENT repo; they live
-      on Zenodo (doi 10.5281/zenodo.15641296). T_3 runs libinvent mode, so the
-      libinvent prior specifically is required. Which prior is a decision worth
-      recording, not a default.
+      Priors are NOT bundled with the REINVENT repo; they live on Zenodo under
+      concept DOI 10.5281/zenodo.15641296, which resolves to record 20701824
+      (version DOI 10.5281/zenodo.20701824). A concept DOI always points at the
+      newest version, so the RECORD id is pinned here instead — otherwise a new
+      upstream release would silently change the model underneath a published
+      result, which is the failure sources.lock.json exists to prevent.
+
+      The record carries seven priors. T_3 needs `libinvent.prior` (94.8 MB):
+      it decorates a FIXED sulfopin scaffold at defined attachment points,
+      which is exactly LibInvent's task. The reinvent/pubchem priors generate
+      whole molecules de novo (that is T_1's job, and T_1 uses a
+      structure-conditioned model instead), and linkinvent joins two fragments
+      with a linker, a different problem. Which prior is a scientific decision,
+      not a default.
 
   gnina:
     description: "gnina covalent docking binary — the ONE tool T_3 and T_4 share"

@@ -20,6 +20,9 @@
     },
     "reinvent4_repo": {
       "commit": "04de385d33f95e97f3960b5c4184a0c0bd3ad7f8"
+    },
+    "reinvent_priors": {
+      "sha256": "03e6cbe8a53e59a4ac3aa6728d041f1957bdd07b5eefdf2cfc5c8591036075af"
     }
   }
 }
