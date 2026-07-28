@@ -29,7 +29,15 @@ log = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DIR = _REPO_ROOT / "decisions"
 
-VALID_STATUS = {"proposed", "accepted", "superseded", "rejected"}
+# `partially_withdrawn` exists because a decision can cover two independent
+# calls and have exactly one of them undermined. D0021 decided two
+# regiochemistries on shared evidence; a defect in that evidence invalidated one
+# and left the other untouched. Forcing it to `superseded` would discard a
+# conclusion that still holds, and leaving it `accepted` would keep advertising
+# one that does not. Records in this state MUST carry a withdrawal notice naming
+# what is withdrawn and what stands.
+VALID_STATUS = {"proposed", "accepted", "superseded", "rejected",
+                "partially_withdrawn"}
 VALID_APPROACH = {"shared", "t1", "t2", "t3", "t4", "integration"}
 VALID_ORIGIN = {"spec", "adversary", "implementation", "user"}
 REQUIRED_FIELDS = {"id", "title", "date", "status", "approach"}

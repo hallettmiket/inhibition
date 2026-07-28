@@ -2,7 +2,7 @@
 id: D0021
 title: BDHI and naphthoquinone attachment points resolved by paired docking
 date: 2026-07-27
-status: accepted
+status: partially_withdrawn
 approach: t4
 decided_by: '@mhallet'
 origin: implementation
@@ -23,6 +23,36 @@ evidence:
   - 'all four classes are paired on the SAME 187 R-groups, so the comparison is matched'
 runbook: null
 ---
+
+## WITHDRAWAL NOTICE (2026-07-27, same day)
+
+**The BDHI half of this decision is withdrawn. The naphthoquinone half stands.**
+
+Preparing the MM-GBSA input revealed that gnina was docking the **pre-reaction**
+ligand: the leaving group was never removed, so gnina formed the S–C bond onto a
+carbon whose valence was already full. Every docked reactive carbon has five
+bonds. See D0022.
+
+For a leaving group on a flexible sp3 carbon this is survivable — chloroacetamide
+puts its chlorine a median 2.93 Å from SG and **0%** of its poses clash. For a
+leaving group on a rigid sp2/aromatic carbon it is not: the ring geometry fixes
+the C–halogen direction, so bonding S to that carbon drives the halogen into the
+sulfur.
+
+- `bdhi_c5`: halogen a median **1.63 Å** from SG, **68%** of poses clashing
+- `bdhi_c4`: **47%** clashing
+- `snar_chloroazine`: **56%** clashing, with contacts as short as 0.89 Å
+
+**Both BDHI arms are contaminated, and the arm that won has the worse clash
+rate.** The pose-success endpoint that decided it cannot be distinguished from a
+clash artifact. The BDHI call is withdrawn pending a re-dock on adduct-form
+ligands.
+
+**The naphthoquinone call stands.** Both arms are Michael acceptors with no
+leaving group at all, so neither is affected: 0% clash for `naphthoquinone_benzo`
+and 3.2% for `naphthoquinone_c2`. The C2-versus-benzo comparison was between two
+ligands of identical composition, and the 97%-no-pose result for C2 reflects the
+geometry it was measuring.
 
 ## Context
 
