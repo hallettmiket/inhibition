@@ -343,7 +343,23 @@ def write_token(results: list[GateResult], token_path: Path | None = None) -> Pa
     p = token_path or TOKEN_DEFAULT
     p.parent.mkdir(parents=True, exist_ok=True)
 
+    # MERGE, DO NOT REPLACE. This used to rebuild the payload from only the
+    # current run's results, so `run_enrichment_gate.py covalent` deleted the
+    # non_covalent verdict — the one T_1 and T_2 read before ranking. Nothing
+    # errored; their ranking stage just reported UNGATED, which reads like "no
+    # gate was ever run" rather than "another run erased it". A stratum absent
+    # from THIS run keeps the verdict it already had.
     by_stratum: dict[str, dict] = {}
+    if p.is_file():
+        try:
+            by_stratum = json.loads(p.read_text(encoding="utf-8")).get("strata", {})
+            log.info("merging into existing token (strata present: %s)",
+                     sorted(by_stratum))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("existing token unreadable (%s); starting fresh", exc)
+            by_stratum = {}
+    for s in {r.stratum for r in results}:
+        by_stratum.pop(s, None)          # this run supersedes its own strata
     for r in results:
         s = by_stratum.setdefault(r.stratum, {"metrics": {}})
         s["metrics"][r.metric] = r.to_dict()
