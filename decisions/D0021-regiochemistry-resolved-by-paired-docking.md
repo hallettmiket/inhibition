@@ -2,12 +2,12 @@
 id: D0021
 title: BDHI and naphthoquinone attachment points resolved by paired docking
 date: 2026-07-27
-status: partially_withdrawn
+status: superseded
 approach: t4
 decided_by: '@mhallet'
 origin: implementation
 supersedes: []
-superseded_by: null
+superseded_by: D0024
 affects:
   - approaches/t4_combinatorial/05_regiochemistry_comparison.py
   - config/approaches/t4_combinatorial.yaml
@@ -23,6 +23,34 @@ evidence:
   - 'all four classes are paired on the SAME 187 R-groups, so the comparison is matched'
 runbook: null
 ---
+
+## RESOLUTION AFTER RE-DOCK (2026-07-27, same day)
+
+The re-dock on adduct-form ligands is done, and **the BDHI call reverses**.
+
+| | old (pre-reaction) | new (adduct) |
+|---|---|---|
+| `bdhi_c4` median | +0.01 | **−3.79** |
+| `bdhi_c5` median | −2.22 | −2.87 |
+| `bdhi_c4` no-pose | 50% | **14%** |
+| `bdhi_c5` no-pose | 37% | 20% |
+
+**Carry `bdhi_c4`, drop `bdhi_c5`** — the opposite of what this record originally
+concluded. Verdict **UNDERPOWERED**: the affinity difference is real
+(median −0.58 kcal/mol, p = 0.0035) but modest, and the pose-success endpoint no
+longer separates the arms at all (18 vs 29 discordant pairs, p = 0.14). With the
+clash artifact gone, most poses now succeed in both arms, so the binary endpoint
+has little left to discriminate. Treat as a weak preference, not a finding.
+
+The original call was an artifact, and the artifact was large enough to invert
+the answer. Note it did so through the *loser*: `bdhi_c4`'s retained bromine
+blocked half its poses, which read as a geometric failure of the C4 attachment
+when it was really a failure to remove a leaving group.
+
+**Naphthoquinone is unchanged and remains STRONG** — benzo over C2, 69 discordant
+pairs against 6, p = 1.2e-14. This is what the withdrawal notice predicted:
+Michael acceptors carry no leaving group, so nothing about that comparison could
+move. The prediction holding is mild evidence the diagnosis was right.
 
 ## WITHDRAWAL NOTICE (2026-07-27, same day)
 

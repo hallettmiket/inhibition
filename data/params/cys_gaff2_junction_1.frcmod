@@ -1,0 +1,28 @@
+Cys-SG to GAFF2 ligand junction (D0023). ff19SB type S meets GAFF2 type c3;
+no force field covers that bond, so each term is taken from its closest
+same-chemistry analogue in the two parent force fields. Every line cites its
+source.
+
+MASS
+
+BOND
+S -c3  227.0    1.8100   from ff19SB S-2C (the Cys CB-SG bond itself)
+
+ANGLE
+2C-S -c3    62.0       98.90   from parm19 CT-S-CT (methionine thioether)
+S -c3-hc    50.0      109.50   from parm19 H1-CT-S (cysteine)
+S -c3-c     50.0      114.70   from parm19 CT-CT-S (cystine)
+S -c3-c3    50.0      114.70   from parm19 CT-CT-S
+S -c3-ca    50.0      114.70   from parm19 CT-CT-S
+S -ca-ca    50.0      120.00   sp2 ring carbon, idealised trigonal
+2C-S -ca    62.0       98.90   from parm19 CT-S-CT
+S -c3-n     50.0      114.70   from parm19 CT-CT-S
+S -c3-os    50.0      114.70   from parm19 CT-CT-S
+
+DIHE
+X -c3-S -X    3    1.00          0.0             3.   from parm19 X-CT-S-X
+X -ca-S -X    2    1.00          0.0             2.   from parm19 X-CT-S-X, sp2
+
+IMPROPER
+
+NONBON
