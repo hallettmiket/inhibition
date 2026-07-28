@@ -40,6 +40,7 @@ import sys
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+from shared import covalent_adduct as cad           # noqa: E402
 from shared import covalent_protocol as cp          # noqa: E402
 from shared import enrichment_gate as eg            # noqa: E402
 from shared import reference_set as rs              # noqa: E402
@@ -133,10 +134,26 @@ def embed_3d(smiles: str, out_sdf: Path, seed: int = 42) -> bool:
 
 
 def _dock_covalent(job: dict) -> dict:
-    """One covalent dock. Runs in a worker process, pinned to one GPU."""
+    """One covalent dock. Runs in a worker process, pinned to one GPU.
+
+    THE GATE MUST DOCK WHAT THE APPROACHES DOCK (D0022). Actives and decoys are
+    converted to adduct form here through the same `shared.covalent_adduct`
+    transform T_3 and T_4 use. A gate that validated the pre-reaction form while
+    the approaches docked adducts would be grading a protocol nobody runs --
+    which is the same failure the module docstring warns about, arriving through
+    the ligand rather than the tool.
+
+    This is not optional bookkeeping: the protocol now serves the ADDUCT
+    attachment SMARTS, which cannot match a pre-reaction ligand, so the old path
+    would fail outright rather than quietly mis-score.
+    """
     os.environ["CUDA_VISIBLE_DEVICES"] = str(job["gpu"])
     lig = Path(job["workdir"]) / f"{job['id']}.sdf"
-    if not embed_3d(job["smiles"], lig):
+    try:
+        adduct = cad.to_adduct_form(job["smiles"], job["warhead_class"])
+    except cad.AdductError as exc:
+        return {**job, "error": f"adduct: {str(exc)[:200]}"}
+    if not embed_3d(adduct.adduct_smiles, lig):
         return {**job, "error": "embed_failed"}
     try:
         r = cp.dock(lig, Path(job["workdir"]) / f"{job['id']}_docked.sdf",
@@ -219,7 +236,11 @@ def run_stratum(stratum: str) -> pd.DataFrame:
     """Dock a whole stratum, resumably, and return the scored frame."""
     workdir = OUT_ROOT / stratum
     workdir.mkdir(parents=True, exist_ok=True)
-    results_path = workdir / "results.jsonl"
+    # A NEW results file per ligand form (D0022). `results.jsonl` holds the
+    # pre-reaction run; reusing it would silently resume onto the old docks and
+    # report the old gate under a new protocol fingerprint. Append-only means it
+    # stays where it is.
+    results_path = workdir / f"results_{cp.LIGAND_FORM}.jsonl"
 
     done: set[str] = set()
     if results_path.is_file():

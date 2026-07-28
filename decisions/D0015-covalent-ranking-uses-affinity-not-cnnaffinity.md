@@ -2,12 +2,12 @@
 id: D0015
 title: Covalent ranking uses gnina affinity, not CNNaffinity
 date: 2026-07-27
-status: accepted
+status: partially_withdrawn
 approach: shared
 decided_by: '@mhallet'
 origin: implementation
 supersedes: []
-superseded_by: null
+superseded_by: null   # justification revised by D0028
 affects:
   - config/choreography.yaml
   - shared/covalent_protocol.py
@@ -21,6 +21,20 @@ evidence:
   - 'both verdicts capped at UNDERPOWERED by the 4-chemotype floor'
 runbook: null
 ---
+
+## REVISION NOTICE (2026-07-28, D0028)
+
+**The conclusion stands; the evidence below does not.** Re-measuring on
+adduct-form ligands (D0022) gives `affinity_kcal` ROC-AUC **0.718** with a CI of
+**[0.483, 0.944] that INCLUDES 0.5** — where this record cites 0.815 with an
+interval that excluded it. The excluded-interval comparison was this decision's
+stated reason for preferring affinity over CNNaffinity, and it is gone.
+
+`affinity_kcal` remains the rank metric because it still beats CNNaffinity on
+every statistic (AUC 0.718 vs 0.392, EF1% 19.0 vs 0.0, BEDROC 0.333 vs 0.146)
+and because gnina warns CNN scoring is uncalibrated for covalent docking. Do not
+cite the interval. See D0028, which also documents a class-imbalance confound in
+the decoy set affecting both measurements.
 
 ## Context
 
