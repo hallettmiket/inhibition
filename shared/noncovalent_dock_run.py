@@ -65,9 +65,11 @@ OBABEL = "/data/lab_vm/envs/dwi_cheminf/bin/obabel"
 SEARCH_DEPTH = 20      # D0017 — the adoption evidence does not hold below this
 THREADS = 8000
 NICE = 19
-# The lab cap on CPU cores. Ligand prep is embarrassingly parallel and would
-# happily take all 224.
-MAX_PREP_WORKERS = 20
+# Ligand prep is embarrassingly parallel and would happily take all 224 cores.
+# The project budget lives in shared/compute.py (raised to 50 by @mhallet on
+# 2026-07-28).
+from . import compute                             # noqa: E402
+MAX_PREP_WORKERS = compute.MAX_CPU_WORKERS
 
 _RESULT_RE = re.compile(r"REMARK VINA RESULT:\s*(-?\d+\.\d+)")
 

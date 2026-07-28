@@ -39,6 +39,7 @@ import pandas as pd
 REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO))
 
+from shared import compute                      # noqa: E402
 from shared import mmgbsa_run as runner          # noqa: E402
 
 log = logging.getLogger("t3-mmgbsa")
@@ -49,7 +50,9 @@ EXPERIMENT = "03_t3_reinvent"
 def main() -> None:
     ap = argparse.ArgumentParser(description="T_3 step 5: covalent MM-GBSA.")
     ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--workers", type=int, default=compute.MAX_CPU_WORKERS,
+                    help="concurrent candidates; the project budget "
+                         "lives in shared/compute.py")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO,
                         format="%(levelname)s %(name)s: %(message)s")

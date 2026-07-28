@@ -37,6 +37,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from . import compute
 from . import io as dio
 from . import mmgbsa as mg
 from . import mmgbsa_noncovalent as mgn
@@ -106,7 +107,7 @@ def score_one(job: dict) -> dict:
 
 
 def run(*, experiment: str, approach: str, work_dirname: str = "mmgbsa_2",
-        workers: int = 6, limit: int | None = None):
+        workers: int = compute.MAX_CPU_WORKERS, limit: int | None = None):
     """Score one approach's shortlist and merge the result onto its frame."""
     data = DATA_ROOT / experiment
     work_root = data / work_dirname
@@ -236,7 +237,7 @@ def score_one_covalent(job: dict) -> dict:
 
 
 def run_covalent(*, experiment: str, approach: str, work_dirname: str = "mmgbsa",
-                 workers: int = 6, limit: int | None = None,
+                 workers: int = compute.MAX_CPU_WORKERS, limit: int | None = None,
                  classes: set[str] | None = None):
     """Score one covalent approach's shortlist, one system per MOLECULE.
 

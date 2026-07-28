@@ -55,6 +55,7 @@ import pandas as pd
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+from shared import compute                         # noqa: E402
 from shared import covalent_adduct as cad          # noqa: E402
 from shared import enrichment_gate as eg           # noqa: E402
 from shared import mmgbsa as mg                    # noqa: E402
@@ -67,18 +68,13 @@ GATE_DIR = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate"
 RESULTS = GATE_DIR / "results_adduct_classmatched.jsonl"
 WORK_ROOT = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate"
                  "/mmgbsa_gate")
-NICE = 19
-
-# One thread per worker. antechamber's AM1-BCC step shells out to sqm, which is
-# OpenMP-threaded and will otherwise take every core on the machine.
-_SINGLE_THREAD = {"OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
-                  "OPENBLAS_NUM_THREADS": "1", "NUMEXPR_NUM_THREADS": "1"}
+NICE = compute.NICE
 
 
 def score_one(job: dict) -> dict:
     """MM-GBSA on one gate ligand, from the pose the gate already docked."""
     os.nice(NICE)
-    os.environ.update(_SINGLE_THREAD)
+    compute.pin_to_one_thread()
     wd = WORK_ROOT / job["id"]
     wd.mkdir(parents=True, exist_ok=True)
 
@@ -132,7 +128,7 @@ def load_jobs() -> list[dict]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--workers", type=int, default=compute.MAX_CPU_WORKERS)
     ap.add_argument("--limit", type=int, default=None)
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO,
