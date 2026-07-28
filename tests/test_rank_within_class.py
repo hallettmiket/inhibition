@@ -207,3 +207,33 @@ def test_one_stratum_run_does_not_erase_another(tmp_path):
     assert "covalent" in strata, "the run's own stratum must be written"
     assert "non_covalent" in strata, "the other stratum must survive the run"
     assert strata["non_covalent"]["metrics"]["vina_affinity"]["roc_auc"] == 0.535
+
+
+def test_shared_identities_rank_as_one_molecule():
+    """D0029, second act. A quota of 3 must mean three MOLECULES.
+
+    T_4 carries one row per (R-group, warhead route), and the three SN2
+    acetamides reach an identical adduct. Merging their classes removed the
+    duplication BETWEEN groups; this pins that it is also gone WITHIN one.
+    Ranking rows gave `acetamide_adduct` a top-3 of one molecule three times.
+    """
+    rows = []
+    for i in range(5):                       # 5 molecules, each via 3 routes
+        for route in ("chloroacetamide", "sulfamate_acetamide",
+                      "sulfonate_acetamide"):
+            rows.append(dict(adduct_class="acetamide_adduct", dock_id=f"d{i}",
+                             warhead_class=route, affinity_kcal=-9.0 + i,
+                             HAC=30, candidate_id=f"{route}_{i}"))
+    df = pd.DataFrame(rows)
+
+    r = rs.rank(df, metric="affinity_kcal", group_col="adduct_class",
+                min_docked=1, identity_col="dock_id")
+    # All three routes to one molecule share its rank.
+    assert r[r.dock_id == "d0"]["rank"].nunique() == 1
+    assert set(r["rank"].unique()) == {1, 2, 3, 4, 5}
+    assert r["group_n_docked"].iloc[0] == 5, "group size counts molecules, not rows"
+
+    s = rs.shortlist(r, quota=3)
+    short = s[s.shortlist]
+    assert short.dock_id.nunique() == 3, "a quota of 3 must be 3 distinct molecules"
+    assert len(short) == 9, "every route to a shortlisted molecule is carried"

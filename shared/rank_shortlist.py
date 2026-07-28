@@ -95,11 +95,19 @@ def attach_gate(df: pd.DataFrame, stratum: str, metric: str) -> pd.DataFrame:
 
 
 def rank(df: pd.DataFrame, *, metric: str, group_col: str | None,
-         min_docked: int) -> pd.DataFrame:
+         min_docked: int, identity_col: str | None = None) -> pd.DataFrame:
     """Rank within each group; add percentile, group size and ligand efficiency.
 
     `group_col=None` ranks the whole frame as one group, which is correct for
     T_1, T_2 and T_3 — none of them varies the warhead.
+
+    `identity_col` RANKS MOLECULES, NOT ROWS. T_4 carries one row per
+    (R-group, warhead route) but several routes reach the same adduct, so the
+    same molecule appears more than once inside a group. Ranking rows gave
+    `acetamide_adduct` a top-3 of one molecule listed three times — D0029's
+    defect surviving the fix for D0029, because merging the classes removed the
+    duplication BETWEEN groups and left it WITHIN one. Rows sharing an identity
+    receive the same rank, so a quota of 3 means three distinct molecules.
     """
     if metric not in LOWER_IS_BETTER:
         raise ValueError(
@@ -117,13 +125,24 @@ def rank(df: pd.DataFrame, *, metric: str, group_col: str | None,
         raise SystemExit(f"no row carries a {metric} value; nothing to rank")
 
     for grp, idx in out[docked].groupby("rank_group").groups.items():
-        sub = out.loc[idx].sort_values(metric, ascending=True)   # lower better
-        n = len(sub)
-        ranks = list(range(1, n + 1))
-        out.loc[sub.index, "rank"] = ranks
+        sub = out.loc[idx]
+        if identity_col:
+            # One entry per MOLECULE. Several rows may reach the same product by
+            # different synthetic routes; they are one candidate, not several.
+            best = (sub.groupby(identity_col)[metric].min()
+                    .sort_values(ascending=True))
+            n = len(best)
+            rank_of = {ident: r for r, ident in enumerate(best.index, start=1)}
+            ranks_series = sub[identity_col].map(rank_of)
+        else:
+            ordered = sub.sort_values(metric, ascending=True)
+            n = len(ordered)
+            ranks_series = pd.Series(range(1, n + 1), index=ordered.index)
+        out.loc[sub.index, "rank"] = ranks_series.reindex(sub.index)
         out.loc[sub.index, "group_n_docked"] = n
         out.loc[sub.index, "group_percentile"] = [
-            round(100.0 * (n - r) / (n - 1), 2) if n > 1 else 100.0 for r in ranks]
+            round(100.0 * (n - r) / (n - 1), 2) if n > 1 else 100.0
+            for r in ranks_series.reindex(sub.index)]
         out.loc[sub.index, "rank_is_selective"] = bool(n >= min_docked)
         if n < min_docked:
             log.warning("group %r has only %d successful docks (< %d): its rank "
@@ -159,7 +178,7 @@ def shortlist(df: pd.DataFrame, *, quota: int,
         if grp in exclude:
             log.info("group %r excluded from the shortlist by the caller", grp)
             continue
-        take = sub.sort_values("rank").head(quota)
+        take = sub[sub["rank"] <= quota]
         out.loc[take.index, "shortlist"] = True
         notes = []
         if "reactivity_flag" in sub.columns:

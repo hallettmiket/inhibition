@@ -61,7 +61,12 @@ def score_one(row: pd.Series, lib, receptor_cache: dict) -> dict:
 
     done = wd / "result.json"
     if done.is_file():                       # resumable: minutes per candidate
-        return json.loads(done.read_text())
+        cached = json.loads(done.read_text())
+        # Results written before D0029 carry no dock_id, and the merge is now on
+        # dock_id — without this they would rejoin as nulls and silently drop a
+        # candidate that had in fact been scored.
+        cached.setdefault("dock_id", row["dock_id"])
+        return cached
 
     pose = DOCK_ROOT / f"{row['dock_id']}_docked.sdf"
     if not pose.is_file():
@@ -76,7 +81,8 @@ def score_one(row: pd.Series, lib, receptor_cache: dict) -> dict:
 
     energies = {leg: mg.minimize_and_score(wd, leg)
                 for leg in ("complex", "receptor", "ligand")}
-    result = {"candidate_id": cid, "warhead_class": row["warhead_class"],
+    result = {"candidate_id": cid, "dock_id": row["dock_id"],
+              "warhead_class": row["warhead_class"],
               **mg.delta_g(energies), **{f"topology_{k}": v
                                          for k, v in verified.items()}}
     done.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -100,6 +106,18 @@ def main() -> None:
         raise SystemExit("frame has no dock_id — re-run 03_covalent_dock.py (D0022)")
 
     todo = df[df["shortlist"].fillna(False)].copy()
+    # ONE SYSTEM PER MOLECULE, NOT PER ROUTE (D0029). Three warhead classes reach
+    # an identical adduct, so the shortlist carries the same molecule up to three
+    # times. Scoring each row minimised the SAME 2,400-atom system repeatedly:
+    # candidates 1 and 4 of the previous run produced byte-identical inputs and a
+    # complex energy equal to the decimal. The result is mapped back to every
+    # route afterwards.
+    n_rows = len(todo)
+    todo = todo.drop_duplicates("dock_id")
+    if len(todo) != n_rows:
+        log.info("%d shortlisted rows -> %d distinct molecules; %d duplicate "
+                 "route(s) will reuse their molecule's result (D0029)",
+                 n_rows, len(todo), n_rows - len(todo))
     if args.classes:
         keep = {c.strip() for c in args.classes.split(",")}
         todo = todo[todo["warhead_class"].isin(keep)]
@@ -120,6 +138,7 @@ def main() -> None:
             (WORK_ROOT / row["candidate_id"] / "traceback.txt").write_text(
                 traceback.format_exc(), encoding="utf-8")
             failures.append({"candidate_id": row["candidate_id"],
+                             "dock_id": row["dock_id"],
                              "warhead_class": row["warhead_class"],
                              "mmgbsa_error": str(exc)[:300]})
 
@@ -127,13 +146,14 @@ def main() -> None:
         raise SystemExit("nothing to do")
 
     cols = pd.DataFrame(results + failures)
-    keep_cols = [c for c in ("candidate_id", "dG_kcal", "G_complex", "G_receptor",
+    keep_cols = [c for c in ("dock_id", "dG_kcal", "G_complex", "G_receptor",
                              "G_ligand", "mmgbsa_error") if c in cols.columns]
-    stale = [c for c in keep_cols if c != "candidate_id" and c in df.columns]
+    stale = [c for c in keep_cols if c != "dock_id" and c in df.columns]
     if stale:
         df = df.drop(columns=stale)
-    merged = df.merge(cols[keep_cols].drop_duplicates("candidate_id"),
-                      on="candidate_id", how="left")
+    # Merge on dock_id: every synthetic route to a scored molecule gets its dG.
+    merged = df.merge(cols[keep_cols].drop_duplicates("dock_id"),
+                      on="dock_id", how="left")
     if len(merged) != len(df):
         raise RuntimeError(f"merge changed row count {len(df)} -> {len(merged)}")
 

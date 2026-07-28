@@ -79,6 +79,9 @@ def main() -> None:
     log.info("loaded %s (%d rows)", frame_path.name, len(df))
     if RANK_METRIC not in df.columns:
         raise SystemExit(f"frame has no {RANK_METRIC!r} — run 03_covalent_dock.py first")
+    if "dock_id" not in df.columns:
+        raise SystemExit("frame has no `dock_id`; molecule identity is required "
+                         "to rank distinct molecules rather than routes (D0029)")
 
     # Post-reaction identity, read from the library rather than hard-coded here.
     lib = wl.load()
@@ -97,8 +100,10 @@ def main() -> None:
     log.info("%d warhead classes -> %d distinct adduct classes (D0029)", n_w, n_a)
 
     gated = rs.attach_gate(df, STRATUM, RANK_METRIC)
+    # Rank MOLECULES, not rows: three routes reach the same acetamide adduct, so
+    # ranking rows gave a top-3 of one molecule listed three times (D0029).
     ranked = rs.rank(gated, metric=RANK_METRIC, group_col="adduct_class",
-                     min_docked=cfg["min_docked"])
+                     min_docked=cfg["min_docked"], identity_col="dock_id")
     final = rs.shortlist(ranked, quota=quota)
 
     n_short = int(final["shortlist"].sum())
@@ -123,8 +128,8 @@ def main() -> None:
     print(f"  shortlisted {n_short} rows = {n_mols} DISTINCT molecules "
           f"across {n_a} adduct classes")
     if n_short != n_mols:
-        print("  (rows exceed molecules only if a dock is shared; on adduct "
-              "classes they should be equal — D0029)")
+        print(f"  ({n_short - n_mols} extra rows are ALTERNATIVE SYNTHETIC ROUTES "
+              "to a shortlisted molecule, not extra candidates — D0029)")
     print()
     print(rs.summarise(final, RANK_METRIC))
 
