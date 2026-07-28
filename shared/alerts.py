@@ -15,13 +15,25 @@ because the warhead is the mechanism.
 So for the covalent approaches alerts are computed twice:
 
   whole molecule  -> ADVISORY. Recorded, never gating. It will flag warheads.
-  R-group alone   -> HARD GATE. The R-group is decoration; a PAINS motif there
-                     is a genuine liability with no mechanistic excuse.
+  decoration      -> HARD GATE. Decoration is not mechanism; a PAINS motif there
+                     is a genuine liability with no excuse.
 
-Isolating the R-group needs care: cutting a substituent off a scaffold leaves an
-open valence, and an unsatisfied radical matches substructure patterns that the
-real molecule never presents. The fragment is therefore capped with a neutral
-methyl before it is scored (see `isolate_rgroup`).
+HOW THE DECORATION'S SHARE IS MEASURED (D0025). NOT by cutting the molecule up.
+The molecule is screened INTACT, and each alert is attributed by asking RDKit
+which atoms it matched: inside the excused region (core plus warhead) it is the
+mechanism, outside it belongs to the decoration, and a match spanning both is
+charged to the decoration but reported separately as a boundary hit.
+
+Excision was tried first and is a trap, because the cut itself creates
+chemistry. An amide `>N-C(=O)-R` severed from its nitrogen and capped with
+hydrogen is a formamide, which BRENK flags as an aldehyde; a thioether capped
+the same way is a thiol. Neither group exists in the real molecule. Attribution
+breaks no bonds, so it cannot invent a functional group.
+
+The excused region must cover the WHOLE warhead, not just its reactive atoms.
+`warhead_fragment_smiles` defines it. Excusing only the narrow reactive-atom
+SMARTS leaves `alpha_halo_carbonyl` straddling the boundary on every
+chloroacetamide — the two-tier false positive returning through a new door.
 
 For the NON-covalent approaches (T_1, T_2) there is no warhead to excuse, so the
 whole-molecule result is the one that matters — and removing reactive
@@ -116,6 +128,33 @@ def _warhead_patterns() -> tuple[tuple[str, Chem.Mol], ...]:
     return tuple(out)
 
 
+@lru_cache(maxsize=1)
+def _warhead_group_patterns() -> tuple[tuple[str, Chem.Mol], ...]:
+    """Whole-warhead SMARTS per class, from `warhead_fragment_smiles`.
+
+    Distinct from `_warhead_patterns`, which returns the narrow reactive-atom
+    SMARTS used to tell gnina where to form the bond. For alert attribution the
+    whole group matters: excusing `[CH2][Cl]` but not the carbonyl it is alpha
+    to leaves `alpha_halo_carbonyl` spanning the boundary and blamed on the
+    decoration.
+
+    The fragment's `[*]` attachment marker is kept: as SMARTS it matches any
+    atom, which is what is wanted — it binds to whatever the warhead is attached
+    to, and that atom is part of the core in every approach that uses this.
+    """
+    from . import warhead_library as wl
+
+    out = []
+    for _, r in wl.load().iterrows():
+        frag = str(r.get("warhead_fragment_smiles", "")).strip()
+        if not frag or frag == getattr(wl, "UNRESOLVED", "UNRESOLVED"):
+            continue
+        p = Chem.MolFromSmarts(frag)
+        if p is not None:
+            out.append((str(r["class_id"]), p))
+    return tuple(out)
+
+
 def is_warhead_fragment(frag_smiles: str) -> bool:
     """True if a fragment carries any known warhead reactive-atom motif."""
     m = smi.to_mol(frag_smiles)
@@ -139,10 +178,12 @@ def isolate_rgroup(smiles: str, core_smarts: str, *, cap: str = "C",
         truncated — neopentyl returns as four carbons instead of five. Write the
         core as the atoms it actually is: `N[CH]1CCS(=O)(=O)C1`.
     cap : str
-        Atom used to satisfy the bond left by the excision. A neutral methyl by
-        default: leaving the valence open produces a radical or a bare dummy,
-        and both match substructure patterns the real molecule never presents —
-        which would generate alerts that are artifacts of the cutting.
+        **IGNORED — see D0025.** The severed bond is filled with hydrogen
+        regardless of what is passed here. That is why this function no longer
+        feeds the gate: H-capping turns amides into formamides and thioethers
+        into thiols, inventing alerts the molecule never had. The result is
+        retained for human inspection of what the decoration looks like, and for
+        nothing that decides anything. Use `attribute_alerts` to gate.
     drop_warhead_fragments : bool
         Discard excised fragments that carry a warhead motif. **Required for the
         two-tier gate to mean anything.** The T_4 core has TWO attachment points
@@ -210,6 +251,107 @@ def isolate_rgroup(smiles: str, core_smarts: str, *, cap: str = "C",
 
 
 @dataclass
+class AttributedAlerts:
+    """Alerts on the INTACT molecule, attributed to core or decoration (D0025).
+
+    Three buckets, because an alert can sit wholly inside the core, wholly
+    outside it, or straddle the boundary:
+
+    core      every matched atom is a core atom. Expected and excused — this is
+              the warhead the approach is built around.
+    rgroup    no matched atom is a core atom. The decoration's own alert.
+    boundary  the match spans both. Counted against the decoration, because the
+              motif would not exist without it, but reported separately so a
+              reviewer can see this was a judgement call rather than a clean hit.
+    """
+
+    core: list[str] = field(default_factory=list)
+    rgroup: list[str] = field(default_factory=list)
+    boundary: list[str] = field(default_factory=list)
+    core_found: bool = True
+
+    @property
+    def attributable(self) -> int:
+        """Alerts the decoration is responsible for."""
+        return len(self.rgroup) + len(self.boundary)
+
+    def to_columns(self) -> dict:
+        return {
+            "core_alert_total": len(self.core),
+            "core_alert_names": "|".join(self.core),
+            "rgroup_alert_total": self.attributable,
+            "rgroup_alert_names": "|".join(self.rgroup + self.boundary),
+            "boundary_alert_total": len(self.boundary),
+            "boundary_alert_names": "|".join(self.boundary),
+        }
+
+
+def attribute_alerts(smiles: str, core_smarts: str,
+                     catalogs: tuple[str, ...] = CATALOGS,
+                     *, excuse_warheads: bool = True) -> AttributedAlerts:
+    """Screen the INTACT molecule and attribute each alert by its matched atoms.
+
+    THIS DOES NOT CUT THE MOLECULE (D0025). The previous approach excised the
+    R-group and capped the severed bond, which changed the fragment's chemistry:
+    an amide ``>N-C(=O)-R`` severed from its nitrogen and capped with hydrogen
+    becomes a formamide ``H-C(=O)-R``, and BRENK correctly flags an aldehyde
+    that exists only in the fragment. The same mechanism turned thioethers into
+    thiols. Together those two accounted for 3,014 of T_3's 5,270 rejections.
+
+    Screening the intact molecule and asking RDKit which atoms each alert
+    matched removes the failure mode rather than tuning around it: no bond is
+    broken, so no functional group can be invented by breaking one.
+    """
+    out = AttributedAlerts()
+    mol = smi.to_mol(smiles)
+    patt = Chem.MolFromSmarts(core_smarts)
+    if mol is None or patt is None:
+        out.core_found = False
+        return out
+    core_match = mol.GetSubstructMatch(patt)
+    if not core_match:
+        out.core_found = False
+        return out
+    core_atoms = set(core_match)
+
+    # THE WARHEAD IS EXCUSED ALONGSIDE THE CORE, and it has to be named
+    # separately because it is not inside the core SMARTS. T_4 scopes alerts
+    # against `N[CH]1CCS(=O)(=O)C1` — the sulfolane and its nitrogen — while the
+    # warhead hangs off that nitrogen, outside the pattern. Attributing purely
+    # by the core would blame every chloroacetamide's `alkyl_halide` on the
+    # decoration and reject all 1,683 survivors: exactly the false positive the
+    # two-tier design exists to prevent, arriving through a new door.
+    #
+    # Warhead atoms are located on the INTACT molecule, which is the same reason
+    # the old excision path did it that way: the T_4 core includes the amide
+    # nitrogen, so removing it splits an acrylamide in half and neither piece
+    # still matches the Michael-acceptor pattern.
+    # The WHOLE warhead group is excused, not just its reactive atoms. The
+    # reactive-atom SMARTS is deliberately narrow — chloroacetamide's is
+    # `[CH2][Cl]`, two atoms — so excusing only those leaves the carbonyl
+    # exposed, and BRENK's `alpha_halo_carbonyl` then straddles the boundary and
+    # is charged to the decoration. That motif IS the chloroacetamide warhead.
+    # The library's `warhead_fragment_smiles` describes the whole group, so it
+    # is what defines the excused region.
+    if excuse_warheads:
+        for _cls, wpatt in _warhead_group_patterns():
+            for m in mol.GetSubstructMatches(wpatt):
+                core_atoms.update(m)
+
+    for cat_name in catalogs:
+        for fm in _catalog(cat_name).GetFilterMatches(mol):
+            atoms = {b for _, b in fm.atomPairs}
+            name = fm.filterMatch.GetName()
+            if atoms <= core_atoms:
+                out.core.append(name)
+            elif not (atoms & core_atoms):
+                out.rgroup.append(name)
+            else:
+                out.boundary.append(name)
+    return out
+
+
+@dataclass
 class TwoTierResult:
     """Whole-molecule (advisory) plus R-group (gating) alert results."""
 
@@ -218,11 +360,17 @@ class TwoTierResult:
     rgroup_smiles: str | None
     passes_gate: bool
     reason: str = ""
+    attributed: "AttributedAlerts | None" = None
 
     def to_columns(self) -> dict:
         out = self.whole.to_columns(prefix="whole_")
-        if self.rgroup is not None:
-            out.update(self.rgroup.to_columns(prefix="rgroup_"))
+        if self.attributed is not None:
+            out.update(self.attributed.to_columns())
+        else:
+            out.update({"core_alert_total": 0, "core_alert_names": "",
+                        "rgroup_alert_total": 0, "rgroup_alert_names": "",
+                        "boundary_alert_total": 0, "boundary_alert_names": ""})
+        # Retained for human inspection only; the gate no longer reads it (D0025).
         out["rgroup_smiles"] = self.rgroup_smiles or ""
         out["alert_gate_pass"] = self.passes_gate
         out["alert_gate_reason"] = self.reason
@@ -241,20 +389,30 @@ def two_tier(smiles: str, core_smarts: str, *,
         one on the warhead.
     """
     whole = screen(smiles)
-    rg_smiles = isolate_rgroup(smiles, core_smarts)
-    if rg_smiles is None:
-        # Core absent, or the excision failed. Not a pass: verify-after-expansion
-        # exists precisely to catch products that lost the core.
+    att = attribute_alerts(smiles, core_smarts)
+    if not att.core_found:
+        # Core absent. Not a pass: verify-after-expansion exists precisely to
+        # catch products that lost the core.
         return TwoTierResult(whole=whole, rgroup=None, rgroup_smiles=None,
-                             passes_gate=False,
-                             reason="core not found or R-group could not be isolated")
-    rg = screen(rg_smiles)
-    ok = rg.total <= max_rgroup_alerts
+                             attributed=att, passes_gate=False,
+                             reason="core not found in the molecule")
+
+    # The R-group SMILES is still reported for human inspection, but it is NOT
+    # what the gate reads any more (D0025). Excision is lossy at the cut bond;
+    # attribution on the intact molecule is not.
+    rg_smiles = isolate_rgroup(smiles, core_smarts)
+
+    ok = att.attributable <= max_rgroup_alerts
+    names = att.rgroup + att.boundary
     reason = ("" if ok else
-              f"R-group carries {rg.total} alert(s): "
-              + ", ".join(n for c in CATALOGS for n in rg.names.get(c, []))[:180])
-    return TwoTierResult(whole=whole, rgroup=rg, rgroup_smiles=rg_smiles,
-                         passes_gate=ok, reason=reason)
+              f"decoration carries {att.attributable} alert(s): "
+              + ", ".join(names)[:180]
+              + (f" [{len(att.boundary)} spanning the core boundary]"
+                 if att.boundary else ""))
+    rg_result = AlertResult(counts={"attributed": att.attributable},
+                            names={"attributed": names})
+    return TwoTierResult(whole=whole, rgroup=rg_result, rgroup_smiles=rg_smiles,
+                         attributed=att, passes_gate=ok, reason=reason)
 
 
 def screen_frame(df: pd.DataFrame, smiles_col: str = "canonical_smiles", *,

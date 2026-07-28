@@ -75,6 +75,7 @@ def load_config() -> dict:
         "timesteps": g.get("timesteps"),
         "min_heavy": int(f.get("min_heavy_atoms", 0)),
         "max_heavy": int(f.get("max_heavy_atoms", 10_000)),
+        "size_classes": cfg.get("size_classes") or {},
         "mechanism": cfg["approach"]["mechanism"],
         "enrichment_verdict": cfg.get("docking", {}).get("enrichment_verdict"),
     }
@@ -133,6 +134,21 @@ def run_diffsbdd(cfg: dict, workdir: Path, n_samples: int,
     return out_sdf
 
 
+def _size_class(hac: int, bounds: dict) -> str:
+    """Label a molecule fragment / lead_like / out_of_range by heavy-atom count.
+
+    A LABEL, not a verdict. T_1 is the only approach that spans fragment and
+    lead space, because it is the only one with no seed dictating size. Pooling
+    a 12-heavy-atom fragment with a T_4 lead on a physchem plot without saying
+    so would make T_1 look like an outlier when it is really a different kind of
+    object.
+    """
+    for name, (lo, hi) in bounds.items():
+        if lo <= hac <= hi:
+            return name
+    return "out_of_range"
+
+
 def parse_generated(sdf: Path, cfg: dict) -> pd.DataFrame:
     """Read the generated poses, dedup on InChIKey, stamp size bounds."""
     from rdkit import Chem, RDLogger
@@ -157,15 +173,17 @@ def parse_generated(sdf: Path, cfg: dict) -> pd.DataFrame:
         hac = mol.GetNumHeavyAtoms()
         reject = None
         if hac < cfg["min_heavy"]:
-            reject = "too_small"
+            reject = "degenerate_too_small"
         elif hac > cfg["max_heavy"]:
             reject = "too_large"
+        size_class = _size_class(hac, cfg["size_classes"])
         rows.append({"canonical_smiles": canon,
                      "candidate_id": smi.candidate_id(canon, prefix=APPROACH),
                      "approach": APPROACH,
                      "mechanism": cfg["mechanism"],
                      "generated_pose_index": idx,
                      "generated_heavy_atoms": hac,
+                     "size_class": size_class,
                      "rejected_at": reject})
     log.info("read %d generated molecules, %d unparseable, %d unique kept",
              n_read, n_unparseable, len(rows))
@@ -218,6 +236,10 @@ def main() -> None:
         print(f"  heavy atoms: median {s.median():.0f}, range {s.min()}-{s.max()}")
     for reason, k in df["rejected_at"].value_counts().items():
         print(f"    stamped {reason}: {k}")
+    if "size_class" in df:
+        print("  size classes (label, not verdict):")
+        for cls, k in df["size_class"].value_counts().items():
+            print(f"    {cls:14s} {k}")
     print(f"\n  NOTE: non-covalent docking is {cfg['enrichment_verdict']} on this "
           "receptor (D0016); T_1's ranking carries that caveat.")
 

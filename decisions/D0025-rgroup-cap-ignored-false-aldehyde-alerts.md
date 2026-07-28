@@ -2,7 +2,7 @@
 id: D0025
 title: isolate_rgroup ignores its cap argument, producing false aldehyde alerts
 date: 2026-07-27
-status: proposed
+status: accepted
 approach: shared
 decided_by: '@mhallet'
 origin: implementation
@@ -41,11 +41,40 @@ through a carbonyl it is not: an amide `>N–C(=O)–R` becomes, once severed fr
 the nitrogen and H-capped, a formamide `H–C(=O)–R`. BRENK then flags an aldehyde
 that exists only in the fragment, never in the molecule.
 
-## Decision (proposed, NOT yet applied)
+## Decision (APPLIED 2026-07-28 — option 3, PI's choice)
 
-Fix `isolate_rgroup` to honour `cap`, and re-run the affected gates.
+**Do not cut the molecule at all.** Screen it intact and attribute each alert by
+the atoms RDKit reports it matched: wholly inside the excused region it is the
+mechanism, wholly outside it belongs to the decoration, and a match spanning
+both is charged to the decoration but reported separately as a boundary hit.
 
-Not applied tonight, deliberately. `shared/alerts.py` is also T_4's alert gate,
+`isolate_rgroup` is left in place, its result retained for human inspection and
+for nothing that decides anything. Its `cap` argument is documented as ignored
+rather than fixed, because the function is no longer load-bearing.
+
+TWO REGRESSIONS FOUND WHILE APPLYING THIS, both reintroducing the exact false
+positive the two-tier design exists to prevent:
+
+1. **Attributing by the core alone rejected all 1,683 T_4 survivors.** T_4 scopes
+   against `N[CH]1CCS(=O)(=O)C1` — the sulfolane and its nitrogen — while the
+   warhead hangs outside that pattern, so every warhead alert was charged to the
+   decoration. The warhead must be excused alongside the core.
+2. **Excusing only the reactive ATOMS still rejected 1,146.** chloroacetamide's
+   reactive-atom SMARTS is `[CH2][Cl]`, so the carbonyl stayed exposed and
+   `alpha_halo_carbonyl` straddled the boundary. The excused region is defined
+   by `warhead_fragment_smiles`, the whole group.
+
+Both were caught by diffing the new gate against the old on all 1,782 T_4
+candidates rather than trusting it. Final effect on T_4: 1,683 -> 1,624 passing,
+59 changed, all newly rejected on genuine decoration alerts.
+
+A THIRD BUG, found in the same pass: re-running annotation over its own output
+inherited the previous run's rejections, because `screen_frame` only stamps rows
+whose `rejected_at` is still null. 1,114 T_3 rows were stamped `alerts` while
+carrying `alert_gate_pass = True` — a frame disagreeing with itself. The stage
+now clears the stamps it owns before re-applying them.
+
+The original note, retained: `shared/alerts.py` is also T_4's alert gate,
 and T_4's enumeration, triage, docking, ranking and MM-GBSA have all been run
 against its current behaviour. Changing it invalidates that gate and requires
 re-running the chain. That is a considered change with a verification cost, not
@@ -65,9 +94,22 @@ Two things need deciding together with it:
 
 ## Consequences
 
-**T_3's current annotation (D3_3) is provisional and its 97.7% rejection rate
-should not be believed.** The 126 candidates that passed are a biased sample —
-they are the ones whose decoration happened not to attach through a carbonyl.
+**T_3's rejection rate barely moved — 97.7% to 77.2% — and that is the
+interesting part.** The aldehyde and thiol artefacts are gone entirely, but the
+dominant alert is now `acyclic_imide` (3,787 candidates), and it is REAL. The
+T_3 scaffold nitrogen already carries the acrylamide carbonyl; LibInvent
+frequently decorates it with a second acyl group, and an N with two acyl groups
+is an acyclic imide — genuinely more electrophilic and hydrolytically labile
+than the acrylamide alone.
+
+So the finding is not "the gate was broken", it is **"LibInvent's preferred
+decoration chemistry for this scaffold creates imides"**. That is a fact about
+T_3 worth carrying to the panel, and it would have stayed hidden underneath the
+aldehyde artefact. 1,233 of 5,396 now pass.
+
+`max_rgroup_alerts = 0` remains the default and remains worth revisiting
+separately: rejecting on a single alert is strict for an approach whose value is
+proposing chemistry a person would not have picked.
 
 T_4 is affected in principle but far less in practice: its R-groups come from a
 frequency-derived ChEMBL library and attach through carbon, not carbonyl. The

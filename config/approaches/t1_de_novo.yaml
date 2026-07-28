@@ -35,11 +35,28 @@ generation:
   num_nodes_lig: null   # let the model choose ligand size
 
 filters:
-  # De novo output needs a size sanity bound that a seeded approach does not:
-  # a diffusion model will happily emit 6-atom fragments and 90-atom sprawl,
-  # and neither is a lead. These bound what proceeds; they do not delete.
-  min_heavy_atoms: 15
+  # THE FLOOR KILLS DEGENERATE OUTPUT ONLY (PI decision, 2026-07-28).
+  #
+  # It was 15, which was doing two jobs at once: excluding 1-5 atom garbage, and
+  # excluding a real population the model deliberately generated around 8-12
+  # heavy atoms. On 4,803 samples the median is 16 and the 25th percentile is 9,
+  # so a floor of 15 discarded 49% of the run — including molecules that are
+  # legitimate FRAGMENTS, not failures.
+  #
+  # 10 removes the degenerate tail (a 1-heavy-atom "molecule" is not a
+  # candidate) and keeps 69.6%. Size is then carried as a LABEL rather than a
+  # verdict, so the panel can see that T_1 proposes smaller chemistry than the
+  # seeded approaches — which is information about the pocket, not an error.
+  min_heavy_atoms: 10
   max_heavy_atoms: 45
+
+size_classes:
+  # Boundaries for the reported label. Fragment-space and lead-space are
+  # different kinds of object and should not be silently pooled: T_2 and T_3 sit
+  # at median MW ~380-400, so a 12-heavy-atom T_1 hit will cluster apart on any
+  # physchem axis, and the GUI must say why.
+  fragment: [10, 17]        # roughly MW 135-230
+  lead_like: [18, 45]
 
 docking:
   # NON-COVALENT, and the enrichment gate says so with a shrug (D0016):

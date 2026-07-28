@@ -35,8 +35,12 @@ from . import alerts, descriptors, novelty, smiles as smi
 
 log = logging.getLogger(__name__)
 
-GATE_ALERTS = "alert_gate"
+GATE_ALERTS = "alert_gate"          # written by this module's alert_limit check
 GATE_UNPARSEABLE = "unparseable"
+# `shared.alerts.screen_frame` writes its own stamp under a DIFFERENT name. Both
+# belong to this stage and both must be cleared on a re-run; missing this one
+# left 1,114 T_3 rows stamped while their gate said pass.
+GATE_ALERTS_SCREEN = "alerts"
 
 
 def annotate(df: pd.DataFrame, *, approach: str, core_smarts: str | None = None,
@@ -70,6 +74,25 @@ def annotate(df: pd.DataFrame, *, approach: str, core_smarts: str | None = None,
 
     if "rejected_at" not in out.columns:
         out["rejected_at"] = pd.NA
+
+    # CLEAR THE STAMPS THIS STAGE OWNS BEFORE RE-APPLYING THEM.
+    #
+    # This stage reads the LATEST frame, which after one run is its own output.
+    # Re-running it over that frame inherited the previous run's rejections, and
+    # because `screen_frame` only stamps rows whose `rejected_at` is still null,
+    # a candidate rejected by an earlier, buggier gate could never be
+    # un-rejected. 1,114 T_3 rows ended up stamped `alerts` while carrying
+    # `alert_gate_pass = True` — a frame disagreeing with itself.
+    #
+    # Only stamps belonging to THIS stage are cleared. A rejection from
+    # generation (lost scaffold, degenerate size) is somebody else's fact and
+    # must survive.
+    owned = {GATE_ALERTS, GATE_UNPARSEABLE, GATE_ALERTS_SCREEN}
+    stale = out["rejected_at"].isin(owned)
+    if stale.any():
+        log.info("[%s] clearing %d stamp(s) from a previous run of this stage",
+                 approach, int(stale.sum()))
+        out.loc[stale, "rejected_at"] = pd.NA
     if "candidate_id" not in out.columns:
         out["candidate_id"] = [smi.candidate_id(s, prefix=approach)
                                for s in out[smiles_col]]
