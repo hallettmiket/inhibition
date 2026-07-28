@@ -45,7 +45,9 @@ GATE_ALERTS_SCREEN = "alerts"
 
 def annotate(df: pd.DataFrame, *, approach: str, core_smarts: str | None = None,
              smiles_col: str = "canonical_smiles",
-             alert_limit: int | None = None) -> pd.DataFrame:
+             alert_limit: int | None = None,
+             max_rgroup_alerts: int = 0,
+             excused_alerts: tuple[str, ...] = ()) -> pd.DataFrame:
     """Add descriptors, novelty and alerts; stamp `rejected_at`.
 
     Parameters
@@ -111,7 +113,12 @@ def annotate(df: pd.DataFrame, *, approach: str, core_smarts: str | None = None,
 
     log.info("[%s] screening structural alerts (%s)", approach,
              "R-group scoped" if core_smarts else "whole molecule")
-    out = alerts.screen_frame(out, smiles_col=smiles_col, core_smarts=core_smarts)
+    out = alerts.screen_frame(out, smiles_col=smiles_col, core_smarts=core_smarts,
+                              max_rgroup_alerts=max_rgroup_alerts,
+                              excused_alerts=tuple(excused_alerts))
+    if core_smarts:
+        log.info("[%s] decoration gate: <=%d alert(s), excusing %s",
+                 approach, max_rgroup_alerts, list(excused_alerts) or "nothing")
 
     if alert_limit is not None:
         col = "rgroup_alert_total" if core_smarts and "rgroup_alert_total" in out \

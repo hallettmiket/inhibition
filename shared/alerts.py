@@ -361,6 +361,7 @@ class TwoTierResult:
     passes_gate: bool
     reason: str = ""
     attributed: "AttributedAlerts | None" = None
+    excused: list = field(default_factory=list)
 
     def to_columns(self) -> dict:
         out = self.whole.to_columns(prefix="whole_")
@@ -372,13 +373,16 @@ class TwoTierResult:
                         "boundary_alert_total": 0, "boundary_alert_names": ""})
         # Retained for human inspection only; the gate no longer reads it (D0025).
         out["rgroup_smiles"] = self.rgroup_smiles or ""
+        out["excused_alert_names"] = "|".join(self.excused)
+        out["excused_alert_total"] = len(self.excused)
         out["alert_gate_pass"] = self.passes_gate
         out["alert_gate_reason"] = self.reason
         return out
 
 
 def two_tier(smiles: str, core_smarts: str, *,
-             max_rgroup_alerts: int = 0) -> TwoTierResult:
+             max_rgroup_alerts: int = 0,
+             excused_alerts: tuple[str, ...] = ()) -> TwoTierResult:
     """Advisory whole-molecule alerts + a gating R-group check (covalent approaches).
 
     Parameters
@@ -402,22 +406,36 @@ def two_tier(smiles: str, core_smarts: str, *,
     # attribution on the intact molecule is not.
     rg_smiles = isolate_rgroup(smiles, core_smarts)
 
-    ok = att.attributable <= max_rgroup_alerts
+    # EXCUSED ALERTS ARE CARRIED, NOT COUNTED (D0026). Naming an alert here is a
+    # decision that this specific liability is understood and accepted for this
+    # approach. It still travels with the candidate as `excused_alert_names` so
+    # the GUI can show it — the D0019 pattern: flag, do not veto. Raising
+    # `max_rgroup_alerts` instead would admit the named liability AND every
+    # other one-off alert indiscriminately, which is a different decision
+    # wearing the same clothes.
     names = att.rgroup + att.boundary
+    excused = [n for n in names if n in excused_alerts]
+    counted = [n for n in names if n not in excused_alerts]
+
+    ok = len(counted) <= max_rgroup_alerts
     reason = ("" if ok else
-              f"decoration carries {att.attributable} alert(s): "
-              + ", ".join(names)[:180]
-              + (f" [{len(att.boundary)} spanning the core boundary]"
-                 if att.boundary else ""))
-    rg_result = AlertResult(counts={"attributed": att.attributable},
-                            names={"attributed": names})
-    return TwoTierResult(whole=whole, rgroup=rg_result, rgroup_smiles=rg_smiles,
-                         attributed=att, passes_gate=ok, reason=reason)
+              f"decoration carries {len(counted)} alert(s): "
+              + ", ".join(counted)[:180]
+              + (f" [{len([n for n in att.boundary if n not in excused_alerts])} "
+                 "spanning the core boundary]" if att.boundary else ""))
+    rg_result = AlertResult(counts={"attributed": len(counted)},
+                            names={"attributed": counted})
+    res = TwoTierResult(whole=whole, rgroup=rg_result, rgroup_smiles=rg_smiles,
+                        attributed=att, passes_gate=ok, reason=reason)
+    res.excused = excused
+    return res
 
 
 def screen_frame(df: pd.DataFrame, smiles_col: str = "canonical_smiles", *,
                  core_smarts: str | None = None,
-                 disqualifying: tuple[str, ...] = ()) -> pd.DataFrame:
+                 disqualifying: tuple[str, ...] = (),
+                 max_rgroup_alerts: int = 0,
+                 excused_alerts: tuple[str, ...] = ()) -> pd.DataFrame:
     """Add alert columns to a candidate frame, stamping rather than deleting.
 
     Parameters
@@ -443,7 +461,9 @@ def screen_frame(df: pd.DataFrame, smiles_col: str = "canonical_smiles", *,
     records = []
     for s in out[smiles_col]:
         if core_smarts:
-            records.append(two_tier(s, core_smarts).to_columns())
+            records.append(two_tier(s, core_smarts,
+                                    max_rgroup_alerts=max_rgroup_alerts,
+                                    excused_alerts=excused_alerts).to_columns())
         else:
             r = screen(s)
             cols = r.to_columns(prefix="whole_")

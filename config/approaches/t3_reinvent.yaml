@@ -61,3 +61,31 @@ docking:
   # second code path is how two approaches drift apart.
   protocol: shared.covalent_protocol
   ligand_form: adduct               # D0022
+
+alert_gate:
+  # HOW MANY ALERTS THE DECORATION MAY CARRY, AND WHICH ARE EXCUSED (D0026).
+  #
+  # The count was 0 by default — any alert rejected — which failed 77% of T_3.
+  # Raising the count is the wrong instrument: 2,853 of the 3,054 single-alert
+  # candidates carry `acyclic_imide` and nothing else, so "allow 1" would have
+  # been a decision to accept imides taken by accident, while ALSO admitting
+  # thioesters, phenol esters and thiocarbonyls, which hydrolyse and are worse.
+  max_attributable_alerts: 0
+
+  # Named, deliberate, and CARRIED not hidden. The T_3 scaffold nitrogen already
+  # bears the acrylamide carbonyl; LibInvent frequently adds a second acyl,
+  # which makes a genuine acyclic imide. That is a real liability — more
+  # electrophilic and more hydrolytically labile than the acrylamide alone — not
+  # a false positive.
+  #
+  # It is excused rather than rejected because this is a structural consequence
+  # of where T_3 decorates, so rejecting on it discards 53% of the approach
+  # before anything has been measured — the "filter before you measure" trap
+  # D0012 and D0019 both refuse. The flag travels as `excused_alert_names` and
+  # the GUI MUST display it: an imide shown without that caveat implies a
+  # cleanliness it did not earn.
+  #
+  # If docking and MM-GBSA end up favouring imides, the honest resolution is a
+  # hydrolytic-stability measurement, not a recomputed alert.
+  excused_alerts:
+    - acyclic_imide

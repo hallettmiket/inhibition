@@ -27,6 +27,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO))
 
+import yaml                                        # noqa: E402
+
 from shared import annotate as ann                 # noqa: E402
 from shared import io as dio                       # noqa: E402
 
@@ -50,12 +52,22 @@ def main() -> None:
     df, frame_path = dio.latest_frame(EXPERIMENT, APPROACH)
     log.info("loaded %s (%d rows)", frame_path.name, len(df))
 
+    gate = (yaml.safe_load(
+        (REPO / "config" / "approaches" / "t3_reinvent.yaml").read_text(
+            encoding="utf-8")).get("alert_gate") or {})
+    excused = tuple(gate.get("excused_alerts") or ())
+    max_alerts = int(gate.get("max_attributable_alerts", 0))
+
     out_df = ann.annotate(df, approach=APPROACH, core_smarts=SCAFFOLD_SMARTS,
-                          alert_limit=args.alert_limit)
+                          alert_limit=args.alert_limit,
+                          max_rgroup_alerts=max_alerts,
+                          excused_alerts=excused)
 
     out = dio.write_full_frame(
         out_df, approach=APPROACH, experiment=EXPERIMENT, stage="t3_annotate",
-        params={"alert_scoping": "R-group outside the fixed scaffold",
+        params={"alert_scoping": "attributed on the intact molecule (D0025)",
+                "max_attributable_alerts": max_alerts,
+                "excused_alerts": list(excused),
                 "alert_limit": args.alert_limit,
                 "novelty": "1 - max Tanimoto (ECFP4) vs the external set"},
         inputs={"d3_frame": frame_path})

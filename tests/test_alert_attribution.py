@@ -125,3 +125,27 @@ def test_gate_and_stamp_agree():
     out = ann.annotate(df, approach="t4", core_smarts=T4_SCOPE)
     disagree = out["rejected_at"].notna() & out["alert_gate_pass"].eq(True)
     assert not disagree.any(), "stamped rejected while the gate says pass"
+
+
+def test_excused_alert_passes_but_is_carried(): 
+    """D0026: a named excusal is a decision, and it must stay visible."""
+    acyl = "C=CC(=O)N(C(=O)c1ccccc1)C1CCS(=O)(=O)C1"
+    strict = alerts.two_tier(acyl, T3_SCOPE)
+    assert not strict.passes_gate
+
+    lenient = alerts.two_tier(acyl, T3_SCOPE, excused_alerts=("acyclic_imide",))
+    assert lenient.passes_gate
+    assert "acyclic_imide" in lenient.excused, "the excusal must be recorded"
+    cols = lenient.to_columns()
+    assert cols["excused_alert_names"] == "acyclic_imide"
+    assert cols["excused_alert_total"] == 1
+
+
+def test_excusing_one_alert_does_not_admit_others():
+    """The point of naming: excusing imides must not let a thioester through."""
+    both = "C=CC(=O)N(C(=O)CSC(=O)C)C1CCS(=O)(=O)C1"
+    r = alerts.two_tier(both, T3_SCOPE, excused_alerts=("acyclic_imide",))
+    other = [n for n in r.attributed.rgroup + r.attributed.boundary
+             if n != "acyclic_imide"]
+    if other:
+        assert not r.passes_gate, f"excusal leaked past the named alert: {other}"
