@@ -48,6 +48,10 @@ CANDIDATES = {
         "C=CC(=O)N(c1ccccc1)[C@@H]1CCS(=O)(=O)C1",
     "bdhi_c5":
         "O=S1(=O)CC[C@@H](N(c2ccccc2)C2CC(Br)=NO2)C1",
+    "naphthoquinone_c2":
+        "O=C1c2ccccc2C(=O)C(c2ccccc2)=C1",
+    "naphthoquinone_benzo":
+        "O=C1C=CC(=O)c2cc(-c3ccccc3)ccc21",
 }
 
 HALOGENS = {"F", "Cl", "Br", "I"}
@@ -107,12 +111,56 @@ def test_sn2_acetamides_converge(library):
         + "; ".join(f"{k}={v}" for k, v in got.items()))
 
 
-def test_michael_acceptor_is_not_transformed(library):
-    """Nothing leaves in a Michael addition, and the approximation is declared."""
+def test_acrylamide_adduct_is_saturated(library):
+    """D0030. Acrylamide's adduct is the SATURATED thioether, not the alkene.
+
+    Leaving the C=C in place hands gnina an sp2 carbon and produces a vinyl
+    thioether — planar and rigid where the real linker rotates freely. T_3's
+    only warhead is acrylamide, so this was about to bias its entire search
+    against decorations that need to bend.
+    """
     a = ca.to_adduct_form(CANDIDATES["acrylamide"], "acrylamide", library=library)
-    assert a.n_atoms_removed == 0
+    assert a.n_atoms_removed == 0, "nothing leaves in a Michael addition"
     assert a.leaving_group_smiles is None
-    assert a.approximation and "alpha carbon" in a.approximation
+
+    m = Chem.MolFromSmiles(a.adduct_smiles)
+    assert m is not None
+    assert not m.HasSubstructMatch(Chem.MolFromSmarts("[CX3]=[CX3][CX3]=O")), (
+        "the acceptor alkene survived the transform; the docked ligand would be "
+        "a vinyl thioether")
+    # The product is a propanamide whose terminal carbon carries the hydrogen
+    # gnina replaces — exactly parallel to the acetamide classes' CH3.
+    assert m.HasSubstructMatch(Chem.MolFromSmarts("[CH3][CH2][CX3](=O)[NX3]"))
+    att = m.GetAtomWithIdx(a.attachment_idx)
+    assert att.GetTotalNumHs() == 3, "attachment carbon should be a CH3"
+    assert str(att.GetHybridization()) == "SP3"
+
+
+def test_quinone_adduct_keeps_its_alkene(library):
+    """D0030, the other half: quinones re-aromatize, so sp2 is CORRECT.
+
+    Thiol addition to a 1,4-naphthoquinone gives a hydroquinone that re-oxidizes
+    to the 2-thio-quinone. Saturating it here would model a species that does
+    not persist — the opposite error to the acrylamide one.
+    """
+    for cls in ("naphthoquinone_c2", "naphthoquinone_benzo"):
+        a = ca.to_adduct_form(CANDIDATES[cls], cls, library=library)
+        m = Chem.MolFromSmiles(a.adduct_smiles)
+        assert m.GetAtomWithIdx(a.attachment_idx).GetTotalNumHs() == 1
+        assert str(m.GetAtomWithIdx(a.attachment_idx).GetHybridization()) == "SP2"
+        assert a.approximation and "re-aromatized" in a.approximation
+
+
+def test_saturation_is_driven_by_the_library_not_the_mechanism(library):
+    """`michael_addition` alone must never decide whether to saturate.
+
+    Both acrylamide and the quinones are `michael_addition`; they need opposite
+    treatments. The discriminator is re-aromatizability, which is chemistry a
+    SMARTS cannot infer, so it lives in the library as a declared column.
+    """
+    michael = library[library.mechanism == "michael_addition"]
+    assert len(michael) == 3
+    assert set(michael.loc[michael.adduct_saturates_alkene, "class_id"]) == {"acrylamide"}
 
 
 def test_ambiguous_attachment_from_the_rgroup_is_rejected(library):

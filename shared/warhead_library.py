@@ -2,7 +2,7 @@
 Purpose: Data-driven warhead-class library for T_4 — narrow now, wide later.
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-27
-Input: data/reference/warhead_classes_3.csv
+Input: data/reference/warhead_classes_5.csv
 Output: validated warhead classes, filtered by how well-founded each one is
 
 DESIGN INTENT. The set of warhead chemistries is DATA, not code. Going wide —
@@ -45,7 +45,7 @@ from . import smiles as smi
 log = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_LIBRARY = _REPO_ROOT / "data" / "reference" / "warhead_classes_4.csv"
+DEFAULT_LIBRARY = _REPO_ROOT / "data" / "reference" / "warhead_classes_5.csv"
 
 UNRESOLVED = "UNRESOLVED"
 

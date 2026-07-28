@@ -27,13 +27,27 @@ removes the leaving group whatever its size, from a single chlorine to the
 twelve-heavy-atom sulfamate. Reusing the already-validated pattern means the two
 cannot drift apart.
 
-MICHAEL ACCEPTORS ARE NOT TRANSFORMED. Nothing leaves in a Michael addition, and
-the alkene carbon already carries the implicit hydrogen gnina needs — verified in
-the existing poses, where all three Michael classes attached at a carbon that
-ended up with four bonds. The true adduct saturates the C=C and adds a hydrogen to the
-alpha carbon; the docking input keeps the alkene. That approximation is recorded
-in `adduct_approximation` rather than hidden, and it is one hydrogen on a
-flexible position, against the twelve atoms it replaces elsewhere.
+MICHAEL ACCEPTORS SPLIT IN TWO (D0030). Nothing leaves in a Michael addition, so
+these classes were initially left untransformed. That is right for one of the two
+chemistries here and wrong for the other, and the difference is whether the
+adduct can re-aromatize.
+
+- **Quinones** (`naphthoquinone_c2`, `naphthoquinone_benzo`): thiol addition
+  gives a hydroquinone that re-oxidizes to the 2-thio-1,4-naphthoquinone. The
+  sulfur ends up on an **sp2** carbon and the ring keeps its alkene, so the
+  untransformed molecule IS the product. No transform.
+- **Acrylamide**: no re-aromatization is available. The product is the
+  **saturated** 3-thio-propanamide, `Cys-S-CH2-CH2-C(=O)NR2`. Leaving the alkene
+  in place hands gnina an sp2 carbon and yields a vinyl thioether,
+  `Cys-S-CH=CH-C(=O)NR2` — planar and rigid where the real linker rotates
+  freely. That is not a missing hydrogen, it is the wrong linker flexibility,
+  and it biases against exactly the decorations that need to bend. So the C=C is
+  saturated here and the attachment SMARTS is the propanamide's terminal carbon,
+  parallel to how the acetamide classes bond the CH3 of `[*]C(=O)C`.
+
+The distinction is carried in the library column `adduct_saturates_alkene`
+rather than inferred, because "is this Michael acceptor re-aromatizable" is
+chemistry, not something a SMARTS can decide.
 
 UNIQUENESS IS A GATE, NOT AN ASSUMPTION. The adduct attachment SMARTS must match
 exactly one atom in the product. An R-group that happens to contain its own
@@ -137,6 +151,40 @@ def _strip_leaving_group(mol: Chem.Mol, reactive_smarts: str) -> tuple[Chem.Mol,
     return keep, lg, removed
 
 
+def _saturate_michael(mol: Chem.Mol, reactive_smarts: str) -> Chem.Mol:
+    """Saturate the Michael acceptor's C=C, giving the true thioether adduct.
+
+    `reactive_atom_smarts` for a Michael acceptor is `[CX3]=[CX3][CX3]=O`, whose
+    first two atoms are the beta carbon (attacked by the thiol) and the alpha
+    carbon. Dropping that bond to single and re-sanitizing lets RDKit restore
+    the implicit hydrogens on both: the beta carbon becomes the CH3 whose
+    hydrogen gnina replaces, and the alpha carbon gains the hydrogen the real
+    addition delivers.
+    """
+    patt = Chem.MolFromSmarts(reactive_smarts)
+    if patt is None:
+        raise AdductError(f"unparseable reactive_atom_smarts {reactive_smarts!r}")
+    matches = mol.GetSubstructMatches(patt)
+    if not matches:
+        raise AdductError(
+            f"Michael acceptor pattern {reactive_smarts!r} does not match; the "
+            "warhead is absent or was altered by generation")
+    beta, alpha = matches[0][0], matches[0][1]
+    bond = mol.GetBondBetweenAtoms(beta, alpha)
+    if bond is None or bond.GetBondType() != Chem.BondType.DOUBLE:
+        raise AdductError(
+            f"atoms {beta} and {alpha} are not joined by a double bond; the "
+            "reactive SMARTS does not locate the acceptor's alkene")
+    rw = Chem.RWMol(mol)
+    rw.GetBondBetweenAtoms(beta, alpha).SetBondType(Chem.BondType.SINGLE)
+    out = rw.GetMol()
+    try:
+        Chem.SanitizeMol(out)
+    except Exception as exc:  # noqa: BLE001
+        raise AdductError(f"saturated adduct does not sanitize: {exc}") from exc
+    return out
+
+
 def to_adduct_form(candidate_smiles: str, warhead_class: str,
                    library=None) -> AdductForm:
     """Build the docking-ready adduct form of one candidate.
@@ -161,14 +209,19 @@ def to_adduct_form(candidate_smiles: str, warhead_class: str,
     if bool(row.get("has_leaving_group", True)):
         adduct, lg, removed = _strip_leaving_group(
             mol, str(row["reactive_atom_smarts"]))
+    elif bool(row.get("adduct_saturates_alkene", False)):
+        # Michael addition with no route back to an aromatic ring (acrylamide).
+        # The product is the saturated thioether, so the C=C must go.
+        adduct, lg, removed = _saturate_michael(
+            mol, str(row["reactive_atom_smarts"])), None, 0
     else:
-        # Michael addition: nothing leaves and the alkene carbon already carries
-        # the implicit hydrogen gnina replaces.
+        # Michael addition onto a quinone: the hydroquinone adduct re-oxidizes,
+        # putting the sulfur on an sp2 carbon with the alkene intact. The
+        # untransformed molecule already is that product.
         adduct, lg, removed = mol, None, 0
         approximation = (
-            "Michael acceptor docked as the alkene. The true adduct saturates "
-            "the C=C and gains one hydrogen on the alpha carbon; that hydrogen "
-            "is not modelled in the docked pose.")
+            "Quinone Michael acceptor modelled as the re-aromatized "
+            "2-thio-quinone; the transient hydroquinone adduct is not modelled.")
 
     adduct_smiles = smi.canonical(Chem.MolToSmiles(adduct))
     if adduct_smiles is None:
