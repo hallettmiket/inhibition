@@ -38,6 +38,7 @@ sys.path.insert(0, str(APP_DIR))
 sys.path.insert(0, str(APP_DIR.parent.parent))
 
 import data as D                                  # noqa: E402
+import depict                                     # noqa: E402
 
 st.set_page_config(page_title="Dance with Inhibition — integration",
                    layout="wide")
@@ -112,6 +113,110 @@ def panel_candidates() -> None:
                 st.caption(f"MM-GBSA dG on {int(s['dG_kcal'].notna().sum())} of "
                            f"{len(s)} — an INDEPENDENT estimate, not confirmation "
                            "of the docking rank.")
+            with st.expander("structures"):
+                top = s.sort_values("rank").head(9)
+                smi_col = ("adduct_smiles"
+                           if "adduct_smiles" in top.columns
+                           and top["adduct_smiles"].notna().any()
+                           else "canonical_smiles")
+                if smi_col == "adduct_smiles":
+                    st.caption("Showing the ADDUCT form — the post-reaction "
+                               "species that was docked (D0022/D0030), not the "
+                               "molecule as synthesised.")
+                st.markdown(
+                    depict.grid(list(top[smi_col]),
+                                [f"#{int(r)} · {v:.2f}"
+                                 for r, v in zip(top["rank"], top[cfg["metric"]])],
+                                width=150, height=120),
+                    unsafe_allow_html=True)
+
+
+def panel_dossier() -> None:
+    st.header("Per-candidate dossier")
+    st.caption("Everything recorded about one candidate, including the SMILES "
+               "in a form you can copy into any other tool.")
+
+    c1, c2 = st.columns([1, 2])
+    approach = c1.selectbox("approach", list(D.APPROACHES),
+                            format_func=lambda k: D.APPROACHES[k]["name"])
+    s = D.shortlist(approach)
+    if s.empty:
+        st.info("no shortlist for this approach yet")
+        return
+    s = s.sort_values("rank")
+    labels = {r["candidate_id"]: f"#{int(r['rank'])} · {r['candidate_id']}"
+              for _, r in s.iterrows()}
+    cid = c2.selectbox("candidate", list(labels), format_func=lambda k: labels[k])
+    row = s[s["candidate_id"] == cid].iloc[0]
+    cfg = D.APPROACHES[approach]
+
+    # --- structure(s) -----------------------------------------------------
+    is_covalent = "adduct_smiles" in s.columns and pd.notna(row.get("adduct_smiles"))
+    hl = depict.warhead_smarts(str(row.get("warhead_class", ""))) \
+        if "warhead_class" in s.columns else None
+
+    if is_covalent:
+        a, b = st.columns(2)
+        with a:
+            st.markdown("**As synthesised** (pre-reaction)")
+            st.markdown(depict.svg(row["canonical_smiles"], highlight_smarts=hl),
+                        unsafe_allow_html=True)
+            st.caption("Warhead highlighted. This is the molecule a chemist makes.")
+        with b:
+            st.markdown("**As docked** (adduct form)")
+            st.markdown(depict.svg(row["adduct_smiles"]), unsafe_allow_html=True)
+            lg = row.get("leaving_group_smiles")
+            st.caption(
+                f"Post-reaction species (D0022/D0030). Leaving group `{lg}` is "
+                "gone." if pd.notna(lg) and lg else
+                "Post-reaction species (D0022/D0030). Nothing leaves in a "
+                "Michael addition.")
+    else:
+        st.markdown(depict.svg(row["canonical_smiles"], width=420, height=320),
+                    unsafe_allow_html=True)
+
+    # --- SMILES -----------------------------------------------------------
+    st.markdown("**SMILES**")
+    st.code(row["canonical_smiles"], language="text")
+    if is_covalent:
+        st.markdown("**Adduct SMILES** (what was actually docked)")
+        st.code(row["adduct_smiles"], language="text")
+    if "protonated_smiles" in s.columns and pd.notna(row.get("protonated_smiles")):
+        if str(row["protonated_smiles"]) != str(row["canonical_smiles"]):
+            st.markdown("**At pH 7.4** (what MM-GBSA parameterised)")
+            st.code(row["protonated_smiles"], language="text")
+            st.caption(f"Formal charge {int(row.get('protonated_charge', 0)):+d} — "
+                       "the generator emitted a neutral form.")
+
+    # --- numbers ----------------------------------------------------------
+    st.divider()
+    verdict = str(row.get("gate_verdict", "UNGATED"))
+    cols = st.columns(4)
+    cols[0].metric(cfg["metric"], f"{row.get(cfg['metric'], float('nan')):.2f}")
+    cols[1].metric("rank", f"{int(row['rank'])} of {int(row.get('group_n_docked', 0))}")
+    le = row.get("ligand_efficiency")
+    cols[2].metric("ligand efficiency", f"{le:.3f}" if pd.notna(le) else "—")
+    dg = row.get("dG_kcal")
+    cols[3].metric("MM-GBSA dG", f"{dg:.2f}" if pd.notna(dg) else "not scored")
+
+    st.markdown(f"{gate_badge(verdict)} **Gate: {verdict}** — this rank is an "
+                "ordering the pipeline produced, not evidence of binding (D0031).")
+
+    axes = [a for a in D.SHARED_AXES if a in s.columns]
+    if axes:
+        st.markdown("**Shared physicochemical axes** (identical RDKit call "
+                    "across all four approaches)")
+        st.dataframe(pd.DataFrame([{a: row[a] for a in axes}]),
+                     use_container_width=True, hide_index=True)
+
+    flags = {k: row[k] for k in ("shortlist_reason", "reactivity_flag",
+                                 "adduct_approximation", "excused_alert_names",
+                                 "rgroup_alert_names", "size_class")
+             if k in s.columns and pd.notna(row.get(k)) and str(row.get(k)).strip()}
+    if flags:
+        st.markdown("**Flags carried with this candidate**")
+        for k, v in flags.items():
+            st.markdown(f"- `{k}`: {v}")
 
 
 def panel_convergence() -> None:
@@ -315,6 +420,7 @@ def panel_open_questions() -> None:
 
 PANELS = {
     "Shortlists": panel_candidates,
+    "Candidate dossier": panel_dossier,
     "Convergence": panel_convergence,
     "Shared axes": panel_axes,
     "Within-stratum": panel_within_stratum,
