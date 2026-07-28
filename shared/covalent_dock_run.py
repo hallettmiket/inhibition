@@ -68,8 +68,18 @@ ADDUCT_COLS = ("candidate_id", "dock_id", "adduct_smiles",
                "adduct_degenerate_attachment")
 
 
-def select_gpus() -> list[int]:
-    """Idle GPUs, yielding to other researchers — re-checked between chunks."""
+def select_gpus(explicit: list[int] | None = None) -> list[int]:
+    """Idle GPUs, yielding to other researchers — re-checked between chunks.
+
+    `explicit` overrides the search entirely. Prefer it whenever another docking
+    job is already running: the auto-search calls a GPU busy above
+    GPU_BUSY_MEMORY_MIB, and gnina occupies only ~500 MiB, so two auto-selecting
+    covalent jobs both pick the SAME first-N devices and leave the rest idle.
+    Vina-GPU (~18 GB) is visible to the threshold; gnina is not.
+    """
+    if explicit:
+        log.info("GPUs: using %s (explicitly allocated)", explicit)
+        return explicit
     try:
         out = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=index,memory.used",
@@ -142,7 +152,8 @@ def build_adducts(survivors: pd.DataFrame, lib) -> pd.DataFrame:
 
 
 def run(*, experiment: str, approach: str, frame_prefix: str,
-        limit: int | None = None, results_name: str = "results_adduct.jsonl"):
+        limit: int | None = None, results_name: str = "results_adduct.jsonl",
+        gpus: list[int] | None = None):
     """Dock one approach's survivors and merge the result back onto its frame."""
     os.nice(NICE)
     out_root = DATA_ROOT / experiment / "docking"
@@ -195,10 +206,10 @@ def run(*, experiment: str, approach: str, frame_prefix: str,
     with open(results_path, "a", encoding="utf-8") as fh:
         for start in range(0, len(jobs), CHUNK):
             chunk = jobs[start:start + CHUNK]
-            gpus = select_gpus()
+            chosen = select_gpus(gpus)
             for i, j in enumerate(chunk):
-                j["gpu"] = gpus[i % len(gpus)]
-            with ProcessPoolExecutor(max_workers=len(gpus)) as ex:
+                j["gpu"] = chosen[i % len(chosen)]
+            with ProcessPoolExecutor(max_workers=len(chosen)) as ex:
                 for fut in as_completed({ex.submit(_dock_one, j): j for j in chunk}):
                     fh.write(json.dumps(fut.result()) + "\n")
                     fh.flush()
