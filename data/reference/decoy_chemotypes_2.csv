@@ -1,0 +1,8 @@
+chemotype,group_smarts,chembl_query,representative_class,note
+chloroacetamide,[NX3]C(=O)[CH2][Cl],NC(=O)CCl,chloroacetamide,"SN2 at the alpha carbon. The carbonyl's other neighbour is N: an acetAMIDE, so [#6]C(=O) does not match the actives."
+sulfamate_acetamide,[NX3]C(=O)[CH2]O[SX4](=O)(=O)[NX3],NC(=O)COS(=O)(=O)N,sulfamate_acetamide,Reddi 2023 chemotype. A plain aryl sulfamate is NOT this: the alpha-carbonyl placement is what makes the carbon electrophilic.
+sulfonate_acetamide,[NX3]C(=O)[CH2]O[SX4](=O)(=O)[#6],NC(=O)COS(=O)(=O)C,sulfonate_acetamide,"Same SN2 carbon as chloroacetamide, different leaving group."
+naphthoquinone,O=C1C=CC(=O)c2ccccc21,O=C1C=CC(=O)c2ccccc12,naphthoquinone_c2,"ONE chemotype. T_4's _c2 and _benzo are enumeration attachment points, not distinct chemistries; Juglone (5-OH) sits at neither, which is why the class test must run at chemotype level."
+snar_chloroazine,[Cl]c1ncc([N+](=O)[O-])cn1,Clc1ncc([N+](=O)[O-])cn1,snar_chloroazine,Nitro-activated 2-chloropyrimidine.
+acrylamide,[CH2]=[CH]C(=O)[NX3],C=CC(=O)N,acrylamide,No Pin1 active carries this; decoys exist for T_3's use.
+bdhi,[Br]C1=NOCC1,BrC1=NOCC1,bdhi_c5,"3-bromo-4,5-dihydroisoxazole."

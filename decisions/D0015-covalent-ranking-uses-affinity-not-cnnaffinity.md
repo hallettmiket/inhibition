@@ -22,6 +22,14 @@ evidence:
 runbook: null
 ---
 
+> **REVISION NOTICE (D0031, 2026-07-28).** Re-measured a third time, now
+> against CLASS-MATCHED decoys: affinity_kcal ROC-AUC 0.537 and cnn_affinity
+> 0.552 — indistinguishable, both at chance, EF1% 0.0 for each. The
+> comparison that this decision rests on does not survive a decoy set of the
+> actives' own chemotype. The choice of affinity now stands only on gnina's
+> warning that CNN scoring is uncalibrated for covalent docking, which is a
+> mechanistic argument. Do not cite the ROC-AUC figures below.
+
 ## REVISION NOTICE (2026-07-28, D0028)
 
 **The conclusion stands; the evidence below does not.** Re-measuring on

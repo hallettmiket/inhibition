@@ -209,9 +209,22 @@ def build_jobs(stratum: str, workdir: Path) -> list[dict]:
                      (master.canonical_smiles != "UNVERIFIED")][
         ["name", "canonical_smiles"]].reset_index(drop=True)
 
-    dfile = DECOY_DIR / (f"decoys_covalent_2.csv" if stratum == "covalent"
+    # D0031: the covalent stratum uses the CLASS-MATCHED set. decoys_covalent_2
+    # pooled 104 acrylamide decoys (a class with no active at all) against
+    # chloroacetamide, sulfamate and naphthoquinone actives, so D0028 found the
+    # gate partly measuring chemotype rather than binding.
+    dfile = DECOY_DIR / ("decoys_covalent_6.csv" if stratum == "covalent"
                          else "decoys_non_covalent_1.csv")
     decoys = pd.read_csv(dfile)
+    if stratum == "covalent":
+        decoys = decoys.rename(columns={"active": "matched_active",
+                                        "canonical_smiles": "smiles"})
+        # `warhead_class` here is a CHEMOTYPE; docking needs a library class for
+        # its SMARTS, so map through the chemotype table rather than guessing.
+        from shared import decoys_classmatched as _dcm
+        rep = dict(zip(_dcm.load_chemotypes()["chemotype"],
+                       _dcm.load_chemotypes()["representative_class"]))
+        decoys["warhead_classes"] = decoys["warhead_class"].map(rep)
     actives, decoys, excluded = eg.filter_adequately_matched(actives, decoys)
     log.info("[%s] %d actives, %d decoys (excluded: %s)",
              stratum, len(actives), len(decoys), excluded)
@@ -240,7 +253,7 @@ def run_stratum(stratum: str) -> pd.DataFrame:
     # pre-reaction run; reusing it would silently resume onto the old docks and
     # report the old gate under a new protocol fingerprint. Append-only means it
     # stays where it is.
-    results_path = workdir / f"results_{cp.LIGAND_FORM}.jsonl"
+    results_path = workdir / f"results_{cp.LIGAND_FORM}_classmatched.jsonl"
 
     done: set[str] = set()
     if results_path.is_file():

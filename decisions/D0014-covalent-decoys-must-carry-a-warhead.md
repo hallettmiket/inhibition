@@ -20,6 +20,13 @@ evidence:
 runbook: null
 ---
 
+> **REVISION NOTICE (D0031, 2026-07-28).** The decision below is right and is
+> now enforced properly. Its IMPLEMENTATION property-matched first and
+> filtered for a warhead afterwards, which eliminated rare chemotypes before
+> the warhead filter ran and topped up the shortfall across classes: 104
+> acrylamide decoys against zero acrylamide actives. `decoys_covalent_2` must
+> not be used for a covalent gate again; see `decoys_covalent_6.csv`.
+
 ## Context
 
 The first covalent decoy set was property-matched on size, greasiness,
