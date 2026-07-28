@@ -46,6 +46,31 @@ enumeration:
   library_size: 1782   # 9 warhead classes x 198 R-groups; pinned by 01_enumerate.py
   rgroup_library: data/reference/rgroup_library_1.csv
 
+ranking:
+  # RANK WITHIN WARHEAD CLASS, NOT GLOBALLY (step 8).
+  #
+  # gnina's affinity is not comparable across warhead classes here. Each class
+  # docks against a DIFFERENT reactive-atom constraint, so the pose ensembles
+  # are not drawn from one distribution, and classes differ in heavy-atom count,
+  # which a Vina-style score tracks. A global sort would largely report which
+  # class is biggest and greasiest.
+  #
+  # So each class is ranked against itself and contributes a fixed quota. The
+  # shortlist becomes a designed comparison across chemotypes rather than a
+  # league table one class monopolizes.
+  per_class_quota: 3
+
+  # Below this many successful docks, "best in class" is most of the class, and
+  # the within-class rank is not selective. Such classes still contribute, but
+  # their shortlist rows are flagged so nothing downstream reads the rank as
+  # stronger evidence than it is.
+  min_docked_for_meaningful_rank: 20
+
+  # Classes stamped OUTSIDE_WINDOW by the reactivity triage (D0019) are ranked
+  # and do contribute, carrying their flag. Dropping them here would silently
+  # re-impose the kinetics filter the PI deliberately relaxed.
+  include_flagged_classes: true
+
 reporting:
   # If the two BDHI regiochemistries (or the two naphthoquinone ones) survive to
   # ranking, report them SEPARATELY rather than merging. Which attachment works

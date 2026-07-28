@@ -133,6 +133,43 @@ def latest(directory: Path, stem: str, suffix: str) -> Path | None:
     return best
 
 
+def read_frame(path: Path | str) -> pd.DataFrame:
+    """Read a full frame, translating one notoriously opaque parquet failure.
+
+    Frames are written by the `dwi_cheminf` env (pyarrow >= 22). pyarrow
+    **19.0.0** — the version in the base anaconda install — has a reader bug
+    that rejects the size statistics those files carry, with the message
+    "Repetition level histogram size mismatch". Nothing is wrong with the file:
+    `dwi_cheminf` (22) and `dwi_gui` (24) both read it fine, and no writer-side
+    option (write_page_index, format version 1.0/2.4) avoids it, because the
+    defect is in the reader. Fixed upstream in pyarrow 19.0.1.
+
+    Without this translation the message reads like data corruption, which is
+    exactly the wrong thing to believe about an append-only artifact.
+    """
+    try:
+        return pd.read_parquet(path)
+    except OSError as exc:
+        if "histogram size mismatch" not in str(exc):
+            raise
+        import pyarrow
+        raise IOError_(
+            f"{path} is fine; your pyarrow ({pyarrow.__version__}) cannot read "
+            "it. pyarrow 19.0.0 has a size-statistics reader bug fixed in "
+            "19.0.1. Read this frame from the dwi_cheminf or dwi_gui env, or "
+            "upgrade pyarrow to >= 19.0.1."
+        ) from exc
+
+
+def latest_frame(experiment: str, approach: str) -> tuple[pd.DataFrame, Path]:
+    """Load the newest full frame for an approach, with its path."""
+    d = approach_dir(approach, experiment)
+    p = latest(d, f"D{approach[-1]}", ".parquet")
+    if p is None:
+        raise IOError_(f"no D{approach[-1]} frame under {d}")
+    return read_frame(p), p
+
+
 def read_top10(approach: str, experiment: str) -> pd.DataFrame:
     """Read an approach's latest top-10 hand-off, validating it on the way in.
 
