@@ -1,0 +1,63 @@
+# T_3 — generative decoration of the sulfopin scaffold (covalent)
+#
+# Purpose: T_3's parameters — the scaffold, the fixed warhead, and the prior.
+# Author:  Mike Hallett (with Claude Code)
+# Date:    2026-07-27
+
+approach:
+  id: t3
+  name: "generative decoration of sulfopin"
+  seed: sulfopin_prime
+  mechanism: covalent
+  inhibition_proxy_strength: strong
+
+generation:
+  engine: reinvent4
+  mode: libinvent
+
+  # LibInvent, not the de novo Reinvent prior. T_3's question is what
+  # decoration best complements a FIXED covalent scaffold at a defined
+  # attachment point — which is exactly LibInvent's task. A de novo prior
+  # would generate whole molecules and would have to be constrained back
+  # into the scaffold afterwards, which is T_1's problem, not T_3's.
+  prior: /data/lab_vm/immutable/inhibition/weights/reinvent_priors/libinvent.prior
+
+  # ONE attachment point. sulfopin's core is a two-point scaffold (T_4 varies
+  # both), but T_3 fixes the warhead and varies only the other side, so the
+  # scaffold handed to LibInvent carries a single [*].
+  scaffold_smiles: "[*]N(C(=O)C=C)C1CCS(=O)(=O)C1"
+
+  n_smiles: 20000
+  unique_molecules: true
+  randomize_smiles: true
+  device: "cuda:0"
+  batch_size: 128
+
+warhead:
+  # THE WARHEAD IS CHOSEN UP FRONT, BY THE PI (2026-07-27), NOT SELECTED.
+  #
+  # This is the structural difference between T_3 and T_4. T_4 enumerates nine
+  # warhead classes and lets the gates discriminate; T_3 commits to acrylamide
+  # and spends its whole budget on the decoration. Because the warhead is
+  # fixed, T_3 needs no reactivity triage — condition (ii) rests on the expert
+  # choice, not on a computed LUMO window.
+  #
+  # Acrylamide is a standard Michael acceptor with NO validated covalent-Cys113
+  # Pin1 precedent, and D0019 found it falls OUTSIDE the reactivity window
+  # anchored on the verified chemotypes (by 0.106 eV against a 0.5 eV
+  # tolerance). That is informative about the choice, not a contradiction of
+  # it — see D0019's closing note. It is recorded here so the GUI can show the
+  # caveat beside T_3's candidates.
+  class_id: acrylamide
+  fixed: true
+  reactivity_triage: not_applicable
+  outside_reactivity_window: true    # D0019
+
+docking:
+  # T_3 and T_4 MUST share the covalent protocol byte-for-byte (control S3),
+  # including D0022's adduct-form rule: acrylamide is a Michael acceptor with
+  # no leaving group, so its adduct form equals its pre-reaction form and the
+  # transform is a no-op — but it goes through the same code path, because a
+  # second code path is how two approaches drift apart.
+  protocol: shared.covalent_protocol
+  ligand_form: adduct               # D0022

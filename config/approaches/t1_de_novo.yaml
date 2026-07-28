@@ -1,0 +1,50 @@
+# T_1 — de novo generation into the Pin1 pocket (non-covalent)
+#
+# Purpose: T_1's parameters — the pocket definition and the diffusion model.
+# Author:  Mike Hallett (with Claude Code)
+# Date:    2026-07-27
+
+approach:
+  id: t1
+  name: "de novo pocket-conditioned generation"
+  seed: null                  # THE point of T_1: no seed, no chemotype inherited
+  mechanism: non_covalent
+  inhibition_proxy_strength: weak     # reversible occupancy; see D0016
+
+generation:
+  engine: diffsbdd
+  repo: /data/lab_vm/envs/_src/DiffSBDD
+  checkpoint: /data/lab_vm/immutable/inhibition/weights/crossdocked_fullatom_cond.ckpt
+
+  # Conditioned on the pocket, not on a reference ligand. Passing sulfopin as
+  # `--ref_ligand` would define the pocket by the very chemotype T_1 exists to
+  # avoid inheriting; the residue list defines the same site without importing
+  # a ligand's shape as a prior.
+  pocket_mode: resi_list
+
+  # The Cys113 catalytic site. Cys113 itself is included because T_1's
+  # candidates are non-covalent and must still occupy the same pocket the
+  # covalent approaches attack, or the four approaches are not comparable.
+  resi_list: [A:113, A:59, A:157, A:118, A:122, A:63, A:130, A:131, A:68, A:112]
+
+  n_samples: 5000
+  batch_size: 64
+  sanitize: true
+  relax: false          # UFF relaxation is done downstream, once, for all approaches
+  timesteps: null       # model default
+  num_nodes_lig: null   # let the model choose ligand size
+
+filters:
+  # De novo output needs a size sanity bound that a seeded approach does not:
+  # a diffusion model will happily emit 6-atom fragments and 90-atom sprawl,
+  # and neither is a lead. These bound what proceeds; they do not delete.
+  min_heavy_atoms: 15
+  max_heavy_atoms: 45
+
+docking:
+  # NON-COVALENT, and the enrichment gate says so with a shrug (D0016):
+  # ROC-AUC 0.535, CI [0.215, 0.855], EF1% 0.0 on this receptor. T_1's
+  # dock-based ranking is therefore weakly supported and must be displayed
+  # with that uncertainty rather than presented as a score.
+  enrichment_verdict: UNDERPOWERED    # D0016
+  rank_metric_trust: low
