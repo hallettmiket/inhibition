@@ -85,6 +85,26 @@ def pose_to_sdf(pose_pdbqt: Path, workdir: Path, smiles: str) -> Path:
     pose = Chem.MolFromPDBFile(str(raw), sanitize=False, removeHs=False)
     if pose is None:
         raise mg.MMGBSAError(f"RDKit could not read the converted pose {raw.name}")
+
+    # STRIP THE POSE'S HYDROGENS BEFORE MATCHING, and do it explicitly.
+    #
+    # Vina keeps polar hydrogens, so a carboxylic acid pose carries its -OH
+    # hydrogen. The template is the species at pH 7.4 — a carboxylATE, whose
+    # oxygen has no hydrogen and a -1 charge — and imposing that on an oxygen
+    # that still holds an H is a valence contradiction: "Explicit valence for
+    # atom # 23 O, 2, is greater than permitted". Every T_1 and T_2 candidate
+    # failed this way the moment protonation was switched on.
+    #
+    # `removeHs=True` on the reader does NOT help: it is a no-op under
+    # sanitize=False, which is why the atom count was unchanged. The hydrogens
+    # are therefore deleted by hand, the heavy-atom skeleton is matched to the
+    # template, and hydrogens are put back afterwards at the template's
+    # protonation state.
+    rw = Chem.RWMol(pose)
+    for idx in sorted([a.GetIdx() for a in pose.GetAtoms()
+                       if a.GetAtomicNum() == 1], reverse=True):
+        rw.RemoveAtom(idx)
+    pose = rw.GetMol()
     template = Chem.MolFromSmiles(smiles)
     if template is None:
         raise mg.MMGBSAError(f"unparseable candidate SMILES {smiles!r}")

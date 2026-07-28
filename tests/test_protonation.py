@@ -75,3 +75,32 @@ def test_heavy_atom_skeleton_is_unchanged():
 def test_unparseable_smiles_raises_rather_than_returning_a_guess():
     with pytest.raises(ValueError):
         prot.dominant_state("not a molecule")
+
+
+def test_a_pose_docked_neutral_still_maps_onto_its_anion():
+    """Regression: protonation broke every T_1 and T_2 candidate at once.
+
+    Poses were docked in the neutral form, so a carboxylic acid pose carries its
+    -OH hydrogen. Matching it against the pH-7.4 template — a carboxylate whose
+    oxygen has no hydrogen and a -1 charge — is a valence contradiction unless
+    the pose's hydrogens are stripped first. `removeHs=True` on the RDKit PDB
+    reader is a no-op under `sanitize=False`, which is what hid this.
+    """
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+
+    acid = "CC(=O)O"
+    anion = prot.dominant_state(acid)["protonated_smiles"]
+
+    # A pose-like molecule: correct heavy atoms, explicit acidic H, no bond orders.
+    posed = Chem.AddHs(Chem.MolFromSmiles(acid))
+    AllChem.EmbedMolecule(posed, randomSeed=42)
+
+    rw = Chem.RWMol(posed)
+    for idx in sorted([a.GetIdx() for a in posed.GetAtoms()
+                       if a.GetAtomicNum() == 1], reverse=True):
+        rw.RemoveAtom(idx)
+    heavy = rw.GetMol()
+
+    fixed = AllChem.AssignBondOrdersFromTemplate(Chem.MolFromSmiles(anion), heavy)
+    assert Chem.GetFormalCharge(fixed) == -1
