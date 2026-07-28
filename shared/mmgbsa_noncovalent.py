@@ -1,0 +1,208 @@
+"""
+Purpose: Non-covalent MM-GBSA rescoring — the T5 tier for T_1 and T_2.
+Author: Mike Hallett (with Claude Code)
+Date: 2026-07-28
+Input: a docked Vina-GPU pose (PDBQT) + the prepared receptor
+Output: dG_bind and its per-term breakdown, per candidate
+
+THE ADAPTER T_2's PLAN NAMED. T_2's documented pipeline lists "T5 · Physics
+rescoring on survivors" as step 8, with the MM-GBSA adapter "specified with its
+interface fixed but not yet implemented". This is that adapter. It is
+deliberately the SAME three-leg protocol, the same implicit-solvent model and
+the same minimiser as the covalent version, so a T_2 number and a T_4 number
+differ only where the chemistry differs.
+
+SIMPLER THAN THE COVALENT CASE, NOT HARDER. Everything that makes
+`shared.mmgbsa` intricate is covalent-specific: the CYX residue, the link-atom
+cut, the hand-derived GAFF2 junction parameters, the capping hydrogen and the
+charge correction. None of it applies here. What is reused verbatim is the part
+that must not diverge — receptor preparation (including the histidine states
+`reduce` assigned), the minimisation input, the energy parsing and dG.
+
+ONE REAL ADVANTAGE OVER T_4. The covalent dG carries a constant term for the
+bond formed and the bonds broken, which cancels only within a warhead class
+(D0020, D0023). There is no such term here, so a non-covalent dG IS comparable
+across the whole approach. T_2 may rank on it globally; T_4 may not.
+
+WHAT THIS IS NOT. Single-structure MM-GBSA on a minimised geometry — no
+ensemble, no explicit solvent, no entropy. The plan's "ΔG_bind ± uncertainty"
+needs the short explicit-solvent MD listed beside it in the same step, which
+does not exist in this repo. A single minimisation has no error bar, so this
+module reports no uncertainty rather than inventing one.
+
+READ IT WITH D0031. The candidates reaching this tier were selected by docking,
+and on class-matched decoys docking sits at chance on this receptor. So this is
+not confirmation of a docking ranking; it is an INDEPENDENT estimate that may
+disagree with it, and the disagreement is the informative part.
+"""
+
+from __future__ import annotations
+
+import logging
+import subprocess
+from pathlib import Path
+
+from . import mmgbsa as mg
+
+log = logging.getLogger(__name__)
+
+OBABEL = "/data/lab_vm/envs/dwi_cheminf/bin/obabel"
+
+
+def pose_to_sdf(pose_pdbqt: Path, workdir: Path, smiles: str) -> Path:
+    """First (best) pose from a Vina-GPU PDBQT, as a chemically correct molecule.
+
+    COORDINATES FROM THE POSE, BOND ORDERS FROM THE SMILES. PDBQT does not
+    record bond orders or formal charges — it carries atom types for scoring, not
+    chemistry. Letting the converter re-perceive them produced aromatic carbons
+    with three connections and no hydrogen, and antechamber refused the file:
+    "Weird atomic valence (3) for atom C1". Any parameterisation built from a
+    PDBQT alone is guessing at the molecule it is parameterising.
+
+    So the docked heavy-atom geometry is kept and the connectivity is imposed
+    from the candidate's own canonical SMILES, which the frame already carries.
+    Hydrogens are then added at that geometry rather than by re-embedding, which
+    would discard the pose this stage exists to score.
+    """
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+
+    # VIA PDB, NOT SDF. obabel's SDF writer commits to bond orders it inferred
+    # from the PDBQT and gets them wrong — it produced a three-valent oxygen,
+    # which RDKit rejects before the template can correct anything. A PDB carries
+    # connectivity without bond orders, which is exactly the input
+    # AssignBondOrdersFromTemplate is designed for. Same pose either way; the
+    # difference is whether the converter is allowed to guess.
+    raw = workdir / "pose_raw.pdb"
+    cmd = [OBABEL, "-ipdbqt", str(pose_pdbqt), "-opdb", "-O", str(raw),
+           "-f", "1", "-l", "1"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if not raw.is_file() or raw.stat().st_size == 0:
+        raise mg.MMGBSAError(
+            f"could not convert {pose_pdbqt.name} to PDB: "
+            f"{(proc.stderr or proc.stdout)[-300:]}")
+
+    pose = Chem.MolFromPDBFile(str(raw), sanitize=False, removeHs=False)
+    if pose is None:
+        raise mg.MMGBSAError(f"RDKit could not read the converted pose {raw.name}")
+    template = Chem.MolFromSmiles(smiles)
+    if template is None:
+        raise mg.MMGBSAError(f"unparseable candidate SMILES {smiles!r}")
+    try:
+        fixed = AllChem.AssignBondOrdersFromTemplate(template, pose)
+    except Exception as exc:  # noqa: BLE001
+        raise mg.MMGBSAError(
+            f"could not map the docked pose onto its own SMILES ({exc}); the "
+            "pose and the frame disagree about the molecule") from exc
+
+    fixed = Chem.AddHs(fixed, addCoords=True)
+    out = workdir / "ligand_pose.sdf"
+    w = Chem.SDWriter(str(out))
+    w.write(fixed)
+    w.close()
+    return out
+
+
+def parameterize_ligand(pose_sdf: Path, workdir: Path,
+                        net_charge: int = 0) -> tuple[Path, Path]:
+    """AM1-BCC/GAFF2 parameters for the docked pose. No cap, no correction.
+
+    `net_charge` MUST be the ligand's formal charge. antechamber assigns AM1-BCC
+    charges under the total it is given, so a carboxylate passed as neutral
+    silently redistributes a whole electron across the molecule.
+    """
+    mol2 = workdir / "ligand.mol2"
+    mg._run([mg._amber("antechamber"),
+             "-i", str(pose_sdf), "-fi", "sdf",
+             "-o", str(mol2), "-fo", "mol2",
+             "-c", "bcc", "-nc", str(int(net_charge)), "-s", "2",
+             "-at", "gaff2", "-pf", "y"],
+            workdir, "antechamber.log", timeout=3600)
+    if not mol2.is_file() or mol2.stat().st_size == 0:
+        raise mg.MMGBSAError(
+            f"antechamber produced no mol2; see {workdir/'antechamber.log'}")
+
+    frcmod = workdir / "ligand.frcmod"
+    mg._run([mg._amber("parmchk2"), "-i", str(mol2), "-f", "mol2",
+             "-o", str(frcmod), "-s", "gaff2"],
+            workdir, "parmchk2.log")
+    log.info("ligand parameterised (non-covalent), net charge %+d", net_charge)
+    return mol2, frcmod
+
+
+def build_topologies(workdir: Path, mol2: Path, frcmod: Path, receptor_pdb: Path
+                     ) -> dict[str, tuple[Path, Path]]:
+    """Complex, receptor and ligand topologies in one tleap pass.
+
+    The complex is a plain `combine` — no `bond`, because nothing is bonded.
+    That single missing line is the whole difference from the covalent build,
+    and with it go the junction parameters and the capping logic.
+    """
+    script = f"""source {mg.PROTEIN_FF}
+source {mg.LIGAND_FF}
+loadamberparams {frcmod.name}
+set default PBRadii {mg.PB_RADII}
+
+LIG = loadmol2 {mol2.name}
+saveamberparm LIG ligand.prmtop ligand.inpcrd
+
+rec = loadpdb {receptor_pdb.name}
+saveamberparm rec receptor.prmtop receptor.inpcrd
+
+cpx = combine {{rec LIG}}
+saveamberparm cpx complex.prmtop complex.inpcrd
+quit
+"""
+    (workdir / "build.leap").write_text(script, encoding="utf-8")
+    mg._run([mg._amber("tleap"), "-f", "build.leap"], workdir, "tleap.log")
+
+    legs = {}
+    for leg in ("complex", "receptor", "ligand"):
+        top, crd = workdir / f"{leg}.prmtop", workdir / f"{leg}.inpcrd"
+        if not top.is_file() or top.stat().st_size == 0:
+            raise mg.MMGBSAError(
+                f"tleap produced no usable {leg} topology; "
+                f"see {workdir/'tleap.log'}")
+        legs[leg] = (top, crd)
+
+    missing = [l for l in (workdir / "tleap.log").read_text().splitlines()
+               if "Could not find" in l]
+    if missing:
+        raise mg.MMGBSAError(
+            f"{len(missing)} missing force-field parameter(s), first: "
+            f"{missing[0].strip()}")
+    return legs
+
+
+def verify_complex(legs: dict[str, tuple[Path, Path]]) -> dict:
+    """Atom-count bookkeeping: the complex must be receptor plus ligand exactly.
+
+    The covalent build asserts a specific SG-C bond exists. There is no bond to
+    check here, so what is checked instead is that nothing was lost or
+    duplicated by `combine` — a silently truncated complex would still minimise
+    and would still return a plausible dG.
+    """
+    import parmed
+
+    n = {leg: len(parmed.load_file(str(top)).atoms)
+         for leg, (top, _) in legs.items()}
+    if n["complex"] != n["receptor"] + n["ligand"]:
+        raise mg.MMGBSAError(
+            f"complex has {n['complex']} atoms but receptor + ligand is "
+            f"{n['receptor']} + {n['ligand']} = {n['receptor'] + n['ligand']}; "
+            "combine lost or duplicated atoms")
+    info = {"n_complex": n["complex"], "n_receptor": n["receptor"],
+            "n_ligand": n["ligand"]}
+    log.info("complex verified (non-covalent): %s", info)
+    return info
+
+
+def delta_g(legs: dict[str, mg.LegEnergies]) -> dict:
+    """dG = G_complex - G_receptor - G_ligand, with the per-term breakdown."""
+    out = mg.delta_g(legs)
+    # The covalent scheme's caveats do not apply, and leaving them attached
+    # would understate what this number supports.
+    out["scheme"] = "non-covalent 3-leg, no link atom"
+    out["comparable"] = ("across the whole approach — there is no per-class "
+                         "constant bond term to cancel (contrast D0020)")
+    return out

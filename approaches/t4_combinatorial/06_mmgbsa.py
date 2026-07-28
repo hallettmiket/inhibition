@@ -92,6 +92,13 @@ def score_one(row: pd.Series, lib, receptor_cache: dict) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser(description="T_4 step 9: covalent MM-GBSA.")
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--no-write", action="store_true",
+                    help="compute and cache result.json only; write no frame. "
+                         "REQUIRED when running several classes in parallel — "
+                         "each worker would otherwise write a full frame holding "
+                         "only its own class's dG, and the last to finish would "
+                         "become the latest frame. Follow a parallel fan-out "
+                         "with one plain run, which merges every cached result.")
     ap.add_argument("--classes", default=None,
                     help="comma-separated warhead classes to restrict to")
     args = ap.parse_args()
@@ -156,6 +163,11 @@ def main() -> None:
                       on="dock_id", how="left")
     if len(merged) != len(df):
         raise RuntimeError(f"merge changed row count {len(df)} -> {len(merged)}")
+
+    if args.no_write:
+        print(f"\n--no-write: cached {len(results)} result(s), {len(failures)} "
+              "failure(s); no frame written. Run without --no-write to merge.")
+        return
 
     out = dio.write_full_frame(
         merged, approach="t4", experiment=EXPERIMENT, stage="t4_mmgbsa",
