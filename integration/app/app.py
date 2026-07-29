@@ -105,7 +105,9 @@ def panel_candidates() -> None:
                 f"`{cfg['metric']}` (lower better) · {cfg['mechanism']} · "
                 f"seed: {cfg['seed']}")
             show = [c for c in ("rank", "candidate_id", cfg["metric"],
-                                "ligand_efficiency", "dG_kcal", "warhead_class")
+                                "ligand_efficiency", "dG_kcal",
+                                "dG_ensemble_kcal", "dG_ensemble_sem_kcal",
+                                "warhead_class")
                     if c in s.columns]
             st.dataframe(s.sort_values("rank")[show].head(25),
                          use_container_width=True, hide_index=True)
@@ -113,6 +115,20 @@ def panel_candidates() -> None:
                 st.caption(f"MM-GBSA dG on {int(s['dG_kcal'].notna().sum())} of "
                            f"{len(s)} — an INDEPENDENT estimate, not confirmation "
                            "of the docking rank.")
+            if ("dG_ensemble_kcal" in s.columns
+                    and s["dG_ensemble_kcal"].notna().any()):
+                # The two dG columns are DIFFERENT ESTIMATORS, not two
+                # precisions of one (D0036). Said plainly here, because a
+                # reader who sees a value beside an uncertainty will otherwise
+                # read the pair as one number and its error bar.
+                st.caption(
+                    f"Ensemble dG on "
+                    f"{int(s['dG_ensemble_kcal'].notna().sum())} of {len(s)}, "
+                    "from 2 ns of implicit-solvent MD; the uncertainty is the "
+                    "SEM widened by the trajectory's statistical inefficiency. "
+                    "It is a DIFFERENT estimator from `dG_kcal` (one "
+                    "trajectory vs three independent minimisations), so it "
+                    "replaces rather than refines it.")
             with st.expander("structures"):
                 top = s.sort_values("rank").head(9)
                 smi_col = ("adduct_smiles"
@@ -196,13 +212,26 @@ def panel_dossier() -> None:
     # --- numbers ----------------------------------------------------------
     st.divider()
     verdict = str(row.get("gate_verdict", "UNGATED"))
-    cols = st.columns(4)
+    cols = st.columns(5)
     cols[0].metric(cfg["metric"], f"{row.get(cfg['metric'], float('nan')):.2f}")
     cols[1].metric("rank", f"{int(row['rank'])} of {int(row.get('group_n_docked', 0))}")
     le = row.get("ligand_efficiency")
     cols[2].metric("ligand efficiency", f"{le:.3f}" if pd.notna(le) else "—")
     dg = row.get("dG_kcal")
-    cols[3].metric("MM-GBSA dG", f"{dg:.2f}" if pd.notna(dg) else "not scored")
+    cols[3].metric("MM-GBSA dG", f"{dg:.2f}" if pd.notna(dg) else "not scored",
+                   help="Single-structure, three independent minimisations.")
+    # The ensemble value is shown WITH its uncertainty or not at all: a mean
+    # from 100 correlated frames quoted bare invites exactly the false
+    # precision the ensemble tier exists to remove.
+    dge, sem = row.get("dG_ensemble_kcal"), row.get("dG_ensemble_sem_kcal")
+    cols[4].metric(
+        "ensemble dG",
+        f"{dge:.2f} ± {sem:.2f}" if pd.notna(dge) and pd.notna(sem)
+        else "not scored",
+        help="2 ns implicit-solvent MD, single-trajectory three-leg rescoring. "
+             "± is the SEM widened by the statistical inefficiency. A "
+             "DIFFERENT estimator from MM-GBSA dG, not a refinement of it "
+             "(D0036).")
 
     st.markdown(f"{gate_badge(verdict)} **Gate: {verdict}** — this rank is an "
                 "ordering the pipeline produced, not evidence of binding (D0031).")
