@@ -87,7 +87,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 AMBER_ENV = Path("/data/lab_vm/envs/dwi_amber_md")
 RECEPTOR_PDB = Path("/data/lab_vm/immutable/inhibition/receptor/6VAJ_prepared.pdb")
-JUNCTION_FRCMOD = _REPO_ROOT / "data" / "params" / "cys_gaff2_junction_2.frcmod"
+JUNCTION_FRCMOD = _REPO_ROOT / "data" / "params" / "cys_gaff2_junction_4.frcmod"
 
 COVALENT_RESNUM = "113"          # Cys113, in the ORIGINAL PDB numbering
 COVALENT_RESNAME = "CYS"
@@ -387,6 +387,35 @@ quit
     return legs
 
 
+# Expected heavy-atom valence by GAFF2 carbon type. The attachment carbon is
+# NOT always sp3: D0030 established that a quinone Michael acceptor re-aromatizes
+# to the 2-thio-quinone, so it stays sp2 and correctly carries THREE bonds. An
+# acrylamide, which saturates, correctly carries four.
+#
+# A flat "expected 4" therefore fired on every naphthoquinone -- output that was
+# right by design, reported as though it were wrong. That is worse than no
+# check: it trains the reader to skim past the one warning that would matter if
+# an sp3 attachment really did lose a bond. The expectation is now read from the
+# atom type the force field assigned, and a mismatch is an ERROR rather than a
+# line in a log nobody greps.
+_SP3_CARBON = {"c3", "cx", "cy", "c5", "c6"}
+_SP2_CARBON = {"c", "c2", "ca", "cc", "cd", "ce", "cf", "cp", "cq", "cu",
+               "cv", "cz"}
+_SP_CARBON = {"c1"}
+
+
+def _expected_valence(gaff_type: str) -> int | None:
+    """Bonds a carbon of this GAFF2 type should have, or None if unknown."""
+    t = (gaff_type or "").strip()
+    if t in _SP3_CARBON:
+        return 4
+    if t in _SP2_CARBON:
+        return 3
+    if t in _SP_CARBON:
+        return 2
+    return None
+
+
 def verify_complex(prmtop: Path, cyx_index: int, attach_name: str) -> dict:
     """Assert the covalent bond exists and the ligand kept its charge.
 
@@ -424,14 +453,24 @@ def verify_complex(prmtop: Path, cyx_index: int, attach_name: str) -> dict:
 
     lig = [r for r in p.residues if r.name == LIGAND_RESNAME][0]
     att = [a for a in lig.atoms if a.name == attach_name][0]
-    if len(att.bonds) != 4:
-        log.warning("attachment atom %s has %d bonds, expected 4",
-                    attach_name, len(att.bonds))
+    expected = _expected_valence(att.type)
+    if expected is None:
+        log.warning("attachment atom %s has GAFF type %r, whose valence this "
+                    "check does not know; %d bonds not verified",
+                    attach_name, att.type, len(att.bonds))
+    elif len(att.bonds) != expected:
+        raise MMGBSAError(
+            f"attachment atom {attach_name} (GAFF type {att.type!r}) has "
+            f"{len(att.bonds)} bonds, expected {expected}. The junction is the "
+            "one bond this whole calculation is about; a wrong valence there "
+            "is not a warning.")
     info = {"cyx_residue_index": res_idx, "attachment_atom": atom_name,
             "ligand_atoms": len(lig.atoms),
             "ligand_charge": round(sum(a.charge for a in lig.atoms), 4),
             "complex_charge": round(sum(a.charge for a in p.atoms), 4),
-            "attachment_bonds": len(att.bonds)}
+            "attachment_bonds": len(att.bonds),
+            "attachment_type": att.type,
+            "expected_bonds": expected}
     log.info("complex verified: %s", info)
     return info
 

@@ -1,0 +1,179 @@
+Cys-SG to GAFF2 ligand junction (D0023, extended D0027, D0035).
+
+ff19SB type S meets a GAFF2 carbon at the covalent bond and no force field
+covers that pair. EVERY term below is taken from the GAFF2 parameter for the
+same geometry with GAFF2's thioether sulfur `ss` in place of the protein's `S`.
+That analogue is not a convenience: once Cys113 SG bonds the ligand it IS a
+thioether sulfur (CB-S-C_lig), which is exactly what `ss` describes.
+
+An earlier version of this file hand-picked analogues from parm19 and covered
+only sp3 carbon (`c3`). Six of nine warhead classes attach through sp2 or
+aromatic carbon, so 18 of 27 MM-GBSA builds failed. Deriving every term from one
+source removes both the gap and the inconsistency.
+
+Values below are verbatim from gaff2.dat; the source line is the `ss` form of
+each name.
+
+MASS
+
+BOND
+S -c2   213.76    1.7842     from gaff2 c2-ss
+S -c3   184.74    1.8407     from gaff2 c3-ss
+S -ca   213.48    1.7847     from gaff2 ca-ss
+S -cc   231.66    1.7538     from gaff2 cc-ss
+S -cd   226.53    1.7622     from gaff2 cd-ss
+
+ANGLE
+2C-S -c2    93.32     101.26     from gaff2 c2-ss-c3 (S central)
+2C-S -c3    92.67      99.64     from gaff2 c3-ss-c3 (S central)
+2C-S -ca    92.72     102.53     from gaff2 c3-ss-ca (S central)
+2C-S -cc    94.13     101.06     from gaff2 c3-ss-cc (S central)
+2C-S -cd    93.40     102.22     from gaff2 c3-ss-cd (S central)
+br-cc-S     67.59     120.06     from gaff2 br-cc-ss
+br-cd-S     68.43     116.62     from gaff2 br-cd-ss
+c -c3-S     63.12     109.82     from gaff2 c-c3-ss
+c -cc-S     62.89     121.22     from gaff2 c-cc-ss
+c -cd-S     62.33     122.37     from gaff2 c-cd-ss
+c1-c3-S     63.30     111.39     from gaff2 c1-c3-ss
+c2-c2-S     63.04     122.19     from gaff2 c2-c2-ss
+c2-c3-S     63.56     108.98     from gaff2 c2-c3-ss
+c2-cc-S     62.49     127.48     from gaff2 c2-cc-ss
+c2-cd-S      62.7     127.48     from gaff2 c2-cd-ss
+c3-c2-S     62.42     118.21     from gaff2 c3-c2-ss
+c3-c3-S     62.92     110.18     from gaff2 c3-c3-ss
+c3-cc-S     62.46     121.35     from gaff2 c3-cc-ss
+c3-cd-S     62.55     120.14     from gaff2 c3-cd-ss
+c5-c2-S     61.62     120.99     from gaff2 c5-c2-ss
+c5-c3-S     62.48     111.66     from gaff2 c5-c3-ss
+c5-cc-S     62.07     122.68     from gaff2 c5-cc-ss
+c5-cd-S     60.76     127.03     from gaff2 c5-cd-ss
+c6-c2-S     63.27     114.87     from gaff2 c6-c2-ss
+c6-c3-S     62.35     111.91     from gaff2 c6-c3-ss
+c6-cc-S     61.80     123.86     from gaff2 c6-cc-ss
+c6-cd-S     62.02     121.97     from gaff2 c6-cd-ss
+ca-c3-S     62.96     110.82     from gaff2 ca-c3-ss
+ca-ca-S     63.09     120.06     from gaff2 ca-ca-ss
+ca-cc-S     63.01     121.48     from gaff2 ca-cc-ss
+ca-cd-S     63.13     119.82     from gaff2 ca-cd-ss
+cc-c2-S     63.42     120.29     from gaff2 cc-c2-ss
+cc-c3-S     63.06     111.02     from gaff2 cc-c3-ss
+cc-cc-S     63.33     121.34     from gaff2 cc-cc-ss
+cc-cd-S     65.84     113.35     from gaff2 cc-cd-ss
+cd-c3-S     62.39     113.36     from gaff2 cd-c3-ss
+cd-cc-S     66.62     111.55     from gaff2 cd-cc-ss
+cd-cd-S     63.38     120.27     from gaff2 cd-cd-ss
+ce-c2-S     62.78     123.01     from gaff2 ce-c2-ss
+ce-c3-S     62.76     111.70     from gaff2 ce-c3-ss
+ce-cc-S     63.00     121.51     from gaff2 ce-cc-ss
+ce-cd-S     63.25     122.91     from gaff2 ce-cd-ss
+cf-c2-S     63.26     121.09     from gaff2 cf-c2-ss
+cf-c3-S      63.3     110.72     from gaff2 cf-c3-ss
+cf-cc-S     63.14     124.67     from gaff2 cf-cc-ss
+cf-cd-S     62.58     122.09     from gaff2 cf-cd-ss
+cg-cc-S     63.57     120.76     from gaff2 cg-cc-ss
+ch-cd-S     64.46     116.64     from gaff2 ch-cd-ss
+cl-c2-S     68.48     118.83     from gaff2 cl-c2-ss
+cl-c3-S     67.87     112.89     from gaff2 cl-c3-ss
+cl-cc-S     68.91     119.85     from gaff2 cl-cc-ss
+cl-cd-S     68.58     120.58     from gaff2 cl-cd-ss
+cp-ca-S     65.74     110.38     from gaff2 cp-ca-ss
+cq-ca-S      66.0     111.17     from gaff2 cq-ca-ss
+cs-cc-S     63.28     121.37     from gaff2 cs-cc-ss
+cs-cd-S     64.91     114.39     from gaff2 cs-cd-ss
+cx-c3-S      64.8     105.42     from gaff2 cx-c3-ss
+cy-c3-S      62.0     114.66     from gaff2 cy-c3-ss
+f -c3-S     79.39     111.69     from gaff2 f-c3-ss
+h1-c3-S     42.06     108.73     from gaff2 h1-c3-ss
+h2-c3-S     42.03     108.82     from gaff2 h2-c3-ss
+h3-c3-S     41.88     109.57     from gaff2 h3-c3-ss
+h4-c2-S     42.04     116.27     from gaff2 h4-c2-ss
+h4-ca-S      42.5     116.19     from gaff2 h4-ca-ss
+h4-cc-S     42.11     120.15     from gaff2 h4-cc-ss
+h4-cd-S     41.89     120.20     from gaff2 h4-cd-ss
+h5-c2-S     41.56     119.05     from gaff2 h5-c2-ss
+h5-cc-S     41.99     120.87     from gaff2 h5-cc-ss
+h5-cd-S     41.80     120.70     from gaff2 h5-cd-ss
+ha-c2-S      43.6     116.72     from gaff2 ha-c2-ss
+ha-cc-S      42.2     121.64     from gaff2 ha-cc-ss
+ha-cd-S      42.2     121.64     from gaff2 ha-cd-ss
+hc-c2-S      43.8     115.62     from gaff2 hc-c2-ss
+hc-c3-S      42.5     108.76     from gaff2 hc-c3-ss
+i -cc-S     67.23     117.69     from gaff2 i-cc-ss
+i -cd-S     66.07     122.02     from gaff2 i-cd-ss
+n -c2-S     69.57     111.28     from gaff2 n-c2-ss
+n -c3-S     66.10     115.14     from gaff2 n-c3-ss
+n -cc-S     67.87     120.74     from gaff2 n-cc-ss
+n -cd-S     70.45     111.31     from gaff2 n-cd-ss
+n2-c2-S     67.16     122.65     from gaff2 n2-c2-ss
+n2-c3-S      80.4     109.39     from gaff2 n2-c3-ss
+n2-cc-S     68.02     123.02     from gaff2 n2-cc-ss
+n2-cd-S     67.64     123.47     from gaff2 n2-cd-ss
+n3-c3-S      81.2     107.38     from gaff2 n3-c3-ss
+n4-c2-S      80.7     116.27     from gaff2 n4-c2-ss
+n4-c3-S     65.53     115.22     from gaff2 n4-c3-ss
+n8-c3-S     68.43     107.43     from gaff2 n8-c3-ss
+na-c3-S      82.9     103.15     from gaff2 na-c3-ss
+na-ca-S     65.99     124.14     from gaff2 na-ca-ss
+na-cc-S     70.04     113.50     from gaff2 na-cc-ss
+na-cd-S     70.06     112.47     from gaff2 na-cd-ss
+nb-ca-S     67.93     118.51     from gaff2 nb-ca-ss
+nc-cc-S     67.39     123.20     from gaff2 nc-cc-ss
+nc-cd-S     69.32     116.87     from gaff2 nc-cd-ss
+nd-cc-S     69.74     116.44     from gaff2 nd-cc-ss
+nd-cd-S     67.86     120.28     from gaff2 nd-cd-ss
+ne-c2-S     67.63     120.69     from gaff2 ne-c2-ss
+ne-cc-S     68.98     117.06     from gaff2 ne-cc-ss
+ne-cd-S     66.85     126.00     from gaff2 ne-cd-ss
+nf-c2-S      82.2     120.51     from gaff2 nf-c2-ss
+nf-cc-S     68.32     121.93     from gaff2 nf-cc-ss
+nf-cd-S     68.73     117.12     from gaff2 nf-cd-ss
+nh-c2-S     69.38     112.46     from gaff2 nh-c2-ss
+nh-c3-S      80.6     109.01     from gaff2 nh-c3-ss
+nh-cc-S     67.80     121.33     from gaff2 nh-cc-ss
+nh-cd-S     68.91     116.00     from gaff2 nh-cd-ss
+no-cc-S     67.28     121.04     from gaff2 no-cc-ss
+no-cd-S      79.7     121.06     from gaff2 no-cd-ss
+ns-c2-S     68.67     114.30     from gaff2 ns-c2-ss
+ns-cc-S     67.08     123.72     from gaff2 ns-cc-ss
+ns-cd-S     67.68     120.76     from gaff2 ns-cd-ss
+nu-c2-S     67.10     120.03     from gaff2 nu-c2-ss
+nu-cc-S     67.32     122.97     from gaff2 nu-cc-ss
+nu-cd-S     67.63     121.12     from gaff2 nu-cd-ss
+nv-c2-S     69.06     113.26     from gaff2 nv-c2-ss
+nv-cc-S     67.86     121.33     from gaff2 nv-cc-ss
+nv-cd-S     67.67     120.99     from gaff2 nv-cd-ss
+ny-c2-S     66.53     116.74     from gaff2 ny-c2-ss
+nz-c2-S     68.00     111.17     from gaff2 nz-c2-ss
+o -c2-S     78.98     118.50     from gaff2 o-c2-ss
+oh-c3-S     77.78     111.65     from gaff2 oh-c3-ss
+oh-cc-S     77.91     122.91     from gaff2 oh-cc-ss
+os-c2-S     80.09     112.60     from gaff2 os-c2-ss
+os-c3-S     79.80     105.99     from gaff2 os-c3-ss
+os-cc-S     79.35     118.01     from gaff2 os-cc-ss
+os-cd-S     78.58     119.44     from gaff2 os-cd-ss
+p5-c3-S     41.55     109.74     from gaff2 p5-c3-ss
+s -c2-S     63.85     140.60     from gaff2 s-c2-ss
+s -cc-S     69.21     120.07     from gaff2 s-cc-ss
+s2-cc-S     66.52     125.01     from gaff2 s2-cc-ss
+s4-c3-S     67.14     113.23     from gaff2 s4-c3-ss
+s6-c3-S     67.67     113.37     from gaff2 s6-c3-ss
+sh-c2-S      64.5     117.82     from gaff2 sh-c2-ss
+sh-c3-S      63.5     110.73     from gaff2 sh-c3-ss
+sh-cc-S     67.68     121.89     from gaff2 sh-cc-ss
+ss-c2-S     68.43     116.23     from gaff2 ss-c2-ss
+ss-c3-S     67.75     111.42     from gaff2 ss-c3-ss
+ss-ca-S      64.4     115.15     from gaff2 ss-ca-ss
+ss-cc-S     68.79     119.04     from gaff2 ss-cc-ss
+ss-cd-S     69.02     117.12     from gaff2 ss-cd-ss
+
+DIHE
+X -c2-S -X     3    1.00          0.0             3.   generic, from parm19 X-CT-S-X
+X -c3-S -X     3    1.00          0.0             3.   generic, from parm19 X-CT-S-X
+X -ca-S -X     3    1.00          0.0             3.   generic, from parm19 X-CT-S-X
+X -cc-S -X     3    1.00          0.0             3.   generic, from parm19 X-CT-S-X
+X -cd-S -X     3    1.00          0.0             3.   generic, from parm19 X-CT-S-X
+
+IMPROPER
+
+NONBON
+
