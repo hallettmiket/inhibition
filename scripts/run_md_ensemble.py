@@ -89,8 +89,19 @@ def run_one(job: dict) -> dict:
     done = wd / "md" / "md_result.json"
     if done.is_file() and not job.get("force"):
         r = json.loads(done.read_text())
-        r["cached"] = True
-        return {**job, **r}
+        # A CACHE HIT MUST MATCH THE PROTOCOL, NOT JUST THE PATH. Checking only
+        # for the file's existence meant a 40 ps smoke-test trajectory
+        # satisfied a request for 2 ns: four candidates were silently skipped
+        # by the production run and only surfaced later when the ensemble
+        # rescorer refused to average two frames. A shorter cached run is not
+        # a cheaper version of the requested one, it is a different one.
+        want_ns = round(job["production_ps"] / 1000.0, 3)
+        got_ns = round(float(r.get("ns_simulated", 0.0)), 3)
+        if got_ns >= want_ns:
+            r["cached"] = True
+            return {**job, **r}
+        log.info("%s: cached run is %.3f ns but %.3f ns was requested; "
+                 "recomputing", job["id"], got_ns, want_ns)
     try:
         res = md.run_md(wd, job["id"], device_index=job["gpu"],
                         production_ps=job["production_ps"],
