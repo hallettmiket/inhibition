@@ -148,6 +148,38 @@ class LegEnergies:
         return sum(self.terms.get(k, 0.0) for k in ENERGY_TERMS)
 
 
+def cached_result_is_current(result: dict) -> bool:
+    """Can this cached result.json be trusted, or must the candidate rescore?
+
+    WHY THIS EXISTS. Every cache in this project keyed on the RESULT FILE'S
+    EXISTENCE and nothing else, so a value computed by superseded code satisfied
+    a request made by corrected code. It has now bitten twice:
+
+    - the MD cache returned a 40 ps smoke-test trajectory for a 2 ns request;
+    - this cache returned pre-D0033 energies, leaving 11 of 27 T_4 rows wrong by
+      up to 28 kcal/mol and INVERTING the chloroacetamide ordering.
+
+    Both were invisible: the run reported success, the number looked plausible,
+    and only a recompute revealed it. A cache entry must therefore carry the
+    parameters that produced it, and a missing marker means OLD -- entries
+    written before this check existed cannot be assumed current.
+    """
+    if not isinstance(result, dict):
+        return False
+    if result.get("mmgbsa_error"):
+        return True          # a recorded failure is still a valid answer
+    if list(result.get("energy_terms") or []) != list(ENERGY_TERMS):
+        return False
+    if result.get("igb") != IGB or result.get("pb_radii") != PB_RADII:
+        return False
+    # A non-covalent result records junction_frcmod=None on purpose (no
+    # junction), and that is current. "key absent" is the stale case.
+    if "junction_frcmod" not in result:
+        return False
+    jf = result["junction_frcmod"]
+    return jf is None or jf == JUNCTION_FRCMOD.name
+
+
 def _amber(tool: str) -> str:
     p = AMBER_ENV / "bin" / tool
     if not p.is_file():
@@ -544,4 +576,8 @@ def delta_g(legs: dict[str, LegEnergies]) -> dict:
         "igb": IGB,
         "pb_radii": PB_RADII,
         "ensemble_averaged": False,
+        # Stamped so a cached result can be checked against the code that would
+        # produce it today, rather than trusted because a file exists.
+        "energy_terms": list(ENERGY_TERMS),
+        "junction_frcmod": JUNCTION_FRCMOD.name,
     }

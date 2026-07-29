@@ -66,7 +66,14 @@ def score_one(row: pd.Series, lib, receptor_cache: dict) -> dict:
         # dock_id — without this they would rejoin as nulls and silently drop a
         # candidate that had in fact been scored.
         cached.setdefault("dock_id", row["dock_id"])
-        return cached
+        # A cached value must also have been produced by the CURRENT scorer.
+        # This was the fourth copy of this cache in the repo and the one that
+        # kept 11 of 27 T_4 rows on pre-D0033 energies — wrong by up to 28
+        # kcal/mol, and enough to invert the chloroacetamide ordering — after
+        # the other three had been fixed.
+        if mg.cached_result_is_current(cached):
+            return cached
+        log.info("%s: cached result predates the current scorer; rescoring", cid)
 
     pose = DOCK_ROOT / f"{row['dock_id']}_docked.sdf"
     if not pose.is_file():

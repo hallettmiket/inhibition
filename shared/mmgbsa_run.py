@@ -76,7 +76,10 @@ def score_one(job: dict) -> dict:
 
     done = wd / "result.json"
     if done.is_file():
-        return json.loads(done.read_text())
+        cached = json.loads(done.read_text())
+        if mg.cached_result_is_current(cached):
+            return cached
+        log.info("%s: cached result predates the current scorer; rescoring", cid)
 
     try:
         pose = Path(job["pose_root"]) / f"{cid}_out.pdbqt"
@@ -205,7 +208,9 @@ def score_one_covalent(job: dict) -> dict:
     if done.is_file():
         cached = json.loads(done.read_text())
         cached.setdefault("dock_id", did)
-        return cached
+        if mg.cached_result_is_current(cached):
+            return cached
+        log.info("%s: cached result predates the current scorer; rescoring", did)
 
     try:
         pose = Path(job["pose_root"]) / f"{did}_docked.sdf"

@@ -225,4 +225,12 @@ def delta_g(legs: dict[str, mg.LegEnergies]) -> dict:
     out["scheme"] = "non-covalent 3-leg, no link atom"
     out["comparable"] = ("across the whole approach — there is no per-class "
                          "constant bond term to cancel (contrast D0020)")
+    # No junction exists here, so the junction parameters are not an input to
+    # this number and must not sit in its cache fingerprint — otherwise every
+    # non-covalent candidate rescores whenever the covalent frcmod changes. Set
+    # to None rather than deleted, so the key is still PRESENT: in
+    # mg.cached_result_is_current a MISSING marker means "written before
+    # fingerprinting existed, treat as stale", and an absent key here would
+    # make every non-covalent result permanently un-cacheable.
+    out["junction_frcmod"] = None
     return out

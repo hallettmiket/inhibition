@@ -80,7 +80,11 @@ def score_one(job: dict) -> dict:
 
     done = wd / "result.json"
     if done.is_file():
-        return json.loads(done.read_text())
+        cached = json.loads(done.read_text())
+        if mg.cached_result_is_current(cached):
+            return cached
+        log.info("%s: cached result predates the current scorer; rescoring",
+                 job["id"])
 
     try:
         pose = GATE_DIR / f"{job['id']}_docked.sdf"
