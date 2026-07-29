@@ -26,6 +26,15 @@ evidence:
 
 # MM-GBSA does not rescue the ranking
 
+> **REVISION NOTICE (D0033, 2026-07-28).** Every dG figure below was computed
+> from a leg total that silently omitted three sander energy terms (1-4 VDW,
+> 1-4 EEL, CMAP). Corrected, MM-GBSA scores **ROC-AUC 0.260** rather than
+> 0.140, and Sulfopin ranks **38 of 51** rather than 44. Docking's 0.440 is
+> unaffected. The conclusion of this record is unchanged -- MM-GBSA remains
+> below chance, below docking, and UNDERPOWERED on one active -- but the
+> numbers in the tables and evidence list are superseded by D0033. They are
+> left in place because they are what this decision was made on.
+
 ## What was asked
 
 D0031 left the build with no working discriminator: docking is at chance

@@ -98,8 +98,30 @@ LIGAND_FF = "leaprc.gaff2"
 PB_RADII = "mbondi3"             # required by igb=8
 IGB = 8
 
+# EVERY term sander prints, because a leg total that silently omits one is not
+# a potential energy. RESTRAINT is excluded deliberately: it is always 0.0 here
+# (no restraints are applied) and including it would invite adding a term that
+# is not part of the physical energy if that ever changed.
+#
+# THE BUG THIS REPLACES, RECORDED SO THE SHAPE OF IT IS NOT REPEATED. The old
+# tuple asked for "1-4VDW" and "1-4EEL" without the space sander actually
+# prints ("1-4 VDW = ..."), and omitted CMAP entirely. The parser's token regex
+# stopped at the space, so it stored the 1-4 VDW value under the key "VDW" --
+# which nothing looked up -- and the 1-4 EEL value collided with the already-set
+# "EEL" key under setdefault and was dropped. Net effect: three large terms
+# contributed exactly zero to every leg total in the project.
+#
+# It survived because the resulting dG values still LOOKED right. The omitted
+# terms are enormous (1-4 EEL is ~4400 kcal/mol per leg) and cancel almost
+# entirely between complex and receptor, leaving a residue of +7 to +38
+# kcal/mol that does not cancel and is not constant across ligands. A
+# plausible-looking -15 kcal/mol is not evidence of a correct -15 kcal/mol.
 ENERGY_TERMS = ("BOND", "ANGLE", "DIHED", "VDWAALS", "EEL", "EGB", "ESURF",
-                "1-4VDW", "1-4EEL")
+                "1-4 VDW", "1-4 EEL", "CMAP")
+
+# Matches the multi-word labels explicitly BEFORE falling back to a bare token,
+# so "1-4 VDW" can never again be read as "VDW".
+ENERGY_LINE_RX = re.compile(r"(1-4 VDW|1-4 EEL|[A-Z0-9]+)\s*=\s*(-?\d+\.\d+)")
 
 
 class MMGBSAError(RuntimeError):
@@ -114,6 +136,15 @@ class LegEnergies:
 
     @property
     def total(self) -> float:
+        missing = [k for k in ENERGY_TERMS if k not in self.terms
+                   and k != "CMAP"]
+        if missing:
+            # CMAP is absent for a ligand-only leg (no protein backbone), which
+            # is legitimate. Anything else missing means the parse failed and a
+            # silently-too-small total is about to be returned.
+            raise MMGBSAError(
+                f"leg total is missing {missing} -- refusing to sum a partial "
+                "energy. This is the D0033 failure mode.")
         return sum(self.terms.get(k, 0.0) for k in ENERGY_TERMS)
 
 
@@ -418,6 +449,22 @@ MIN_INPUT = f"""minimise, implicit solvent (GBn2)
 """
 
 
+def parse_energy_block(out: str) -> dict[str, float]:
+    """Energy terms from a sander output's FINAL RESULTS block.
+
+    Split out of `minimize_and_score` so the SAME parser serves the ensemble
+    rescorer. Two parsers over one format is how the leg total and the frame
+    total drift apart without anyone noticing.
+    """
+    if "FINAL RESULTS" not in out:
+        raise MMGBSAError("sander output has no FINAL RESULTS block")
+    block = out.split("FINAL RESULTS")[-1]
+    terms: dict[str, float] = {}
+    for key, val in ENERGY_LINE_RX.findall(block):
+        terms.setdefault(key.strip(), float(val))
+    return terms
+
+
 def minimize_and_score(workdir: Path, leg: str) -> LegEnergies:
     """Minimise one leg and parse its final GB energy terms."""
     (workdir / "min.in").write_text(MIN_INPUT, encoding="utf-8")
@@ -429,11 +476,7 @@ def minimize_and_score(workdir: Path, leg: str) -> LegEnergies:
     out = (workdir / f"{leg}.min.out").read_text()
     if "FINAL RESULTS" not in out:
         raise MMGBSAError(f"{leg}: minimisation did not converge to FINAL RESULTS")
-    block = out.split("FINAL RESULTS")[-1]
-    terms: dict[str, float] = {}
-    for key, val in re.findall(r"([A-Z0-9\-]+)\s*=\s*(-?\d+\.\d+)", block):
-        terms.setdefault(key, float(val))
-    e = LegEnergies(terms=terms)
+    e = LegEnergies(terms=parse_energy_block(out))
     log.info("%s minimised: G = %.2f kcal/mol", leg, e.total)
     return e
 
