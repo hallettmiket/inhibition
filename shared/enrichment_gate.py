@@ -387,8 +387,18 @@ def write_token(results: list[GateResult], token_path: Path | None = None) -> Pa
         except Exception as exc:  # noqa: BLE001
             log.warning("existing token unreadable (%s); starting fresh", exc)
             by_stratum = {}
-    for s in {r.stratum for r in results}:
-        by_stratum.pop(s, None)          # this run supersedes its own strata
+    # SUPERSEDE PER METRIC, NOT PER STRATUM (D0034). This used to pop the whole
+    # stratum before re-adding, so a run that evaluated ONE metric erased every
+    # other metric in that stratum. `run_mmgbsa_gate.py` writes a single
+    # `mmgbsa_dG` result for `covalent`, and doing so deleted the
+    # `affinity_kcal` verdict D0031 established — leaving the covalent stratum
+    # claiming its recommended rank metric was MM-GBSA (ROC-AUC 0.140) when
+    # every approach actually ranks on docking.
+    #
+    # This is the SAME defect as the stratum-level one described above, one
+    # level down: that fix raised the merge granularity from token to stratum
+    # and left the destructive replace in place underneath it. A run supersedes
+    # exactly the metrics it computed and nothing else.
     for r in results:
         s = by_stratum.setdefault(r.stratum, {"metrics": {}})
         s["metrics"][r.metric] = r.to_dict()
