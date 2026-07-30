@@ -221,7 +221,12 @@ def build_jobs(stratum: str, workdir: Path) -> list[dict]:
     # floor. Written out rather than searched for, so a run records which file
     # it consumed.
     if stratum == "covalent":
-        dfile = DECOY_DIR / "decoys_covalent_6.csv"
+        # decoys_covalent_8: rebuilt after the snar_chloroazine class test was
+        # relaxed. The narrow adduct pattern described Tian 6a specifically, so
+        # the class held 3 decoys and its active was untestable; it now holds
+        # 1449 and Tian gets 23 property-matched decoys.
+        dfile = (Path("/data/lab_vm/append_only/inhibition/00_shared_substrate")
+                 / "decoys" / "decoys_covalent_8.csv")
     else:
         dfile = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate"
                      "/decoys/decoys_non_covalent_2.csv")

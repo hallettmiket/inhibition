@@ -62,11 +62,18 @@ log = logging.getLogger(__name__)
 
 _gen = fpg.GetMorganGenerator(radius=2, fpSize=2048)
 
-CLASS_POOL_DIR = Path("/data/lab_vm/immutable/inhibition/decoys/class_pools_3")
+# class_pools_4, and under append_only rather than immutable (read-only by
+# project rule). A NEW directory on purpose: class_pools_3 caches the pools
+# retrieved with the OLD chemotype queries, and a cache keyed only on class_id
+# cannot tell that the query behind it has changed. Reusing the directory would
+# have silently served the 3-molecule snar pool built from the narrow query
+# after the query was relaxed -- which is exactly what happened once already.
+CLASS_POOL_DIR = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate"
+                      "/decoys/class_pools_4")
 MAX_PER_CLASS_FETCH = 3000
 
 _REPO = Path(__file__).resolve().parent.parent
-CHEMOTYPES = _REPO / "data" / "reference" / "decoy_chemotypes_2.csv"
+CHEMOTYPES = _REPO / "data" / "reference" / "decoy_chemotypes_3.csv"
 
 
 def load_chemotypes() -> pd.DataFrame:

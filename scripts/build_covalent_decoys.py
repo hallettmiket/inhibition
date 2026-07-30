@@ -3,7 +3,7 @@ Purpose: Build the class-matched covalent decoy set (D0031).
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-28
 Input: data/reference/pin1_reference_binders_2.csv (frozen actives)
-Output: immutable/inhibition/decoys/decoys_covalent_6.csv + provenance
+Output: append_only/.../decoys/decoys_covalent_8.csv + provenance
 
 Run:  python scripts/build_covalent_decoys.py [--force-fetch] [--n-per-active 50]
 
@@ -34,8 +34,11 @@ from shared.manifest import Manifest               # noqa: E402
 
 log = logging.getLogger("build-decoys")
 
-ACTIVES = REPO / "data" / "reference" / "pin1_reference_binders_2.csv"
-OUT = Path("/data/lab_vm/immutable/inhibition/decoys")
+ACTIVES = REPO / "data" / "reference" / "pin1_reference_binders_3.csv"
+# append_only, not immutable: immutable/ is read-only by project rule, and the
+# earlier versions were written there before that was enforced.
+OUT = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate/decoys")
+OUT_NAME = "decoys_covalent_8.csv"
 
 # The covalent actives, mapped to the library class each one actually belongs
 # to. Kept here rather than parsed from the free-text `warhead_class` column,
@@ -154,7 +157,7 @@ def main() -> None:
 
     ds = pd.concat(frames, ignore_index=True).drop_duplicates("chembl_id")
     OUT.mkdir(parents=True, exist_ok=True)
-    out_csv = OUT / "decoys_covalent_6.csv"
+    out_csv = OUT / OUT_NAME
     ds.to_csv(out_csv, index=False)
 
     man = Manifest(stage="build_covalent_decoys",
@@ -164,7 +167,7 @@ def main() -> None:
                            "class_matched": True,
                            "cross_class_topup": False},
                    inputs={"actives": ACTIVES})
-    (OUT / "decoys_covalent_6_report.json").write_text(
+    (OUT / OUT_NAME.replace(".csv", "_report.json")).write_text(
         json.dumps({"per_active": report,
                     "class_pools": {c: {"query": p.query,
                                         "retrieved": p.n_retrieved,
