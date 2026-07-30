@@ -124,16 +124,27 @@ def gate_verdicts() -> dict:
         tok = json.loads(GATE_TOKEN.read_text())
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)[:200]}
-    out = {}
-    for stratum, v in tok.items():
-        if not isinstance(v, dict):
+    # The token nests as {"strata": {<stratum>: {"metrics": {<metric>: {...}}}}}.
+    # An earlier version of this walked the top level directly and produced an
+    # EMPTY gate section with no error -- a release manifest silently missing
+    # the verdicts it exists to record. Parsed strictly now: if the expected
+    # shape is absent, that is reported rather than returning {}.
+    strata = tok.get("strata")
+    if not isinstance(strata, dict):
+        return {"error": f"unexpected token shape; top-level keys {list(tok)}"}
+    out: dict = {}
+    for stratum, s in strata.items():
+        metrics = (s or {}).get("metrics")
+        if not isinstance(metrics, dict):
+            out[stratum] = {"error": "no 'metrics' block"}
             continue
-        for metric, m in v.items():
-            if isinstance(m, dict) and "verdict" in m:
-                out[f"{stratum}/{metric}"] = {
-                    k: m.get(k) for k in
-                    ("verdict", "roc_auc", "n_actives", "n_decoys",
-                     "n_chemotypes", "ef_1pct")}
+        for metric, m in metrics.items():
+            out[f"{stratum}/{metric}"] = {
+                k: m.get(k) for k in
+                ("verdict", "roc_auc", "roc_auc_ci", "n_actives", "n_decoys",
+                 "n_chemotypes", "ef_1pct", "bedroc") if k in m}
+    if not out:
+        return {"error": "token parsed but contained no metrics"}
     return out
 
 
