@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import multiprocessing
 import os
 import sys
 import traceback
@@ -79,11 +80,29 @@ def discover(approaches: list[str], limit: int | None) -> list[dict]:
     return jobs[:limit] if limit else jobs
 
 
+_MY_GPU: int | None = None
+
+
+def _claim_gpu(queue) -> None:
+    """Take one GPU for the lifetime of this worker process.
+
+    Runs once per worker at pool startup. The queue holds exactly one entry per
+    GPU, so with max_workers == len(gpus) every worker gets a distinct card and
+    keeps it, no matter how the jobs are distributed afterwards.
+    """
+    global _MY_GPU
+    _MY_GPU = queue.get()
+
+
 def run_one(job: dict) -> dict:
     os.nice(19)
     sys.path.insert(0, str(REPO))
     from shared import gromacs_explicit as gx
 
+    if _MY_GPU is None:
+        raise RuntimeError("worker started without claiming a GPU; the pool "
+                           "initializer did not run")
+    job = {**job, "gpu": _MY_GPU}
     wd = Path(job["wd"])
     rep = int(job["replicate"])
     done = wd / f"rep{rep}" / "gromacs_result.json"
@@ -143,9 +162,19 @@ def main() -> None:
         for j in jobs:
             fanned.append({**j, "replicate": rep})
     jobs = fanned
-    for i, j in enumerate(jobs):
-        j.update(gpu=gpus[i % len(gpus)], threads=args.threads,
-                 production_ps=args.production_ps, force=args.force)
+    # GPU OWNERSHIP IS PER WORKER, NOT PER JOB. Assigning gpus[i % len(gpus)] at
+    # submission looks balanced and is not: the pool hands the next job to
+    # whichever worker frees up first, so once runtimes desynchronise -- and they
+    # do, since a failed run returns in seconds and a good one in twenty minutes
+    # -- two jobs collide on one card while another sits idle. Observed live:
+    # two mdrun on GPU 0, none on GPU 6.
+    #
+    # Each worker instead claims one GPU at startup and keeps it for the whole
+    # run. With max_workers == len(gpus) that is a perfect matching by
+    # construction, independent of how long any job takes.
+    for j in jobs:
+        j.update(threads=args.threads, production_ps=args.production_ps,
+                 force=args.force)
 
     log.info("%d runs (%d candidates x %d replicates), %.1f ns each, "
              "GPUs %s, %d threads each", len(jobs),
@@ -153,7 +182,12 @@ def main() -> None:
              args.production_ps / 1000.0, gpus, args.threads)
 
     ok, failed = [], []
-    with ProcessPoolExecutor(max_workers=len(gpus)) as ex:
+    gpu_queue = multiprocessing.Manager().Queue()
+    for g in gpus:
+        gpu_queue.put(g)
+    with ProcessPoolExecutor(max_workers=len(gpus),
+                             initializer=_claim_gpu,
+                             initargs=(gpu_queue,)) as ex:
         futs = {ex.submit(run_one, j): j for j in jobs}
         for n, fut in enumerate(as_completed(futs), 1):
             r = fut.result()
