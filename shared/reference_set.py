@@ -115,6 +115,7 @@ def load(
 
     _validate_smiles_column(master, "canonical_smiles", mpath)
     _validate_smiles_column(anchors, "canonical_smiles", apath)
+    _validate_mechanism(master, mpath)
 
     return ReferenceSet(
         master=master,
@@ -122,6 +123,28 @@ def load(
         master_sha256=_sha256(mpath),
         anchors_sha256=_sha256(apath),
     )
+
+
+#: The ONLY mechanism values the pipeline recognises. The enrichment gate
+#: selects its strata by exact equality (`master.mechanism == "non_covalent"`),
+#: so a value outside this set does not raise anywhere -- it simply matches no
+#: stratum and the active vanishes from every gate that should have used it.
+#: Liu-2024-C3 was written as "non_covalent_active_site" and silently dropped,
+#: costing the sixth independent chemotype, which is the gate's verdict floor.
+#: The log said "5 actives" and nothing said one had been discarded.
+VALID_MECHANISMS = frozenset({"covalent_cys113", "non_covalent", "unknown"})
+
+
+def _validate_mechanism(df: pd.DataFrame, path: Path) -> None:
+    """Raise if any row carries a mechanism the gate cannot select on."""
+    bad = sorted(set(df["mechanism"].dropna().astype(str)) - VALID_MECHANISMS)
+    if bad:
+        names = df[df["mechanism"].astype(str).isin(bad)]["name"].tolist()
+        raise ReferenceSetError(
+            f"{path.name}: unrecognised mechanism value(s) {bad} on {names}. "
+            f"Allowed: {sorted(VALID_MECHANISMS)}. A value outside this set is "
+            "not an error anywhere downstream -- it matches no stratum, so the "
+            "affected binder is silently missing from every gate.")
 
 
 def _require_columns(df: pd.DataFrame, needed: set[str], path: Path) -> None:
