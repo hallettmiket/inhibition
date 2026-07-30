@@ -65,6 +65,30 @@ Data lives outside git, under the governed roots:
   integer-versioned: frontiers, poses, trajectories, `Di.parquet`,
   `Di_top10.csv`.
 
+## Reading the results
+
+Clone your own copy and run the GUI against the shared data — nothing is
+written, so several people can read at once. Pick a port nobody else is using:
+
+```bash
+git clone https://github.com/hallettmiket/inhibition.git ~/inhibition
+cd ~/inhibition
+nice -n 19 /data/lab_vm/envs/dwi_gui/bin/python3.11 -m streamlit run \
+  integration/app/app.py --server.port 8901 --server.address 127.0.0.1 \
+  --server.headless true
+```
+
+Then from your own machine, forward that port and open
+`http://localhost:8901`:
+
+```bash
+ssh -L 8901:127.0.0.1:8901 <you>@<host>
+```
+
+The interpreter and the data roots are shared, so there is no environment to
+build. What you see is whatever the pipeline has written so far; panels for
+stages that have not run are absent rather than empty.
+
 ## Controls (these are not optional)
 
 Four controls came out of an adversary audit of the spec and are wired in as
