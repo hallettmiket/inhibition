@@ -73,7 +73,7 @@ CLASS_POOL_DIR = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate"
 MAX_PER_CLASS_FETCH = 3000
 
 _REPO = Path(__file__).resolve().parent.parent
-CHEMOTYPES = _REPO / "data" / "reference" / "decoy_chemotypes_3.csv"
+CHEMOTYPES = _REPO / "data" / "reference" / "decoy_chemotypes_4.csv"
 
 
 def load_chemotypes() -> pd.DataFrame:

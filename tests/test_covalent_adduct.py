@@ -159,8 +159,19 @@ def test_saturation_is_driven_by_the_library_not_the_mechanism(library):
     SMARTS cannot infer, so it lives in the library as a declared column.
     """
     michael = library[library.mechanism == "michael_addition"]
-    assert len(michael) == 3
-    assert set(michael.loc[michael.adduct_saturates_alkene, "class_id"]) == {"acrylamide"}
+    # NOT a count. This asserted len(michael) == 3 and failed the moment a
+    # legitimate fourth Michael acceptor (cinnamamide) was added -- a passing
+    # test became a blocker for correct work. What the test is FOR is that
+    # `mechanism` does not determine saturation, so assert that directly: the
+    # same mechanism must carry both answers.
+    assert len(michael) >= 3, "need several michael_addition classes to test this"
+    assert set(michael["adduct_saturates_alkene"]) == {True, False}, (
+        "michael_addition classes must disagree on saturation, or the column is "
+        "redundant with mechanism and this guard proves nothing")
+    saturating = set(michael.loc[michael.adduct_saturates_alkene, "class_id"])
+    assert saturating == {"acrylamide", "cinnamamide"}, (
+        "acrylamide and cinnamamide saturate — no re-aromatization is available; "
+        "the quinones do not, because the hydroquinone re-oxidizes")
 
 
 def test_ambiguous_attachment_from_the_rgroup_is_rejected(library):
