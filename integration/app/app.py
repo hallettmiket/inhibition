@@ -243,6 +243,39 @@ def panel_dossier() -> None:
         st.dataframe(pd.DataFrame([{a: row[a] for a in axes}]),
                      use_container_width=True, hide_index=True)
 
+    # Structural convergence: did any OTHER approach reach this molecule?
+    # Reported as a rank when the identical molecule was ranked elsewhere, and
+    # as the nearest shortlisted analogue otherwise -- an empty panel would let
+    # "nobody else found it" read as "the lookup is broken".
+    smi = row.get("canonical_smiles")
+    if pd.notna(smi):
+        conv = D.cross_approach_ranks(str(smi), approach)
+        if conv:
+            st.markdown("**Also found by other approaches?**")
+            exact = [c for c in conv if c["exact"]]
+            st.dataframe(pd.DataFrame([{
+                "approach": c["name"],
+                "same molecule?": "YES" if c["exact"] else "no",
+                "rank there": (f"{int(c['rank'])} of {c['n_ranked']}"
+                               if c["exact"] and pd.notna(c["rank"]) else "—"),
+                "nearest in their shortlist": c["candidate_id"] or "—",
+                "Tanimoto": c["similarity"],
+            } for c in conv]), use_container_width=True, hide_index=True)
+            if exact:
+                st.success(
+                    f"Surfaced independently by {len(exact)} other approach(es)."
+                    " Convergence is a soft cross-validation that needs no "
+                    "shared metric — the approaches report incommensurable "
+                    "numbers, but agreeing on a molecule requires no units.")
+            else:
+                st.caption(
+                    "No other approach reached this molecule. That is the norm "
+                    "here, not a gap: exact overlap between every pair of "
+                    "approaches is zero, and the closest cross-approach "
+                    "shortlist pair in the whole build is T_3~T_4 at Tanimoto "
+                    "0.455. The four searches are effectively disjoint, so "
+                    "convergence currently provides no cross-validation.")
+
     flags = {k: row[k] for k in ("shortlist_reason", "reactivity_flag",
                                  "adduct_approximation", "excused_alert_names",
                                  "rgroup_alert_names", "size_class")

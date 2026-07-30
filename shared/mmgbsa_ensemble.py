@@ -323,8 +323,13 @@ def write_mdcrd(path: Path, frames_a: np.ndarray, title: str = "ensemble") -> No
 
 
 def score_leg(workdir: Path, leg: str, mdcrd: Path, out_dir: Path
-              ) -> list[float]:
-    """Per-frame total energy for one leg, via a single sander invocation."""
+              ) -> list[dict]:
+    """Per-frame TERM DICT for one leg, via a single sander invocation.
+
+    Returns the terms rather than a pre-summed total so the caller can form
+    both the full potential difference and the interaction-only difference
+    (D0037) from one pass of sander.
+    """
     inp = out_dir / f"{leg}_sp.in"
     inp.write_text(SINGLE_POINT_INPUT, encoding="utf-8")
     out = out_dir / f"{leg}_sp.out"
@@ -346,7 +351,7 @@ def score_leg(workdir: Path, leg: str, mdcrd: Path, out_dir: Path
         terms = {}
         for k, v in mg.ENERGY_LINE_RX.findall(b):
             terms.setdefault(k.strip(), float(v))
-        totals.append(mg.LegEnergies(terms=terms).total)
+        totals.append(terms)
     return totals
 
 
@@ -411,8 +416,18 @@ def ensemble_dg(workdir: Path, traj_nm: np.ndarray | None = None,
                 f"{frames_a.shape[0]} frames")
         per_leg[leg] = totals
 
-    dg = (np.asarray(per_leg["complex"]) - np.asarray(per_leg["receptor"])
-          - np.asarray(per_leg["ligand"]))
+    def _series(terms: tuple[str, ...]) -> np.ndarray:
+        """Per-frame (complex - receptor - ligand) over a chosen term set."""
+        n = len(per_leg["complex"])
+        return np.array([
+            sum(per_leg["complex"][i].get(t, 0.0)
+                - per_leg["receptor"][i].get(t, 0.0)
+                - per_leg["ligand"][i].get(t, 0.0) for t in terms)
+            for i in range(n)])
+
+    dg = _series(mg.ENERGY_TERMS)
+    dg_inter = _series(mg.INTERACTION_TERMS)
+    dg_internal = _series(mg.INTERNAL_TERMS)
 
     # PER-FRAME VALUES ARE SAVED, not just the summary. Two reasons. First, the
     # summary cannot be re-interrogated: questions like "how much of the
@@ -422,12 +437,18 @@ def ensemble_dg(workdir: Path, traj_nm: np.ndarray | None = None,
     # bimodal dG from a ligand flipping between two poses reports the same two
     # numbers as a tight unimodal one.
     np.save(out_dir / "dg_per_frame.npy", dg.astype(np.float32))
-    np.savez(out_dir / "legs_per_frame.npz",
-             **{k: np.asarray(v, dtype=np.float32) for k, v in per_leg.items()})
+    np.save(out_dir / "dg_interaction_per_frame.npy", dg_inter.astype(np.float32))
+    np.save(out_dir / "dg_internal_per_frame.npy", dg_internal.astype(np.float32))
 
-    g = statistical_inefficiency(dg)
-    n_eff = max(1.0, dg.size / g)
-    sem = float(dg.std(ddof=1) / np.sqrt(n_eff)) if dg.size > 1 else float("nan")
+    def _stats(series: np.ndarray) -> tuple[float, float, float]:
+        gg = statistical_inefficiency(series)
+        ne = max(1.0, series.size / gg)
+        se = (float(series.std(ddof=1) / np.sqrt(ne)) if series.size > 1
+              else float("nan"))
+        return gg, ne, se
+
+    g, n_eff, sem = _stats(dg)
+    g_i, n_eff_i, sem_i = _stats(dg_inter)
 
     return {
         "dG_kcal_ensemble": round(float(dg.mean()), 3),
@@ -438,6 +459,17 @@ def ensemble_dg(workdir: Path, traj_nm: np.ndarray | None = None,
         "n_frames": int(dg.size),
         "n_effective_samples": round(float(n_eff), 2),
         "statistical_inefficiency": round(float(g), 2),
+        # The standard MM-GBSA quantity, and the remainder that should have
+        # cancelled and did not (D0037). Reported beside the full potential
+        # because the remainder was measured at sd 8.97 kcal/mol on the gate
+        # set and separates actives from decoys BETTER (ROC-AUC 0.781) than
+        # either score containing it -- a fact no consumer can see if it stays
+        # folded into one number.
+        "dG_interaction_kcal": round(float(dg_inter.mean()), 3),
+        "dG_interaction_sem_kcal": round(sem_i, 3),
+        "dG_interaction_sd_kcal": round(float(dg_inter.std(ddof=1)), 3),
+        "dG_internal_residual_kcal": round(float(dg_internal.mean()), 3),
+        "dG_internal_residual_sd_kcal": round(float(dg_internal.std(ddof=1)), 3),
         "frames_discarded": int(discard_first),
         "decomposition": scheme,
         "scheme": ("single-trajectory 3-leg, sander single points"

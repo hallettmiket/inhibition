@@ -75,6 +75,23 @@ class MDError(RuntimeError):
     """Raised when a trajectory cannot be produced or trusted."""
 
 
+def topology_fingerprint(workdir: Path) -> str | None:
+    """SHA-256 of the complex topology a trajectory was propagated from.
+
+    Cheap enough to compute per candidate (~1 MB read) and the only thing that
+    distinguishes a trajectory generated under one set of junction parameters
+    from one generated under another. Returns None if the topology is absent,
+    which callers must treat as "cannot verify" rather than "matches".
+    """
+    import hashlib
+    p = workdir / "complex.prmtop"
+    if not p.is_file() or p.stat().st_size == 0:
+        return None
+    h = hashlib.sha256()
+    h.update(p.read_bytes())
+    return h.hexdigest()
+
+
 @dataclass
 class MDResult:
     candidate_id: str
@@ -91,6 +108,12 @@ class MDResult:
             "n_frames": self.n_frames,
             "ns_simulated": round(self.ns_simulated, 3),
             "wall_seconds": round(self.wall_seconds, 1),
+            # The topology this trajectory was actually propagated from. Without
+            # it the cache could only compare run LENGTH, so a topology rebuilt
+            # with corrected junction parameters (D0037) would silently reuse a
+            # trajectory generated under the old ones -- the same shape of
+            # defect as D0033's stale energies, one layer down.
+            "topology_sha256": topology_fingerprint(self.workdir),
             "solvent": "implicit GBn2 (igb=8), mbondi3 radii",
             "explicit_solvent": False,
             "temperature_k": TEMPERATURE_K,

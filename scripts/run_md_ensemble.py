@@ -97,11 +97,25 @@ def run_one(job: dict) -> dict:
         # a cheaper version of the requested one, it is a different one.
         want_ns = round(job["production_ps"] / 1000.0, 3)
         got_ns = round(float(r.get("ns_simulated", 0.0)), 3)
-        if got_ns >= want_ns:
+        # The topology must match too. A trajectory is only reusable if it was
+        # propagated from the SAME system; a rebuild with corrected junction
+        # parameters produces a different one under an unchanged path, and
+        # length alone cannot tell them apart. A cached record with no
+        # fingerprint predates this check and is treated as stale.
+        want_top = md.topology_fingerprint(wd)
+        got_top = r.get("topology_sha256")
+        if got_ns >= want_ns and got_top and got_top == want_top:
             r["cached"] = True
             return {**job, **r}
-        log.info("%s: cached run is %.3f ns but %.3f ns was requested; "
-                 "recomputing", job["id"], got_ns, want_ns)
+        if got_ns < want_ns:
+            log.info("%s: cached run is %.3f ns but %.3f ns was requested; "
+                     "recomputing", job["id"], got_ns, want_ns)
+        elif not got_top:
+            log.info("%s: cached run has no topology fingerprint; recomputing",
+                     job["id"])
+        else:
+            log.info("%s: topology changed since the cached run; recomputing",
+                     job["id"])
     try:
         res = md.run_md(wd, job["id"], device_index=job["gpu"],
                         production_ps=job["production_ps"],

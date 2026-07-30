@@ -87,7 +87,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 AMBER_ENV = Path("/data/lab_vm/envs/dwi_amber_md")
 RECEPTOR_PDB = Path("/data/lab_vm/immutable/inhibition/receptor/6VAJ_prepared.pdb")
-JUNCTION_FRCMOD = _REPO_ROOT / "data" / "params" / "cys_gaff2_junction_4.frcmod"
+JUNCTION_FRCMOD = _REPO_ROOT / "data" / "params" / "cys_gaff2_junction_5.frcmod"
 
 COVALENT_RESNUM = "113"          # Cys113, in the ORIGINAL PDB numbering
 COVALENT_RESNAME = "CYS"
@@ -118,6 +118,16 @@ IGB = 8
 # plausible-looking -15 kcal/mol is not evidence of a correct -15 kcal/mol.
 ENERGY_TERMS = ("BOND", "ANGLE", "DIHED", "VDWAALS", "EEL", "EGB", "ESURF",
                 "1-4 VDW", "1-4 EEL", "CMAP")
+
+# The split that makes a binding energy a binding energy. INTERACTION_TERMS are
+# what a textbook single-trajectory MM-GBSA reports; INTERNAL_TERMS are the
+# bonded terms that are SUPPOSED to cancel between the three legs and, under a
+# link-atom cap, do not. Their union is ENERGY_TERMS, checked below so the two
+# tuples cannot drift apart from it or from each other.
+INTERACTION_TERMS = ("VDWAALS", "EEL", "EGB", "ESURF")
+INTERNAL_TERMS = ("BOND", "ANGLE", "DIHED", "1-4 VDW", "1-4 EEL", "CMAP")
+assert set(INTERACTION_TERMS) | set(INTERNAL_TERMS) == set(ENERGY_TERMS)
+assert not set(INTERACTION_TERMS) & set(INTERNAL_TERMS)
 
 # Matches the multi-word labels explicitly BEFORE falling back to a bare token,
 # so "1-4 VDW" can never again be read as "VDW".
@@ -564,8 +574,29 @@ def delta_g(legs: dict[str, LegEnergies]) -> dict:
                  - legs["ligand"].terms.get(t, 0.0), 4)
         for t in ENERGY_TERMS
     }
+    # SPLIT THE INTERACTION ENERGY FROM THE NON-CANCELLING REMAINDER (D0037).
+    #
+    # Textbook single-trajectory MM-GBSA is DEFINED by the bonded terms
+    # cancelling exactly, leaving dVDW + dEEL + dEGB + dESURF. The link-atom cap
+    # breaks that here: the complex has an S-C bond where the two legs have S-H
+    # and C-H, so BOND/ANGLE/DIHED/1-4/CMAP do not cancel.
+    #
+    # That remainder was measured at 0.83 +/- 8.97 kcal/mol across the gate set
+    # -- LARGER than the 6.35 kcal/mol spread of the decoys the ranking has to
+    # discriminate within -- and on its own it separates actives from decoys at
+    # ROC-AUC 0.781, better than either score built on top of it. A quantity
+    # that dominates the ranking cannot stay folded invisibly into "dG".
+    #
+    # Both are reported. `dG_kcal` keeps its established meaning (the full
+    # potential difference) so nothing downstream silently changes underneath;
+    # `dG_interaction_kcal` is the standard MM-GBSA quantity; and the remainder
+    # is named rather than left to be inferred by subtraction.
+    interaction = sum(per_term.get(t, 0.0) for t in INTERACTION_TERMS)
+    internal = sum(per_term.get(t, 0.0) for t in INTERNAL_TERMS)
     return {
         "dG_kcal": round(dg, 3),
+        "dG_interaction_kcal": round(interaction, 3),
+        "dG_internal_residual_kcal": round(internal, 3),
         "G_complex": round(legs["complex"].total, 3),
         "G_receptor": round(legs["receptor"].total, 3),
         "G_ligand": round(legs["ligand"].total, 3),

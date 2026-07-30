@@ -70,12 +70,32 @@ def run_one(job: dict) -> dict:
     sys.path.insert(0, str(REPO))
     from shared import mmgbsa_ensemble as me
 
+    from shared import md_ensemble as md
+
     wd = Path(job["workdir"])
     done = wd / "ensemble" / "ensemble_dg.json"
     if done.is_file() and not job.get("force"):
-        return {**job, **json.loads(done.read_text()), "cached": True}
+        cached = json.loads(done.read_text())
+        # This cache previously guarded on file existence ALONE, so it would
+        # have reused an ensemble computed from a superseded topology or a
+        # superseded trajectory without a word. It now pins both inputs plus
+        # the term split (D0037); a record missing any of them predates the
+        # check and is stale by definition.
+        want_top = md.topology_fingerprint(wd)
+        traj = wd / "md" / "traj_nm.npy"
+        want_traj = int(traj.stat().st_mtime_ns) if traj.is_file() else None
+        if (cached.get("topology_sha256")
+                and cached.get("topology_sha256") == want_top
+                and cached.get("traj_mtime_ns") == want_traj
+                and "dG_interaction_kcal" in cached):
+            return {**job, **cached, "cached": True}
+        log.info("%s: cached ensemble predates the current topology, "
+                 "trajectory or term split; recomputing", job["id"])
     try:
         r = me.ensemble_dg(wd, discard_first=job["discard_first"])
+        traj = wd / "md" / "traj_nm.npy"
+        r["topology_sha256"] = md.topology_fingerprint(wd)
+        r["traj_mtime_ns"] = int(traj.stat().st_mtime_ns) if traj.is_file() else None
         done.parent.mkdir(parents=True, exist_ok=True)
         done.write_text(json.dumps(r, indent=2), encoding="utf-8")
         return {**job, **r}
