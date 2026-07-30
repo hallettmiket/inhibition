@@ -51,6 +51,17 @@ COLS = {
     "n_frames": "dG_ensemble_n_frames",
     "statistical_inefficiency": "dG_ensemble_stat_inefficiency",
     "decomposition": "dG_ensemble_decomposition",
+    # D0037. dG_ensemble_kcal is the FULL potential-energy difference, which for
+    # a link-atom decomposition is not an interaction energy: the H caps break
+    # the bonded-term cancellation that single-trajectory MM-GBSA is defined by,
+    # so the internal terms do not subtract out. The interaction column is the
+    # standard quantity; the residual is what the caps left behind, kept beside
+    # it so the size of the contamination is visible rather than inferred.
+    "dG_interaction_kcal": "dG_ensemble_interaction_kcal",
+    "dG_interaction_sem_kcal": "dG_ensemble_interaction_sem_kcal",
+    "dG_interaction_sd_kcal": "dG_ensemble_interaction_sd_kcal",
+    "dG_internal_residual_kcal": "dG_ensemble_internal_residual_kcal",
+    "dG_internal_residual_sd_kcal": "dG_ensemble_internal_residual_sd_kcal",
 }
 
 
@@ -89,6 +100,19 @@ def merge_one(approach: str, ens: pd.DataFrame, dry: bool) -> None:
         log.info("%s:   ensemble - single: mean %+.2f  min %+.2f  max %+.2f "
                  "kcal/mol (different estimators, not an error)",
                  approach, d.mean(), d.min(), d.max())
+
+    # How much of the full potential difference is NOT interaction. Reported
+    # every run because it is the single number that says whether the column
+    # everything has been quoting means what its name suggests.
+    ic = "dG_ensemble_interaction_kcal"
+    rc = "dG_ensemble_internal_residual_kcal"
+    if ic in merged.columns:
+        m = merged[merged[ic].notna()]
+        if not m.empty:
+            frac = (m[rc].abs() / m[ic].abs().replace(0, float("nan"))).median()
+            log.info("%s:   interaction %+.2f kcal/mol (median), residual "
+                     "%+.2f; |residual|/|interaction| median %.2f",
+                     approach, m[ic].median(), m[rc].median(), frac)
     if dry:
         return
     out = dio.write_full_frame(
