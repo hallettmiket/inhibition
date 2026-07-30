@@ -106,6 +106,9 @@ def panel_candidates() -> None:
                 f"seed: {cfg['seed']}")
             show = [c for c in ("rank", "candidate_id", cfg["metric"],
                                 "ligand_efficiency", "dG_kcal",
+                                "dG_ensemble_interaction_kcal",
+                                "dG_ensemble_interaction_sem_kcal",
+                                "dG_ensemble_internal_residual_kcal",
                                 "dG_ensemble_kcal", "dG_ensemble_sem_kcal",
                                 "warhead_class")
                     if c in s.columns]
@@ -129,6 +132,38 @@ def panel_candidates() -> None:
                     "It is a DIFFERENT estimator from `dG_kcal` (one "
                     "trajectory vs three independent minimisations), so it "
                     "replaces rather than refines it.")
+
+            # WHICH COLUMN IS THE BINDING ENERGY (D0037). Single-trajectory
+            # MM-GBSA is defined by its bonded terms cancelling between the
+            # legs. For the covalent approaches the decomposition cuts the
+            # Cys113 SG-C bond and caps both sides with hydrogen, and those caps
+            # do not cancel -- so `dG_ensemble_kcal`, the full potential
+            # difference, carries a contamination that has nothing to do with
+            # binding. The size of it is measured per approach and shown here
+            # rather than described, because "small" and "three times larger
+            # than the signal" are both possible and the reader cannot tell
+            # which without the number.
+            ic, rc = ("dG_ensemble_interaction_kcal",
+                      "dG_ensemble_internal_residual_kcal")
+            if ic in s.columns and s[ic].notna().any():
+                m = s[s[ic].notna()]
+                ratio = (m[rc].abs()
+                         / m[ic].abs().replace(0, float("nan"))).median()
+                if ratio >= 0.10:
+                    st.warning(
+                        f"**Read `{ic}`, not `dG_ensemble_kcal`.** The "
+                        f"link-atom caps leave a residual of "
+                        f"{m[rc].median():+.2f} kcal/mol against an interaction "
+                        f"energy of {m[ic].median():+.2f} — a median "
+                        f"|residual|/|interaction| of **{ratio:.2f}**. The full "
+                        "potential column is not an interaction energy here.")
+                else:
+                    st.caption(
+                        f"Bonded terms cancel: median "
+                        f"|residual|/|interaction| = {ratio:.2f}, so "
+                        f"`{ic}` and `dG_ensemble_kcal` agree. This approach is "
+                        "non-covalent, so there is no link atom to contaminate "
+                        "the decomposition.")
             with st.expander("structures"):
                 top = s.sort_values("rank").head(9)
                 smi_col = ("adduct_smiles"

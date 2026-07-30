@@ -19,6 +19,10 @@ deleting a file that a manifest names makes that run unverifiable.
 
 | `append_only/.../D4_1.parquet` | `D4_2` | 2026-07-27 | Enumerated with a broken `snar_chloroazine` fragment that omitted the chlorine, so the warhead-validity gate correctly killed all 198 of that class. `D4_2` has the corrected fragment. | not yet |
 
+| `append_only/.../D1_15.parquet`, `D2_15`, `D3_14`, `D4_27` | `D1_16`, `D2_16`, `D3_15`, `D4_28` | 2026-07-30 | Written from an uncommitted working tree, so each manifest stamps commit `070f1aa` while the code that produced it was `9785e48`. The numbers are byte-identical — the merge was re-run unchanged against a clean tree solely so the provenance stamp is true. Keeping both would preserve a version whose only distinguishing feature is a false attribution. | yes, once nothing references them — no downstream run consumed them |
+
+| `append_only/.../01_t1_de_novo/gromacs/t1_1224c0ee20c2/rep1/step*.pdb` | — | 2026-07-30 | ~1400 LINCS constraint-violation dumps from a production run that exploded. They are GROMACS diagnostics for a failure already recorded in `rep1_traceback.txt`, and carry no information the traceback lacks. Any candidate that blows up will produce a similar pile. | yes — but the protected-path hook blocks deletion under `/data/lab_vm`, so this needs a route around it |
+
 ## Note on the governed data root
 
 Large derived outputs live under `/data/lab_vm/append_only/inhibition/` and are
