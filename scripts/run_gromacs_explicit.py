@@ -85,26 +85,29 @@ def run_one(job: dict) -> dict:
     from shared import gromacs_explicit as gx
 
     wd = Path(job["wd"])
-    done = wd / "gromacs_result.json"
+    rep = int(job["replicate"])
+    done = wd / f"rep{rep}" / "gromacs_result.json"
     if done.is_file() and not job.get("force"):
         r = json.loads(done.read_text())
         # Same protocol check the MD and ensemble caches now carry: a shorter
         # cached run is a different run, not a cheaper one.
         if float(r.get("production_ps", 0)) >= float(job["production_ps"]):
             return {**job, **r, "cached": True}
-        log.info("%s: cached run is %.0f ps, %.0f requested; recomputing",
-                 job["id"], r.get("production_ps", 0), job["production_ps"])
+        log.info("%s rep%d: cached run is %.0f ps, %.0f requested; recomputing",
+                 job["id"], rep, r.get("production_ps", 0),
+                 job["production_ps"])
     try:
         r = gx.run_pipeline(Path(job["src"]), wd, gpu_id=job["gpu"],
                             threads=job["threads"],
-                            production_ps=job["production_ps"])
-        wd.mkdir(parents=True, exist_ok=True)
+                            production_ps=job["production_ps"],
+                            replicate=rep, candidate_id=job["id"])
+        done.parent.mkdir(parents=True, exist_ok=True)
         done.write_text(json.dumps(r, indent=2), encoding="utf-8")
         return {**job, **r}
     except Exception as exc:  # noqa: BLE001 - one failure must not end the run
         wd.mkdir(parents=True, exist_ok=True)
-        (wd / "traceback.txt").write_text(traceback.format_exc(),
-                                          encoding="utf-8")
+        (wd / f"rep{rep}_traceback.txt").write_text(traceback.format_exc(),
+                                                    encoding="utf-8")
         return {**job, "gromacs_error": f"{type(exc).__name__}: {str(exc)[:300]}"}
 
 
@@ -114,6 +117,12 @@ def main() -> None:
     ap.add_argument("--gpus", default="0,2,3,4,5,6")
     ap.add_argument("--threads", type=int, default=8)
     ap.add_argument("--production-ps", type=float, default=10000.0)
+    ap.add_argument("--replicates", type=int, default=5,
+                    help="independent velocity seeds per candidate. 5 is the "
+                         "default because 3 leaves the spread estimate at the "
+                         "mercy of one outlier, and the implicit tier showed "
+                         "run-to-run swings of 5-12x on the candidates that "
+                         "matter (D0038).")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--out", default=str(DATA / "00_shared_substrate"
@@ -126,12 +135,22 @@ def main() -> None:
     jobs = discover(args.approach or ["t1", "t2"], args.limit)
     if not jobs:
         raise SystemExit("no shortlisted candidate has the Amber inputs needed")
+    # One job per (candidate, replicate). Interleaved by replicate so that if
+    # the run is interrupted every candidate has the same number of replicates
+    # rather than the first few having five and the rest none.
+    fanned = []
+    for rep in range(1, args.replicates + 1):
+        for j in jobs:
+            fanned.append({**j, "replicate": rep})
+    jobs = fanned
     for i, j in enumerate(jobs):
         j.update(gpu=gpus[i % len(gpus)], threads=args.threads,
                  production_ps=args.production_ps, force=args.force)
 
-    log.info("%d candidates, %.1f ns each, GPUs %s, %d threads each",
-             len(jobs), args.production_ps / 1000.0, gpus, args.threads)
+    log.info("%d runs (%d candidates x %d replicates), %.1f ns each, "
+             "GPUs %s, %d threads each", len(jobs),
+             len(jobs) // max(1, args.replicates), args.replicates,
+             args.production_ps / 1000.0, gpus, args.threads)
 
     ok, failed = [], []
     with ProcessPoolExecutor(max_workers=len(gpus)) as ex:
@@ -144,8 +163,8 @@ def main() -> None:
                           r["gromacs_error"][:120])
             else:
                 perf = (r.get("stages", {}).get("prod", {}) or {}).get("ns_per_day")
-                log.info("[%d/%d] %s %d atoms, %d waters%s", n, len(jobs),
-                         r["id"], r.get("atoms", 0), r.get("waters", 0),
+                log.info("[%d/%d] %s rep%d seed %s%s", n, len(jobs), r["id"],
+                         r.get("replicate", 0), r.get("velocity_seed", "?"),
                          f", {perf:.0f} ns/day" if perf else "")
 
     out = Path(args.out)

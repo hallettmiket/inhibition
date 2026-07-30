@@ -160,23 +160,53 @@ constraints     = h-bonds
 nstlist         = 40
 """
 
+# REPLICATE SEEDS ARE EXPLICIT. GROMACS defaults gen-seed = -1, a
+# pseudo-random value taken from the process, so two runs of one system diverge
+# and NEITHER can be reproduced. That is exactly what happened to the implicit
+# tier: the same molecule gave a mean ligand RMSD of 9.0 nm once and 1.75 nm the
+# next time, and there was no way to go back and see which was typical
+# (D0038). A replicate must be independent of its siblings and reproducible on
+# its own, which requires the seed to be chosen rather than drawn.
+BASE_SEED = 20260730
+
+
+def replicate_seed(candidate_id: str, replicate: int) -> int:
+    """A stable, distinct velocity seed for (candidate, replicate).
+
+    Derived from the candidate id so two candidates never share a seed, and
+    from the replicate index so siblings differ. Rerunning replicate 3 of a
+    given candidate reproduces replicate 3, not a new trajectory.
+    """
+    import zlib
+    h = zlib.crc32(candidate_id.encode()) & 0x7FFFFFFF
+    return (BASE_SEED + h + replicate * 7919) % 2147483647
+
+
 MDP = {
     "min": "integrator = steep\nnsteps = 5000\nemtol = 500.0\n" + _COMMON,
-    "nvt": (f"integrator = md\ndt = 0.002\nnsteps = {int(NVT_PS*500)}\n"
+}
+
+
+def nvt_mdp(seed: int) -> str:
+    return (f"integrator = md\ndt = 0.002\nnsteps = {int(NVT_PS*500)}\n"
             f"tcoupl = v-rescale\ntc-grps = System\ntau-t = 0.1\n"
             f"ref-t = {TEMPERATURE_K}\ngen-vel = yes\n"
-            f"gen-temp = {TEMPERATURE_K}\n" + _COMMON),
-    "npt": (f"integrator = md\ndt = 0.002\nnsteps = {int(NPT_PS*500)}\n"
+            f"gen-temp = {TEMPERATURE_K}\ngen-seed = {seed}\n"
+            f"ld-seed = {seed}\n" + _COMMON)
+
+
+def npt_mdp(seed: int) -> str:
+    return (f"integrator = md\ndt = 0.002\nnsteps = {int(NPT_PS*500)}\n"
             f"tcoupl = v-rescale\ntc-grps = System\ntau-t = 0.1\n"
             f"ref-t = {TEMPERATURE_K}\n"
             f"pcoupl = C-rescale\npcoupltype = isotropic\ntau-p = 2.0\n"
             f"ref-p = {PRESSURE_BAR}\ncompressibility = 4.5e-5\n"
-            f"continuation = yes\n" + _COMMON),
-}
+            f"continuation = yes\nld-seed = {seed}\n" + _COMMON)
 
 
-def production_mdp(ps: float) -> str:
+def production_mdp(ps: float, seed: int = BASE_SEED) -> str:
     return (f"integrator = md\ndt = 0.002\nnsteps = {int(ps*500)}\n"
+            f"ld-seed = {seed}\n"
             f"tcoupl = v-rescale\ntc-grps = System\ntau-t = 0.1\n"
             f"ref-t = {TEMPERATURE_K}\n"
             f"pcoupl = C-rescale\npcoupltype = isotropic\ntau-p = 2.0\n"
@@ -235,28 +265,69 @@ def _stage(wd: Path, name: str, mdp: str, start_gro: str, start_cpt: str | None,
 
 
 def run_pipeline(src: Path, wd: Path, gpu_id: int | None = None,
-                 threads: int = 8, production_ps: float = PRODUCTION_PS
-                 ) -> dict:
-    """solvate -> minimise -> NVT -> NPT -> production, in one workdir."""
-    info = solvate(src, wd)
-    log.info("%s: solvated %d atoms (%d waters, %d ions), box %s",
-             wd.name, info["atoms"], info["waters"], info["ions"],
-             info["box_a"])
+                 threads: int = 8, production_ps: float = PRODUCTION_PS,
+                 replicate: int = 1, candidate_id: str | None = None) -> dict:
+    """Solvate once, then run ONE replicate from that shared system.
 
-    stages = [_stage(wd, "min", MDP["min"], "sys.gro", None, gpu_id, threads)]
-    stages.append(_stage(wd, "nvt", MDP["nvt"], "min.gro", None, gpu_id,
-                         threads))
-    stages.append(_stage(wd, "npt", MDP["npt"], "nvt.gro", "nvt.cpt", gpu_id,
-                         threads))
-    stages.append(_stage(wd, "prod", production_mdp(production_ps), "npt.gro",
-                         "npt.cpt", gpu_id, threads))
+    Layout: solvation and minimisation live in `wd`; each replicate gets
+    `wd/repN` for its own NVT, NPT and production. Water placement and the
+    minimised structure are therefore identical across replicates and only the
+    VELOCITIES differ, which is what makes them replicates of one system rather
+    than five loosely related simulations.
 
-    traj = wd / "prod.xtc"
+    Solvation is skipped when it already exists, so replicates 2..N cost only
+    their own dynamics.
+    """
+    cid = candidate_id or wd.name
+    seed = replicate_seed(cid, replicate)
+
+    if (wd / "sys.top").is_file() and (wd / "sys.gro").is_file():
+        import parmed
+        pm = parmed.load_file(str(wd / "solv.prmtop"), xyz=str(wd / "solv.inpcrd"))
+        info = {"atoms": len(pm.atoms),
+                "waters": sum(1 for r in pm.residues
+                              if r.name in ("WAT", "HOH")),
+                "ions": sum(1 for r in pm.residues
+                            if r.name in ("Na+", "Cl-")),
+                "box_a": [round(float(x), 2) for x in pm.box[:3]],
+                "solvation_reused": True}
+    else:
+        info = solvate(src, wd)
+        info["solvation_reused"] = False
+        log.info("%s: solvated %d atoms (%d waters, %d ions)", cid,
+                 info["atoms"], info["waters"], info["ions"])
+
+    stages = []
+    if not (wd / "min.gro").is_file():
+        stages.append(_stage(wd, "min", MDP["min"], "sys.gro", None, gpu_id,
+                             threads))
+
+    rep = wd / f"rep{replicate}"
+    rep.mkdir(parents=True, exist_ok=True)
+    # grompp resolves -p and -c relative to its own cwd, so the shared files are
+    # linked into the replicate directory rather than copied: five replicates of
+    # a 30k-atom system would otherwise duplicate ~30 MB of topology each.
+    for f in ("sys.top", "min.gro"):
+        link = rep / f
+        if not link.exists():
+            link.symlink_to(wd / f)
+
+    stages.append(_stage(rep, "nvt", nvt_mdp(seed), "min.gro", None, gpu_id,
+                         threads))
+    stages.append(_stage(rep, "npt", npt_mdp(seed), "nvt.gro", "nvt.cpt",
+                         gpu_id, threads))
+    stages.append(_stage(rep, "prod", production_mdp(production_ps, seed),
+                         "npt.gro", "npt.cpt", gpu_id, threads))
+
+    traj = rep / "prod.xtc"
     if not traj.is_file() or traj.stat().st_size == 0:
-        raise GromacsError(f"{wd.name}: production produced no trajectory")
+        raise GromacsError(f"{cid} rep{replicate}: production produced no "
+                           "trajectory")
 
     return {
         **info,
+        "replicate": replicate,
+        "velocity_seed": seed,
         "production_ps": production_ps,
         "frame_interval_ps": FRAME_INTERVAL_PS,
         "water_model": "TIP3P",

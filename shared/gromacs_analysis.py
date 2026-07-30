@@ -101,29 +101,68 @@ def _ligand_resname(tpr: Path, wd: Path) -> str:
         "guess which residue is the ligand")
 
 
+def _prepare_pbc(wd: Path, tpr: Path, xtc: Path, resname: str) -> tuple[Path, Path]:
+    """Make molecules whole and centre on the protein BEFORE measuring anything.
+
+    THIS STEP IS NOT OPTIONAL AND ITS ABSENCE IS NOT VISIBLE. A ligand that
+    crosses a periodic boundary reappears on the far side of the box, and
+    `gmx rms` then measures the distance to its own periodic image. On
+    t2_bc8a4b62eb0e that turned a mean ligand RMSD of 0.203 nm into 4.856 nm --
+    a molecule that barely moved, reported as having left the pocket.
+
+    The tell was available and went unexamined: the uncorrected maximum was
+    9.159 nm against a largest box dimension of 8.13 nm, i.e. a displacement
+    larger than the box that contains it. Any "drift" close to half a box
+    dimension should be assumed to be imaging until this step is applied.
+
+    Three groups are written in a fixed order because trjconv and rms both take
+    them positionally and getting them the wrong way round silently measures
+    something else: 0 = protein+ligand (centred and written out), 1 = protein CA
+    (superposition), 2 = ligand heavy atoms (the quantity).
+    """
+    _gmx("select", "-s", str(tpr), "-select",
+         f'group "Protein" or resname {resname}', "-on", "solute.ndx",
+         cwd=wd, log_name="select_solute.log")
+    _gmx("select", "-s", str(tpr), "-select", "name CA", "-on", "fit.ndx",
+         cwd=wd, log_name="select_fit.log")
+    _gmx("select", "-s", str(tpr), "-select",
+         f'resname {resname} and not name "H*"', "-on", "lig.ndx",
+         cwd=wd, log_name="select_lig.log")
+    ndx = wd / "analysis.ndx"
+    ndx.write_text("".join((wd / f).read_text()
+                           for f in ("solute.ndx", "fit.ndx", "lig.ndx")),
+                   encoding="utf-8")
+
+    whole = wd / "whole.xtc"
+    # stdin "1\n0\n": centre on group 1 (CA), output group 0 (protein+ligand).
+    _gmx("trjconv", "-s", str(tpr), "-f", str(xtc), "-n", str(ndx),
+         "-o", str(whole), "-pbc", "mol", "-center",
+         cwd=wd, log_name="trjconv_pbc.log", stdin="1\n0\n")
+    if not whole.is_file() or whole.stat().st_size == 0:
+        raise AnalysisError(f"{wd.name}: trjconv produced no corrected "
+                            "trajectory; refusing to measure the raw one")
+    return whole, ndx
+
+
 def analyse(wd: Path) -> dict:
-    """Ligand RMSD and contacts over the production trajectory."""
+    """Ligand RMSD and contacts over the PBC-corrected production trajectory."""
     tpr, xtc = wd / "prod.tpr", wd / "prod.xtc"
     for p in (tpr, xtc):
         if not p.is_file() or p.stat().st_size == 0:
             raise AnalysisError(f"{wd.name}: missing or empty {p.name}")
 
     resname = _ligand_resname(tpr, wd)
-    _gmx("select", "-s", str(tpr), "-select", "name CA", "-on", "fit.ndx",
-         cwd=wd, log_name="select_fit.log")
-    both = wd / "both.ndx"
-    both.write_text((wd / "fit.ndx").read_text() + (wd / "lig.ndx").read_text(),
-                    encoding="utf-8")
+    whole, ndx = _prepare_pbc(wd, tpr, xtc, resname)
 
-    # Group 0 = protein CA (superposition), group 1 = ligand heavy atoms.
-    _gmx("rms", "-s", str(tpr), "-f", str(xtc), "-n", str(both),
+    # Groups are positional: 1 = CA (fit), 2 = ligand heavy atoms (measured).
+    _gmx("rms", "-s", str(tpr), "-f", str(whole), "-n", str(ndx),
          "-o", "rmsd.xvg", "-tu", "ns", cwd=wd, log_name="rms.log",
-         stdin="0\n1\n")
+         stdin="1\n2\n")
     rmsd = _read_xvg(wd / "rmsd.xvg")
 
-    _gmx("mindist", "-s", str(tpr), "-f", str(xtc), "-n", str(both),
+    _gmx("mindist", "-s", str(tpr), "-f", str(whole), "-n", str(ndx),
          "-on", "numcont.xvg", "-d", str(CONTACT_CUTOFF_NM), "-tu", "ns",
-         cwd=wd, log_name="mindist.log", stdin="1\n0\n")
+         cwd=wd, log_name="mindist.log", stdin="2\n1\n")
     cont = _read_xvg(wd / "numcont.xvg")
 
     if rmsd.shape[0] < 4:
@@ -132,6 +171,17 @@ def analyse(wd: Path) -> dict:
 
     r = rmsd[:, 1]
     c = cont[:, 1]
+
+    # A displacement approaching half a box dimension is the signature of
+    # residual imaging, not motion. The correction above should make this
+    # impossible; it is checked rather than trusted, because the failure is
+    # silent and produced a 24-fold error once already.
+    box_half_nm = 3.3
+    if float(r.max()) > box_half_nm:
+        log.warning("%s: max ligand RMSD %.2f nm exceeds %.1f nm even after PBC "
+                    "correction. Treat as suspect and inspect the trajectory "
+                    "before reporting it.", wd.name, float(r.max()), box_half_nm)
+
     start = c[0] if c[0] > 0 else 1.0
     engaged = float((c >= ENGAGED_FRACTION * start).mean())
 
@@ -139,13 +189,11 @@ def analyse(wd: Path) -> dict:
         "ligand_resname": resname,
         "n_frames_analysed": int(rmsd.shape[0]),
         "ns_analysed": round(float(rmsd[-1, 0]), 3),
-        # Directly comparable with the implicit-solvent run's
-        # ligand_rmsd_nm_* fields: same quantity, same units, protein removed.
+        "pbc_corrected": True,
         "explicit_ligand_rmsd_nm_mean": round(float(r.mean()), 4),
         "explicit_ligand_rmsd_nm_final": round(float(r[-1]), 4),
         "explicit_ligand_rmsd_nm_max": round(float(r.max()), 4),
-        # NOT comparable with mean_contacts from the implicit run: different
-        # definition, different tool. Named so it cannot be mistaken for it.
+        "explicit_rmsd_suspect": bool(float(r.max()) > box_half_nm),
         "gmx_contacts_mean": round(float(c.mean()), 1),
         "gmx_contacts_start": int(c[0]),
         "explicit_frac_frames_engaged": round(engaged, 4),

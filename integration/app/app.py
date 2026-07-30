@@ -236,40 +236,80 @@ def panel_dossier() -> None:
     st.markdown(f"{gate_badge(verdict)} **Gate: {verdict}** — this rank is an "
                 "ordering the pipeline produced, not evidence of binding (D0031).")
 
-    # Does the docked pose survive real water? The two solvent models disagree
-    # so completely (Spearman -0.102 across 47 paired candidates) that showing
-    # only one would misrepresent what is known about this candidate.
+    # Does the docked pose survive the solvent? Every label here names the
+    # solvent model, the run length and the tool, because the two rows are
+    # produced by different engines with different definitions and a bare
+    # side-by-side table invites the reader to subtract them.
     imp_r = row.get("ligand_rmsd_nm_mean")
     exp_r = row.get("explicit_ligand_rmsd_nm_mean")
-    exp_e = row.get("explicit_frac_frames_engaged")
     if pd.notna(exp_r) or pd.notna(imp_r):
-        st.markdown("**Does the pose survive the solvent?** "
-                    "(ligand RMSD from the docked pose, protein motion removed)")
+        st.markdown("#### Does the docked pose hold up in solvent?")
+        st.caption(
+            "Ligand RMSD = how far the ligand moved from its docked pose, in "
+            "nanometres, after superposing on the protein backbone so protein "
+            "tumbling is removed. Smaller = stayed put. This column IS the same "
+            "quantity in both rows and may be compared directly."
+        )
         rows_ = []
         if pd.notna(imp_r):
-            rows_.append({"solvent model": "implicit (GB, 2 ns)",
-                          "ligand RMSD (nm)": round(float(imp_r), 3),
-                          "frames engaged": (round(float(row["frac_frames_engaged"]), 3)
-                                             if pd.notna(row.get("frac_frames_engaged"))
-                                             else None)})
+            rows_.append({
+                "solvent model": "implicit GB (no water molecules)",
+                "engine / length": "OpenMM · 2 ns · 90 frames",
+                "ligand RMSD (nm)": round(float(imp_r), 3),
+                "frames engaged": (round(float(row["frac_frames_engaged"]), 3)
+                                   if pd.notna(row.get("frac_frames_engaged"))
+                                   else None),
+                "replicates": 1,
+            })
         if pd.notna(exp_r):
-            rows_.append({"solvent model": "explicit (TIP3P, 10 ns)",
-                          "ligand RMSD (nm)": round(float(exp_r), 3),
-                          "frames engaged": (round(float(exp_e), 3)
-                                             if pd.notna(exp_e) else None)})
+            rows_.append({
+                "solvent model": "explicit TIP3P (~9,200 waters)",
+                "engine / length": (
+                    f"GROMACS · {row.get('ns_analysed', 10):g} ns · "
+                    f"{int(row['n_frames_analysed']) if pd.notna(row.get('n_frames_analysed')) else '?'} frames"),
+                "ligand RMSD (nm)": round(float(exp_r), 3),
+                "frames engaged": (round(float(row["explicit_frac_frames_engaged"]), 3)
+                                   if pd.notna(row.get("explicit_frac_frames_engaged"))
+                                   else None),
+                "replicates": 1,
+            })
         st.dataframe(pd.DataFrame(rows_), use_container_width=True,
                      hide_index=True)
+
+        st.warning(
+            "**Single run each — do not read a per-molecule verdict from this.** "
+            "Velocities are drawn afresh each run, and re-running the implicit "
+            "simulation changed one molecule's RMSD by 5x and another's by 12x "
+            "(D0038). Five replicates per candidate are needed before "
+            "\"this one is unstable\" is a claim about the molecule rather "
+            "than about one trajectory.")
+
         if pd.notna(exp_r) and pd.notna(imp_r):
             st.caption(
-                "The RMSD column is the same quantity in both rows and can be "
-                "compared. Across the 47 candidates run under both, the two "
-                "models correlate at Spearman **−0.102** — effectively not at "
-                "all. Implicit solvent has no water to hold a ligand in place "
-                "and let two candidates drift into vacuum that stay bound in "
-                "TIP3P. Treat implicit residence as a property of the solvent "
-                "model, not of the molecule (D0038).")
-        elif pd.notna(exp_r):
-            st.caption("Explicit-solvent run only; no implicit counterpart yet.")
+                "**The two models disagree.** Across the 47 candidates run "
+                "under both, ligand RMSD correlates at Spearman **−0.120** — "
+                "effectively not at all. Implicit solvent also reports "
+                "systematically more movement (mean 0.78 nm against 0.35 nm), "
+                "which is expected: it has no water to hold a ligand in place. "
+                "In explicit water nothing dissociates — the largest mean "
+                "displacement across all 47 is 1.16 nm.")
+
+        if bool(row.get("explicit_rmsd_suspect", False)):
+            st.error(
+                "**Suspect measurement.** Displacement approaches half the "
+                "periodic box, the signature of a ligand crossing a boundary "
+                "and being measured against its own image. Inspect the "
+                "trajectory before reporting this value.")
+
+        cm = row.get("gmx_contacts_mean")
+        if pd.notna(cm):
+            st.caption(
+                f"Contacts (GROMACS `mindist`, 0.45 nm): **{cm:g}**. NOT "
+                "comparable with the implicit tier's contact count, which "
+                "counts heavy-atom pairs and returns several-fold larger "
+                "numbers on the same complex. Different definition, not a "
+                "solvent effect. Explicit-solvent trajectories are "
+                "periodic-boundary corrected before measurement.")
 
     axes = [a for a in D.SHARED_AXES if a in s.columns]
     if axes:

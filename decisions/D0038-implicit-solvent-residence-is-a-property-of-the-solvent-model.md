@@ -1,8 +1,8 @@
 ---
 id: D0038
-title: Implicit-solvent residence was a property of the water model, not the molecule
+title: The two solvent models disagree; but the dissociation I blamed on water was a single-trajectory artefact
 date: 2026-07-30
-status: accepted
+status: partially_withdrawn
 approach: shared
 decided_by: '@mhallet'
 origin: implementation
@@ -16,15 +16,47 @@ affects:
   - decisions/D0036-ensemble-mmgbsa-is-precise-and-still-below-chance.md
 evidence:
   - '48 of 48 non-covalent candidates (T_1, T_2) run for 10 ns in explicit TIP3P, 0 failures'
-  - 't1_8a3f4861ac34: implicit ligand RMSD 9.00 nm, engaged 0.07 -> explicit 1.52 nm, engaged 0.977'
-  - 't1_bd563e94c862: implicit ligand RMSD 7.30 nm, engaged 0.14 -> explicit 0.47 nm, engaged 0.746'
+  - 'WITHDRAWN: t1_8a3f4861ac34 9.00 nm was NOT reproducible; implicit re-run gave 1.75 nm (engaged 0.51)'
+  - 'WITHDRAWN: t1_bd563e94c862 7.30 nm was NOT reproducible; implicit re-run gave 0.59 nm (engaged 0.91)'
+  - 'run-to-run divergence under the SAME model: 5.1x and 12.5x on mean ligand RMSD for those two'
+  - 'STANDS: spearman(implicit, explicit) = -0.102 run 1 and -0.144 run 2, i.e. two independent implicit runs both uncorrelated with explicit'
   - 'Spearman(implicit RMSD, explicit RMSD) = -0.102 across 47 paired candidates'
   - 'both models flag a similar COUNT as leaving (4 vs 5 of 47) but they are different candidates'
   - 'candidates stable under GB drift furthest in water: t2_bc8a4b62eb0e 1.78 -> 4.86 nm, t1_c1ec9e35dba7 0.63 -> 4.66 nm'
   - 'GROMACS 2026.3 CUDA sees all 8 A100s at ~740 ns/day; the shared OpenCL build refuses NVIDIA devices entirely'
 ---
 
-# Implicit-solvent residence measured the solvent model
+# Two claims, one withdrawn
+
+## Withdrawal notice
+
+This record made two claims. One stands and is now better supported; the other
+is withdrawn.
+
+**STANDS — implicit and explicit residence are uncorrelated.** A second,
+independent implicit-solvent run gives Spearman **-0.144** against explicit,
+beside **-0.102** for the first. Two runs agree that they disagree with
+explicit water, so this is not one unlucky trajectory.
+
+**WITHDRAWN — the dissociation was not caused by the water model.** It did not
+reproduce under the SAME model. t1_8a3f4861ac34 went 9.00 nm -> **1.75 nm** on
+re-run (engaged 0.07 -> 0.51); t1_bd563e94c862 went 7.30 nm -> **0.59 nm**
+(0.14 -> 0.91). Both now sit close to their explicit values, 1.52 and 0.47 nm.
+The prose below attributes those departures to the absence of explicit water.
+That attribution is unsupported: they were a property of a single short
+trajectory.
+
+Velocities are drawn afresh each run, so two 2 ns trajectories of one molecule
+under one model diverge -- and for candidates that wander they diverge by
+**5.1x and 12.5x** on mean ligand RMSD, while stable candidates reproduce to
+within 0.7-2.1x. The metric is reproducible for molecules that sit still and
+unreproducible for precisely the molecules it was being used to flag.
+
+**The corrected lesson, which is stronger.** A per-candidate residence claim
+needs replicate trajectories in either solvent model. One run cannot separate
+"this ligand leaves the pocket" from "this trajectory wandered", and the
+original reporting did not try to.
+
 
 ## What was claimed
 
