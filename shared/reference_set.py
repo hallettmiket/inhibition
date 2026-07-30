@@ -42,7 +42,7 @@ UNVERIFIED = "UNVERIFIED"
 
 # Repo root, resolved from this file's location so callers need no cwd contract.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MASTER = _REPO_ROOT / "data" / "reference" / "pin1_reference_binders_2.csv"
+DEFAULT_MASTER = _REPO_ROOT / "data" / "reference" / "pin1_reference_binders_3.csv"
 DEFAULT_ANCHORS = _REPO_ROOT / "data" / "reference" / "pin1_covalent_cys113_anchors_2.csv"
 
 

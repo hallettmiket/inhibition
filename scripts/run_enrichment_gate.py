@@ -213,8 +213,20 @@ def build_jobs(stratum: str, workdir: Path) -> list[dict]:
     # pooled 104 acrylamide decoys (a class with no active at all) against
     # chloroacetamide, sulfamate and naphthoquinone actives, so D0028 found the
     # gate partly measuring chemotype rather than binding.
-    dfile = DECOY_DIR / ("decoys_covalent_6.csv" if stratum == "covalent"
-                         else "decoys_non_covalent_1.csv")
+    # The non-covalent decoys moved OUT of the immutable tree (read-only by
+    # project rule) and were rebuilt to span the actives' full mass range.
+    # decoys_non_covalent_1 topped out at MW 478, so Liu-2024-C3 (MW 547) had
+    # zero property matches and filter_adequately_matched would have dropped it
+    # -- silently costing the SIXTH independent chemotype, which is the gate's
+    # floor. Written out rather than searched for, so a run records which file
+    # it consumed.
+    if stratum == "covalent":
+        dfile = DECOY_DIR / "decoys_covalent_6.csv"
+    else:
+        dfile = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate"
+                     "/decoys/decoys_non_covalent_2.csv")
+    if not dfile.is_file():
+        raise SystemExit(f"no decoy file at {dfile}")
     decoys = pd.read_csv(dfile)
     if stratum == "covalent":
         decoys = decoys.rename(columns={"active": "matched_active",
