@@ -3,7 +3,7 @@
 !!! info "Generated page"
     Rendered at build time from the repo's source of truth. Edit the underlying file, not this page.
 
-35 record(s). Each answers *why* a choice was made; the [runbooks](../runbooks/index.md) answer *how* to make that kind of choice again, and a run's `manifest.json` records *what* it actually consumed.
+37 record(s). Each answers *why* a choice was made; the [runbooks](../runbooks/index.md) answer *how* to make that kind of choice again, and a run's `manifest.json` records *what* it actually consumed.
 
 Records marked `origin: adversary` are decisions the adversarial review forced — the audit trail that review changed the design.
 
@@ -885,6 +885,42 @@ Affects: `data/params/cys_gaff2_junction_3.frcmod`, `shared/mmgbsa.py`, `decisio
     - verdict remains UNDERPOWERED: 2 actives < 3 floor, 2 chemotypes < 6 floor
 
 Affects: `shared/mmgbsa_ensemble.py`, `scripts/run_mmgbsa_ensemble.py`, `decisions/D0031-class-matched-decoys-remove-the-apparent-covalent-enrichment.md`, `decisions/D0032-mmgbsa-gate-and-the-power-floor-on-negative-verdicts.md`
+
+---
+
+### D0037 — The junction dihedral was the sp3 analogue, and the reported dG was never an interaction energy
+
+**:material-check: accepted** · `origin: adversary` · 2026-07-29
+
+??? note "Evidence"
+    - the frcmod header states every term is GAFF2's ss analogue; the whole DIHE block said 'from parm19' and used 1.00/3-fold/0deg for all five carbon types
+    - GAFF2 gives X-c2-ss-X 2.200/2-fold/180, X-ca-ss-X 0.800/2-fold/180; only X-c3-ss-X matched what was in use
+    - Juglone's built topology carried 2C-S-cc at PK 0.333, per 3, phase 0.0 -- the sp3 form on an sp2 attachment
+    - affected 31 of 82 gate ligands: every cc/cd/ca/c2 attachment, i.e. exactly the ligands D0035 restored
+    - GAFF2 has NO generic X-cc-ss-X or X-cd-ss-X, only specific 4-atom terms; cc/cd use cd-cc-ss-ca (2.430/2-fold/0) and are the least certain of the five
+    - link-atom cap prevents bonded-term cancellation: residual 9.77 +/- 11.38 kcal/mol against a decoy spread of 6.35
+    - gate ROC-AUC: full potential 0.425, standard interaction energy 0.181, the residual ALONE 0.831
+    - Juglone interaction energy +9.08 kcal/mol, i.e. unfavourable, for a compound with published covalent activity
+    - the measurement-error propagation quoted in D0036 existed in no code in the repository
+
+Affects: `data/params/cys_gaff2_junction_5.frcmod`, `shared/mmgbsa.py`, `shared/mmgbsa_ensemble.py`, `shared/enrichment_gate.py`, `decisions/D0035-the-sp2-junction-gap-was-three-missing-angles.md`, `decisions/D0036-ensemble-mmgbsa-is-precise-and-still-below-chance.md`
+
+---
+
+### D0038 — Implicit-solvent residence was a property of the water model, not the molecule
+
+**:material-check: accepted** · `origin: implementation` · 2026-07-30
+
+??? note "Evidence"
+    - 48 of 48 non-covalent candidates (T_1, T_2) run for 10 ns in explicit TIP3P, 0 failures
+    - t1_8a3f4861ac34: implicit ligand RMSD 9.00 nm, engaged 0.07 -> explicit 1.52 nm, engaged 0.977
+    - t1_bd563e94c862: implicit ligand RMSD 7.30 nm, engaged 0.14 -> explicit 0.47 nm, engaged 0.746
+    - Spearman(implicit RMSD, explicit RMSD) = -0.102 across 47 paired candidates
+    - both models flag a similar COUNT as leaving (4 vs 5 of 47) but they are different candidates
+    - candidates stable under GB drift furthest in water: t2_bc8a4b62eb0e 1.78 -> 4.86 nm, t1_c1ec9e35dba7 0.63 -> 4.66 nm
+    - GROMACS 2026.3 CUDA sees all 8 A100s at ~740 ns/day; the shared OpenCL build refuses NVIDIA devices entirely
+
+Affects: `shared/gromacs_explicit.py`, `shared/gromacs_analysis.py`, `scripts/run_gromacs_explicit.py`, `scripts/merge_gromacs_results.py`, `decisions/D0036-ensemble-mmgbsa-is-precise-and-still-below-chance.md`
 
 ---
 

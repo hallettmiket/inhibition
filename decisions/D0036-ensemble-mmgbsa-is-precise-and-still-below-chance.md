@@ -28,6 +28,23 @@ evidence:
 
 # The ensemble is precise, and still below chance
 
+> **REVISION NOTICE (D0038, 2026-07-30).** The pocket-residence numbers cited
+> in support of this record are withdrawn as claims about molecules. Explicit
+> TIP3P solvent on the same 47 candidates shows the two solvent models are
+> uncorrelated (Spearman **-0.102**), and both candidates reported here as
+> leaving the pocket stay bound in real water: t1_8a3f4861ac34 goes from RMSD
+> 9.00 nm / engaged 0.07 to 1.52 nm / 0.977, and t1_bd563e94c862 from 7.30 nm /
+> 0.14 to 0.47 nm / 0.746. Implicit-solvent residence measured the water model.
+>
+> The dG and enrichment findings below are unaffected -- they do not rest on
+> residence, which was never allowed into the gate.
+>
+> **REVISION NOTICE (D0037, 2026-07-29).** The junction dihedral used to score
+> these systems applied GAFF2's sp3 analogue to every sp2 attachment. It is
+> corrected; the single-structure numbers have been recomputed and the ensemble
+> numbers here have not. See D0037 for the interaction-energy split, which
+> changes what the reported dG means.
+
 ## The prediction was wrong
 
 Before the run I expected the ensemble to show that actives and class-matched

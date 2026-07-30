@@ -53,6 +53,27 @@ COLS = ("explicit_ligand_rmsd_nm_mean", "explicit_ligand_rmsd_nm_final",
         "explicit_ligand_rmsd_nm_max", "explicit_frac_frames_engaged",
         "gmx_contacts_mean", "ns_analysed", "n_frames_analysed")
 
+# The implicit-solvent counterparts, carried onto the same rows. Without them
+# the frame holds half of a comparison, and the comparison IS the result: the
+# two solvent models correlate at Spearman -0.102, so a reader seeing only one
+# would take a solvent-model artefact for a property of the molecule.
+IMPLICIT_INDEX = DATA / "00_shared_substrate" / "md_ensemble_index.jsonl"
+IMPLICIT_COLS = ("ligand_rmsd_nm_mean", "ligand_rmsd_nm_max",
+                 "frac_frames_engaged", "mean_contacts")
+
+
+def implicit_residence() -> pd.DataFrame:
+    """Implicit-solvent residence per candidate, or an empty frame."""
+    if not IMPLICIT_INDEX.is_file():
+        log.warning("no implicit index at %s; frames will carry only the "
+                    "explicit half of the comparison", IMPLICIT_INDEX)
+        return pd.DataFrame()
+    recs = [json.loads(l) for l in IMPLICIT_INDEX.read_text().splitlines()
+            if l.strip()]
+    df = pd.DataFrame([r for r in recs if "md_error" not in r])
+    keep = ["candidate_id", *[c for c in IMPLICIT_COLS if c in df.columns]]
+    return df[keep].drop_duplicates("candidate_id") if not df.empty else df
+
 
 def analyse_one(job: dict) -> dict:
     os.nice(19)
@@ -112,9 +133,13 @@ def main() -> None:
         df, path = dio.latest_frame(experiment, a)
         sub = ens[ens.approach == a][["candidate_id",
                                       *[c for c in COLS if c in ens.columns]]]
-        df = df.drop(columns=[c for c in COLS if c in df.columns])
+        df = df.drop(columns=[c for c in (*COLS, *IMPLICIT_COLS)
+                              if c in df.columns])
         merged = df.merge(sub.drop_duplicates("candidate_id"),
                           on="candidate_id", how="left")
+        imp = implicit_residence()
+        if not imp.empty:
+            merged = merged.merge(imp, on="candidate_id", how="left")
         if len(merged) != len(df):
             raise SystemExit(f"{a}: merge changed row count")
         n = int(merged["explicit_ligand_rmsd_nm_mean"].notna().sum())

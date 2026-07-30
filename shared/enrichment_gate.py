@@ -39,6 +39,7 @@ import random
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import yaml
 from rdkit import DataStructs, RDLogger
@@ -184,6 +185,10 @@ class GateResult:
     ef_1pct: float
     bedroc: float
     per_chemotype_auc: dict[str, float] = field(default_factory=dict)
+    # Set only when a per-candidate measurement error is supplied. Kept
+    # SEPARATE from roc_auc_ci because the two answer different questions
+    # and conflating them was a real defect (D0038).
+    measurement_error: dict | None = None
     verdict: str = "UNDERPOWERED"
     reasons: list[str] = field(default_factory=list)
 
@@ -257,9 +262,70 @@ def _verdict(res: GateResult, thresholds: dict) -> tuple[str, list[str]]:
     return "WEAK", reasons
 
 
+MEASUREMENT_DRAWS = 4000
+MEASUREMENT_SEED = 20260729
+
+
+def propagate_measurement_error(scored: pd.DataFrame, *, metric: str,
+                                sem_col: str, higher_is_better: bool,
+                                n_draws: int = MEASUREMENT_DRAWS,
+                                seed: int = MEASUREMENT_SEED) -> dict:
+    """How much of the ROC-AUC is explained by each candidate's OWN error bar.
+
+    WHY THIS LIVES HERE AND IS SEEDED. This quantity was reported in a decision
+    record and a manuscript draft while existing in no code at all -- computed
+    ad hoc, unversioned, unseeded, untested, and never routed through the gate
+    that grades every other metric. That is how a number becomes load-bearing
+    without ever being checked (D0038).
+
+    WHAT IT DOES AND DOES NOT MEASURE. It resamples each candidate's score from
+    N(value, sem) and recomputes the metric, so it answers: given how precisely
+    each candidate was measured, how much could the ordering move? It holds the
+    SET of molecules fixed.
+
+    It therefore CANNOT represent between-active variance, and with two actives
+    there is none to estimate. It is not a substitute for the bootstrap CI,
+    which resamples molecules and is the interval that speaks to
+    generalisation. Report both or neither -- quoting only this one makes a
+    two-molecule result look decided. `evaluate` returns them in separate
+    fields for exactly that reason.
+    """
+    for col in ("label", metric, sem_col):
+        if col not in scored.columns:
+            raise EnrichmentGateError(f"scored frame missing {col!r}")
+    sub = scored[scored[metric].notna() & scored[sem_col].notna()]
+    labels = sub["label"].astype(int).to_numpy()
+    if labels.sum() == 0 or labels.sum() == len(labels):
+        raise EnrichmentGateError("need both actives and decoys")
+
+    mu = sub[metric].astype(float).to_numpy()
+    se = np.abs(sub[sem_col].astype(float).to_numpy())
+    rng = np.random.default_rng(seed)
+    draws = np.empty(n_draws, dtype=float)
+    for i in range(n_draws):
+        draws[i] = roc_auc(rng.normal(mu, se).tolist(), labels.tolist(),
+                           higher_is_better=higher_is_better)
+    point = roc_auc(mu.tolist(), labels.tolist(),
+                    higher_is_better=higher_is_better)
+    return {
+        "point": round(float(point), 4),
+        "mean": round(float(draws.mean()), 4),
+        "ci": [round(float(np.percentile(draws, 2.5)), 4),
+               round(float(np.percentile(draws, 97.5)), 4)],
+        "p_above_chance": round(float((draws > 0.5).mean()), 4),
+        "n_draws": int(n_draws),
+        "seed": int(seed),
+        "sem_column": sem_col,
+        "holds_fixed": "the set of molecules; cannot represent between-active "
+                       "variance, and with few actives there is none to "
+                       "estimate. Not a substitute for the bootstrap CI.",
+    }
+
+
 def evaluate(scored: pd.DataFrame, *, metric: str, stratum: str,
              higher_is_better: bool, thresholds: dict | None = None,
-             chemotype_threshold: float = 0.4, n_boot: int = 2000) -> GateResult:
+             chemotype_threshold: float = 0.4, n_boot: int = 2000,
+             sem_col: str | None = None) -> GateResult:
     """Score one metric on one stratum and grade it.
 
     Parameters
@@ -302,6 +368,15 @@ def evaluate(scored: pd.DataFrame, *, metric: str, stratum: str,
                 higher_is_better=higher_is_better)
         except EnrichmentGateError:
             continue
+
+    if sem_col and sem_col in scored.columns:
+        try:
+            res.measurement_error = propagate_measurement_error(
+                scored, metric=metric, sem_col=sem_col,
+                higher_is_better=higher_is_better)
+        except EnrichmentGateError as exc:
+            log.warning("[%s/%s] measurement-error propagation skipped: %s",
+                        stratum, metric, exc)
 
     res.verdict, res.reasons = _verdict(res, thresholds or {})
     log.info("[%s/%s] %s — AUC %.3f CI[%.3f,%.3f] EF1%% %.1f BEDROC %.3f over %d chemotypes",

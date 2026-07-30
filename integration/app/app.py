@@ -236,6 +236,41 @@ def panel_dossier() -> None:
     st.markdown(f"{gate_badge(verdict)} **Gate: {verdict}** — this rank is an "
                 "ordering the pipeline produced, not evidence of binding (D0031).")
 
+    # Does the docked pose survive real water? The two solvent models disagree
+    # so completely (Spearman -0.102 across 47 paired candidates) that showing
+    # only one would misrepresent what is known about this candidate.
+    imp_r = row.get("ligand_rmsd_nm_mean")
+    exp_r = row.get("explicit_ligand_rmsd_nm_mean")
+    exp_e = row.get("explicit_frac_frames_engaged")
+    if pd.notna(exp_r) or pd.notna(imp_r):
+        st.markdown("**Does the pose survive the solvent?** "
+                    "(ligand RMSD from the docked pose, protein motion removed)")
+        rows_ = []
+        if pd.notna(imp_r):
+            rows_.append({"solvent model": "implicit (GB, 2 ns)",
+                          "ligand RMSD (nm)": round(float(imp_r), 3),
+                          "frames engaged": (round(float(row["frac_frames_engaged"]), 3)
+                                             if pd.notna(row.get("frac_frames_engaged"))
+                                             else None)})
+        if pd.notna(exp_r):
+            rows_.append({"solvent model": "explicit (TIP3P, 10 ns)",
+                          "ligand RMSD (nm)": round(float(exp_r), 3),
+                          "frames engaged": (round(float(exp_e), 3)
+                                             if pd.notna(exp_e) else None)})
+        st.dataframe(pd.DataFrame(rows_), use_container_width=True,
+                     hide_index=True)
+        if pd.notna(exp_r) and pd.notna(imp_r):
+            st.caption(
+                "The RMSD column is the same quantity in both rows and can be "
+                "compared. Across the 47 candidates run under both, the two "
+                "models correlate at Spearman **−0.102** — effectively not at "
+                "all. Implicit solvent has no water to hold a ligand in place "
+                "and let two candidates drift into vacuum that stay bound in "
+                "TIP3P. Treat implicit residence as a property of the solvent "
+                "model, not of the molecule (D0038).")
+        elif pd.notna(exp_r):
+            st.caption("Explicit-solvent run only; no implicit counterpart yet.")
+
     axes = [a for a in D.SHARED_AXES if a in s.columns]
     if axes:
         st.markdown("**Shared physicochemical axes** (identical RDKit call "

@@ -24,6 +24,15 @@ evidence:
 
 # Three missing angle lines
 
+> **REVISION NOTICE (D0037, 2026-07-29).** This record verified the derivation
+> rule against the ANGLE block only. The DIHE block violated the same rule --
+> it applied GAFF2's sp3 analogue (1.00 / 3-fold / 0 deg) to every sp2
+> attachment, where GAFF2 gives X-c2-ss-X 2.200/2-fold/180 and X-ca-ss-X
+> 0.800/2-fold/180. Corrected in junction v5. The claim below that "a
+> derivation rule that reproduces the existing values can be trusted to produce
+> the missing ones" is sound, but it was applied to one section of the file and
+> not the other.
+
 ## What was blocking
 
 Every failure carried the same tleap message:

@@ -202,7 +202,24 @@ def _stage(wd: Path, name: str, mdp: str, start_gro: str, start_cpt: str | None,
              "-ntmpi", "1", "-ntomp", str(threads)]
     if gpu_id is not None:
         mdrun += ["-gpu_id", str(gpu_id)]
-    _run(mdrun, wd, f"mdrun_{name}.log")
+    try:
+        _run(mdrun, wd, f"mdrun_{name}.log")
+    except GromacsError:
+        # GROMACS' GPU update kernel requires constrained atoms to be
+        # contiguous, and an Amber-ordered topology need not satisfy that:
+        # "Update groups can not be used for this system because atoms that are
+        # (in)directly constrained together are interdispersed with other
+        # atoms", followed by a segfault (signal 11) rather than a clean exit.
+        # It is a kernel limitation, not a bad system -- the same topology runs
+        # correctly with the update on the CPU. Retried once that way rather
+        # than dropping the candidate, because a silent gap in the set would
+        # look like a candidate that failed chemically.
+        text = (wd / f"mdrun_{name}.log").read_text(errors="ignore")
+        if "Update groups can not be used" not in text:
+            raise
+        log.warning("%s/%s: GPU update kernel rejected this atom ordering; "
+                    "retrying with -update cpu", wd.name, name)
+        _run(mdrun + ["-update", "cpu"], wd, f"mdrun_{name}_updatecpu.log")
     secs = time.time() - t0
 
     nsday = None
