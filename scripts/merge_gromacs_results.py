@@ -155,12 +155,44 @@ def main() -> None:
     for a in sorted({r["approach"] for r in ok}):
         experiment = EXPERIMENTS[a]
         df, path = dio.latest_frame(experiment, a)
-        sub = ens[ens.approach == a][["candidate_id",
+        sub = ens[ens.approach == a][["candidate_id", "replicate",
                                       *[c for c in COLS if c in ens.columns]]]
+        # AGGREGATE ACROSS REPLICATES; DO NOT PICK ONE. `drop_duplicates` kept
+        # the FIRST row per candidate, and discover() emits the flat run first,
+        # so the merge silently reported the old single-run numbers and threw
+        # away all five replicates -- the same silent success as the discovery
+        # bug, one step later.
+        #
+        # Replicate 0 is the original single run and is EXCLUDED from the
+        # aggregate: it is a different campaign, and averaging it in would mix
+        # the thing being corrected with the correction.
+        reps = sub[sub["replicate"] > 0]
+        if reps.empty:
+            reps = sub                      # only the old campaign exists
+            log.warning("%s: no replicates found; falling back to the single "
+                        "runs. Treat every number below as one trajectory.", a)
+        g = reps.groupby("candidate_id")
+        agg = g["explicit_ligand_rmsd_nm_mean"].agg(
+            explicit_ligand_rmsd_nm_mean="mean",
+            explicit_rmsd_replicate_sd="std",
+            explicit_rmsd_replicate_min="min",
+            explicit_rmsd_replicate_max="max").reset_index()
+        # The spread IS the result (D0038): two runs of one molecule under one
+        # model diverged 5x and 12x, so a candidate whose replicates disagree
+        # supports no per-molecule residence claim however tight its mean.
+        agg["explicit_rmsd_replicate_ratio"] = (
+            agg["explicit_rmsd_replicate_max"]
+            / agg["explicit_rmsd_replicate_min"].replace(0, pd.NA))
+        agg["n_replicates"] = g.size().values
+        for c in ("explicit_frac_frames_engaged", "gmx_contacts_mean",
+                  "ns_analysed", "n_frames_analysed"):
+            if c in reps.columns:
+                agg[c] = g[c].mean().values
+        if "explicit_rmsd_suspect" in reps.columns:
+            agg["explicit_rmsd_suspect_any"] = g["explicit_rmsd_suspect"].any().values
         df = df.drop(columns=[c for c in (*COLS, *IMPLICIT_COLS)
                               if c in df.columns])
-        merged = df.merge(sub.drop_duplicates("candidate_id"),
-                          on="candidate_id", how="left")
+        merged = df.merge(agg, on="candidate_id", how="left")
         imp = implicit_residence()
         if not imp.empty:
             merged = merged.merge(imp, on="candidate_id", how="left")
