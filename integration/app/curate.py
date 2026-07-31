@@ -27,6 +27,12 @@ output as a working filter finding none -- and the user would act on it.
 
 from __future__ import annotations
 
+#: Mtime of THIS file at the moment it was imported. Frozen at import, so
+#: comparing it with the file's current mtime is the only reliable way to tell
+#: that a running process is executing stale code -- Streamlit re-runs the
+#: script on every interaction but never re-imports helper modules.
+LOADED_MTIME = __import__("os").stat(__file__).st_mtime
+
 import re
 from dataclasses import dataclass
 

@@ -780,15 +780,22 @@ try:
     _repo = str(APP_DIR.parent.parent)
     _head = _sp.run(["git", "-C", _repo, "rev-parse", "--short", "HEAD"],
                     capture_output=True, text=True).stdout.strip()
-    _loaded = max(Path(m.__file__).stat().st_mtime
-                  for m in (D, depict, curate, p3d) if getattr(m, "__file__", None))
-    _newest = max(p.stat().st_mtime for p in APP_DIR.glob("*.py"))
     st.sidebar.caption(f"code: `{_head}`")
-    if _newest > _loaded + 1:
+
+    # COMPARE EACH MODULE'S IMPORT-TIME MTIME WITH ITS CURRENT ONE. The first
+    # version of this compared the helper modules' CURRENT mtimes against the
+    # newest file in the directory -- so editing app.py alone made it cry stale,
+    # every time, including immediately after a restart. It never knew when
+    # anything was imported. Each helper now freezes its own mtime at import
+    # (LOADED_MTIME), which is the only value that answers the question.
+    _stale = [m.__name__ for m in (D, depict, curate, p3d)
+              if getattr(m, "LOADED_MTIME", None) is not None
+              and Path(m.__file__).stat().st_mtime > m.LOADED_MTIME + 1]
+    if _stale:
         st.sidebar.error(
-            "**This process is running stale code.** A module on disk is newer "
-            "than the one loaded. Streamlit does not re-import helper modules — "
-            "restart the app.")
+            f"**Running stale code:** `{'`, `'.join(_stale)}` changed on disk "
+            "since this process imported them. Streamlit does not re-import "
+            "helper modules — restart the app.")
 except Exception:  # noqa: BLE001 - a version badge must never break the page
     pass
 
