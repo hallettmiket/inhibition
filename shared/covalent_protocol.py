@@ -309,7 +309,29 @@ def dock(ligand: Path, out_sdf: Path, warhead_class: str, *,
             f"gnina exited 0 for {ligand.name} but produced no results table. "
             "A dock that returns no score is a failure, not a null result."
         )
-    best = rows[0]
+    # THE AFFINITY-BEST MODE, NOT ROW 0 (D0047).
+    #
+    # gnina's results table is ordered by CNN POSE SCORE, not by affinity. This
+    # used to take `rows[0]` and read `affinity` off it, which meant
+    # `affinity_kcal` was "the affinity of the CNN-selected pose" rather than
+    # "the best affinity". Measured across the existing pools, rows[0] was NOT
+    # the affinity-best mode for 89.0% of T_3 and 89.3% of T_4 candidates,
+    # median penalty 1.46 and 1.95 kcal/mol.
+    #
+    # That mattered because D0011 explicitly demoted `cnn_affinity` to advisory
+    # (gnina itself reports CNN scoring is uncalibrated for covalent docking)
+    # and T_3/T_4 rank on `affinity_kcal` instead. So the project rejected the
+    # CNN as a ranking signal and then let it choose the pose whose affinity it
+    # ranked on. Fixing it re-orders >50% of both covalent shortlists.
+    #
+    # ALL THREE SCORES COME FROM THE SAME MODE. Taking affinity from the
+    # affinity-best pose while leaving the CNN values on the CNN-best pose would
+    # describe two different geometries in one row — a subtler version of the
+    # same defect. `selected_mode` records which one, so a reader never has to
+    # infer it.
+    best = min(rows, key=lambda r: (r["affinity"] if r.get("affinity")
+                                    is not None else float("inf")))
+    selected_mode = rows.index(best) + 1
 
     # gnina emits this on every covalent run, and it matters: the plan makes
     # CNNaffinity T_3's RANK metric and T_4's secondary. Carried into the result
@@ -327,6 +349,11 @@ def dock(ligand: Path, out_sdf: Path, warhead_class: str, *,
         "affinity_kcal": best.get("affinity"),
         "cnn_uncalibrated_for_covalent": cnn_uncalibrated,
         "n_modes": len(rows),
+        # 1-based index of the mode all three scores were read from. 1 means
+        # the CNN-best pose happened also to be affinity-best; anything else
+        # means they disagreed, which is the common case (D0047).
+        "selected_mode": selected_mode,
+        "affinity_selection": "min_affinity_over_modes",
         "protocol_fingerprint": proto.fingerprint(),
         "warhead_class": warhead_class,
         "reactive_atom_smarts": smarts,
