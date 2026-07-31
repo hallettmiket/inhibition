@@ -3,7 +3,8 @@ Purpose: Rebuild the non-covalent decoy set so every non-covalent active has
          enough property-matched decoys to enter the enrichment gate.
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-30
-Input: data/reference/pin1_reference_binders_3.csv, the cached ChEMBL pool
+Input: data/reference/pin1_reference_binders_<latest>.csv (resolved by glob),
+       the cached ChEMBL pool
 Output: append_only/.../decoys/decoys_non_covalent_2.csv + a per-active report
 
 Run:  python scripts/build_noncovalent_decoys_2.py [--per-active 60] [--dry-run]
@@ -52,7 +53,12 @@ sys.path.insert(0, str(REPO))
 
 log = logging.getLogger("build-noncov-decoys")
 
-ACTIVES = REPO / "data" / "reference" / "pin1_reference_binders_3.csv"
+# Resolved by glob, never pinned by hand — a literal version here goes stale
+# silently, because the old file still exists and still parses. See
+# shared.reference_set.latest_reference for the three times that has happened.
+from shared.reference_set import latest_reference  # noqa: E402
+
+ACTIVES = latest_reference("pin1_reference_binders")
 POOL = Path("/data/lab_vm/immutable/inhibition/decoys/chembl_pool.csv")
 OUT_DIR = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate/decoys")
 

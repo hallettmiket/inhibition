@@ -2,8 +2,10 @@
 Purpose: Loader + validator for the frozen Pin1 reference binder set.
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-27
-Input: data/reference/pin1_reference_binders_2.csv and
-       data/reference/pin1_covalent_cys113_anchors_2.csv
+Input: data/reference/pin1_reference_binders_<latest>.csv and
+       data/reference/pin1_covalent_cys113_anchors_<latest>.csv
+       (resolved by glob — see latest_reference(); naming a version here is
+        how this header went stale twice already)
 Output: validated frames for the novelty axis and T_4's reactivity window
 
 This module exists to enforce two adversary controls that are easy to violate
@@ -42,8 +44,58 @@ UNVERIFIED = "UNVERIFIED"
 
 # Repo root, resolved from this file's location so callers need no cwd contract.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MASTER = _REPO_ROOT / "data" / "reference" / "pin1_reference_binders_3.csv"
-DEFAULT_ANCHORS = _REPO_ROOT / "data" / "reference" / "pin1_covalent_cys113_anchors_2.csv"
+_REF_DIR = _REPO_ROOT / "data" / "reference"
+
+
+def latest_reference(stem: str) -> Path:
+    """Highest integer-versioned ``<stem>_N.csv`` under data/reference.
+
+    RESOLVED BY GLOB, NOT PINNED BY HAND. Every reference file in this project
+    is integer-versioned per the lab data rule, and every hand-written pin to a
+    specific version has eventually gone stale while looking fine:
+
+    * `warhead_library.DEFAULT_LIBRARY` sat on `warhead_classes_7.csv` after
+      `_8` was written, so the acrylamide precedent correction in `_8` was
+      never loaded by anything (recorded in data/ready_to_delete.md).
+    * `gen_docs.py` named `pin1_reference_binders_1.csv` as a literal and
+      carried a load error on the rendered status page for weeks.
+    * This module pinned `_3` while `_4` -- which adds two potent covalent
+      actives the gate had been reporting UNDERPOWERED without -- sat unread
+      beside it.
+
+    The failure mode is always the same and always silent: the pin still points
+    at a file that exists and parses, so nothing raises. Globbing gets the same
+    answer with no dependency and cannot go stale.
+
+    Raises
+    ------
+    ReferenceSetError
+        If no versioned file matches, which IS worth failing on -- a missing
+        reference set must not be papered over with a default.
+    """
+    best, best_n = None, -1
+    for p in _REF_DIR.glob(f"{stem}_*.csv"):
+        tail = p.stem[len(stem) + 1:]
+        if tail.isdigit() and int(tail) > best_n:
+            best, best_n = p, int(tail)
+    if best is None:
+        raise ReferenceSetError(
+            f"no versioned {stem}_N.csv under {_REF_DIR}")
+    return best
+
+
+def _default_master() -> Path:
+    return latest_reference("pin1_reference_binders")
+
+
+def _default_anchors() -> Path:
+    return latest_reference("pin1_covalent_cys113_anchors")
+
+
+# Kept as module attributes because callers and tests reference them by name.
+# Resolved at import from the newest file on disk rather than written literally.
+DEFAULT_MASTER = _default_master()
+DEFAULT_ANCHORS = _default_anchors()
 
 
 class ReferenceSetError(RuntimeError):

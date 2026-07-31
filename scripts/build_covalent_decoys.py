@@ -2,7 +2,8 @@
 Purpose: Build the class-matched covalent decoy set (D0031).
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-28
-Input: data/reference/pin1_reference_binders_2.csv (frozen actives)
+Input: data/reference/pin1_reference_binders_<latest>.csv (frozen actives,
+       resolved by glob — see shared.reference_set.latest_reference)
 Output: append_only/.../decoys/decoys_covalent_10.csv + provenance
 
 Run:  python scripts/build_covalent_decoys.py [--force-fetch] [--n-per-active 50]
@@ -28,13 +29,15 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import decoys_classmatched as dcm      # noqa: E402
+from shared import reference_set as rs             # noqa: E402
 from shared import smiles as smi                   # noqa: E402
 from shared import warhead_library as wl           # noqa: E402
 from shared.manifest import Manifest               # noqa: E402
 
 log = logging.getLogger("build-decoys")
 
-ACTIVES = REPO / "data" / "reference" / "pin1_reference_binders_3.csv"
+# Resolved by glob, never pinned by hand (shared.reference_set.latest_reference).
+ACTIVES = rs.latest_reference("pin1_reference_binders")
 # append_only, not immutable: immutable/ is read-only by project rule, and the
 # earlier versions were written there before that was enforced.
 OUT = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate/decoys")
