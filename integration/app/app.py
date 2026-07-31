@@ -350,13 +350,59 @@ def panel_dossier() -> None:
         st.dataframe(pd.DataFrame(rows_), use_container_width=True,
                      hide_index=True)
 
-        st.warning(
-            "**Single run each — do not read a per-molecule verdict from this.** "
-            "Velocities are drawn afresh each run, and re-running the implicit "
-            "simulation changed one molecule's RMSD by 5x and another's by 12x "
-            "(D0038). Five replicates per candidate are needed before "
-            "\"this one is unstable\" is a claim about the molecule rather "
-            "than about one trajectory.")
+        # PER-REPLICATE RMSD (issue #1: "quickly see MD movies, RMSD plots").
+        # Plotted as separate traces, never averaged. D0038 found that two runs
+        # of ONE molecule under ONE model diverged 5x and 12x, so the spread
+        # between replicates is the result; a mean line would hide precisely
+        # what the replicates were run to expose.
+        series = p3d.rmsd_series(approach, str(cid))
+        if series:
+            st.markdown("##### Ligand RMSD, per replicate")
+            wide = pd.DataFrame({f"rep{k}": pd.Series([v for _, v in rows],
+                                                      index=[t for t, _ in rows])
+                                 for k, rows in sorted(series.items())})
+            wide.index.name = "time (ns)"
+            st.line_chart(wide, height=260)
+            finals = {k: rows[-1][1] for k, rows in series.items()}
+            means = {k: sum(v for _, v in rows) / len(rows)
+                     for k, rows in series.items()}
+            spread = (max(means.values()) / min(means.values())
+                      if min(means.values()) > 0 else float("inf"))
+            st.caption(
+                f"{len(series)} replicates · mean RMSD "
+                f"{min(means.values()):.2f}–{max(means.values()):.2f} nm "
+                f"(**{spread:.1f}× spread between replicates**) · final "
+                f"{min(finals.values()):.2f}–{max(finals.values()):.2f} nm. "
+                "A large spread means this candidate's residence is not "
+                "reproducible and no per-molecule verdict should be read from "
+                "any single run.")
+        else:
+            st.warning(
+                "**Single run each — do not read a per-molecule verdict from "
+                "this.** Velocities are drawn afresh each run, and re-running "
+                "the implicit simulation changed one molecule's RMSD by 5x and "
+                "another's by 12x (D0038). Five replicates per candidate are "
+                "needed before \"this one is unstable\" is a claim about the "
+                "molecule rather than about one trajectory.")
+
+        # THE MOVIE. Built on demand: converting a trajectory takes seconds and
+        # writes a file, so it is not done for every candidate a reader clicks.
+        traj = p3d.find_trajectory(approach, str(cid))
+        if traj is not None:
+            with st.expander("MD movie (explicit solvent, PBC-corrected)"):
+                st.caption(
+                    "Protein and ligand only — water and ions are ~90% of the "
+                    "30,000-atom system and would show nothing you need. This "
+                    "is the **PBC-corrected** trajectory: the raw file shows "
+                    "the ligand jumping across the box whenever it crosses a "
+                    "periodic boundary, which reads as dissociation and is not "
+                    "(D0038).")
+                if st.button("build / show movie", key=f"movie_{cid}"):
+                    html = p3d.trajectory_html(*traj)
+                    if html:
+                        components.html(html, height=500)
+                    else:
+                        st.info("could not build the movie for this trajectory")
 
         if pd.notna(exp_r) and pd.notna(imp_r):
             st.caption(
