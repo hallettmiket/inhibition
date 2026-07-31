@@ -58,12 +58,222 @@ st.set_page_config(page_title="Dance with Inhibition — integration",
 
 
 # --------------------------------------------------------------------------
+# STALE-MODULE GUARD — MUST RUN BEFORE ANY HELPER ATTRIBUTE IS TOUCHED
+# --------------------------------------------------------------------------
+# Streamlit re-runs THIS file on every interaction but does NOT re-import local
+# helper modules: they stay in sys.modules from process start. So after an edit
+# to curate.py, the NEW app.py executes against the OLD curate module and dies
+# on the first attribute the old one lacks:
+#
+#     AttributeError: module 'curate' has no attribute 'PANEL_SCOPE'
+#
+# This check used to sit at the BOTTOM of the file next to the version badge,
+# which meant the very error it exists to explain was raised ~30 lines before it
+# ever ran. A diagnostic that only fires after the crash it diagnoses is not a
+# diagnostic. It runs first now, and it STOPS the page with an instruction
+# rather than letting an AttributeError reach the user as a traceback.
+#
+# Each helper freezes its own mtime at import (LOADED_MTIME); comparing that to
+# the file's CURRENT mtime is the only thing that answers "is what I imported
+# still what is on disk". Comparing current mtimes to each other -- the first
+# version of this check -- flags staleness whenever any file is newer than
+# another, which is always, and it never knew when anything was imported.
+_HELPERS = (D, depict, curate, p3d)
+
+
+def stale_modules() -> list[str]:
+    """Helper modules whose file changed since this process imported them."""
+    out = []
+    for m in _HELPERS:
+        loaded = getattr(m, "LOADED_MTIME", None)
+        if loaded is None:
+            continue
+        try:
+            if Path(m.__file__).stat().st_mtime > loaded + 1:
+                out.append(m.__name__)
+        except OSError:
+            continue
+    return out
+
+
+_STALE = stale_modules()
+if _STALE:
+    st.error(
+        "### Restart required — this process is running stale code\n\n"
+        f"`{'`, `'.join(_STALE)}` changed on disk since this process imported "
+        "them. Streamlit re-runs `app.py` on every interaction but **does not "
+        "re-import helper modules**, so the new `app.py` is calling into old "
+        "ones. Rerunning will not fix it, and neither will a browser "
+        "refresh.\n\n"
+        "Stop the process and start it again:\n\n"
+        "```bash\n"
+        "/data/lab_vm/envs/dwi_gui/bin/python3 -m streamlit run "
+        "integration/app/app.py\n"
+        "```\n\n"
+        "The page is halted here deliberately. Continuing would raise an "
+        "`AttributeError` from whichever old module lacks the newest "
+        "attribute, which reads like a code bug rather than a restart.")
+    st.stop()
+
+
+# --------------------------------------------------------------------------
 # shared furniture
 # --------------------------------------------------------------------------
 
 def gate_badge(verdict: str) -> str:
     return {"STRONG": "🟢", "MODERATE": "🟡", "UNDERPOWERED": "🟠",
             "FAIL": "🔴", "UNGATED": "⚪"}.get(str(verdict).upper(), "⚪")
+
+
+# --------------------------------------------------------------------------
+# the curation filter, applied everywhere (issue #3.2)
+#
+# IT LIVES IN THE SIDEBAR BECAUSE THE SIDEBAR IS THE ONLY THING ON EVERY PAGE.
+# The previous version was a text box inside the Shortlists panel; it wrote the
+# spec to session state and nothing else ever read it, so a chemist who excluded
+# chlorines met chlorinated molecules again the moment they clicked "Candidate
+# dossier". A filter that is invisible from the panel it is not affecting cannot
+# be noticed to be off, which is what made this misleading rather than merely
+# incomplete.
+#
+# EVERY PANEL DECLARES ITS SCOPE IN `curate.PANEL_SCOPE`, and an undeclared
+# panel raises. Defaulting an unknown panel to "unfiltered" is precisely the
+# behaviour being fixed, and defaulting it to "filtered" would silently curate a
+# provenance table.
+# --------------------------------------------------------------------------
+
+CURATE_KEY = "_curate_spec"
+
+
+def curation_spec() -> str:
+    """The constraint text the chemist has entered, or ""."""
+    return str(st.session_state.get(CURATE_KEY, "") or "")
+
+
+def curation_rules() -> tuple[list, str | None]:
+    """(parsed rules, error). An unparseable spec yields ([], the message).
+
+    Parsed here rather than inside each panel so that a typo produces ONE
+    message in the sidebar instead of five identical ones down the page — and
+    so that every panel agrees about whether a filter is currently active.
+    """
+    spec = curation_spec()
+    if not spec.strip():
+        return [], None
+    try:
+        return curate.parse(spec), None
+    except curate.ConstraintError as exc:
+        return [], str(exc)
+
+
+def curation_sidebar() -> None:
+    """The global constraint box plus a live statement of what it is doing."""
+    st.sidebar.divider()
+    st.sidebar.subheader("🧪 Curate")
+    st.sidebar.caption(
+        "Chemistry you have ruled out. Applies to **every** candidate view.")
+    st.sidebar.text_area(
+        "constraints", key=CURATE_KEY, height=100,
+        placeholder="no chlorine\nmw < 450",
+        help="One per line. `no chlorine` · `no [Cl]` (SMARTS works too) · "
+             "`require sulfonamide` · `mw < 450` · `sp2_bonds <= 8` for less "
+             "conjugation · `rotatable_bonds <= 6`. Known group names: "
+             + ", ".join(sorted(curate.NAMED_GROUPS)))
+
+    rules, err = curation_rules()
+    if err:
+        # REFUSED, NOT IGNORED. A mis-parsed constraint that filters nothing is
+        # indistinguishable from a working one that finds nothing, and a
+        # chemist would act on it.
+        st.sidebar.error(f"**Filter OFF — constraint not understood.** {err}")
+        return
+    if not rules:
+        st.sidebar.caption("No filter active — every panel shows all candidates.")
+        return
+
+    # The count is over the pooled shortlists, so the sidebar states the size of
+    # the effect before the reader has scrolled to any particular panel.
+    pool = D.all_shortlists()
+    kept = pool
+    if len(pool) and "canonical_smiles" in pool.columns:
+        try:
+            kept, rules = curate.apply(pool, curation_spec())
+        except curate.ConstraintError:
+            kept = pool
+    st.sidebar.success(
+        f"**Filter ON — {len(kept)} of {len(pool)} shortlisted candidates.**\n\n"
+        + "\n".join(f"- `{r.text}` −{r.removed}" for r in rules))
+    st.sidebar.caption(
+        "Not applied to: "
+        + ", ".join(s.panel for s in curate.PANEL_SCOPE if not s.filtered)
+        + " — see *what the filter never touches* on any curated panel.")
+
+
+def curation_header(panel: str) -> list:
+    """State this panel's relationship to the filter, and return its rules.
+
+    Rendered at the TOP of every panel, filtered or not. An unfiltered panel
+    says so explicitly: "no banner" is exactly how the original bug read to the
+    user, and silence is not a claim they can check.
+    """
+    scope = curate.scope_for(panel)
+    rules, err = curation_rules()
+    if err:
+        st.error(f"**Curation filter is OFF — constraint not understood.** {err}"
+                 "  \nEverything below is UNFILTERED. Fix the constraint in the "
+                 "sidebar.")
+        return []
+    if not rules:
+        return []
+    if not scope.filtered:
+        st.info(f"**Curation filter is active but not applied here.** {scope.why}")
+        return []
+    return rules
+
+
+def curated(df: pd.DataFrame, panel: str, *, note: bool = True,
+            label: str = "") -> tuple[pd.DataFrame, list]:
+    """Filter one frame for `panel`, rendering the persistent indicator.
+
+    Returns the frame unchanged when the panel's declared scope says the filter
+    does not belong there, so a caller cannot accidentally curate a provenance
+    view by routing it through this helper.
+    """
+    scope = curate.scope_for(panel)
+    rules, err = curation_rules()
+    if err or not rules or not scope.filtered or df.empty:
+        return df, []
+    if "canonical_smiles" not in df.columns:
+        st.warning(f"Curation not applied{' to ' + label if label else ''} — "
+                   "this frame carries no `canonical_smiles` column to match on.")
+        return df, []
+    n_before = len(df)
+    try:
+        kept, applied = curate.apply(df, curation_spec())
+    except curate.ConstraintError as exc:
+        st.error(f"**Curation not applied — {exc}**")
+        return df, []
+    if note:
+        st.info(curate.banner(applied, n_before, len(kept), label or None))
+    return kept, applied
+
+
+def unfiltered_facts_note() -> None:
+    """What the filter deliberately never touches, and why.
+
+    Sits on the curated panels rather than in documentation because the reader
+    who needs it is the one currently looking at a curated table beside an
+    uncurated count.
+    """
+    with st.expander("what the curation filter never touches — and why"):
+        st.caption(
+            "Curation says which molecules **you** are willing to consider. It "
+            "says nothing about what the pipeline generated, docked or "
+            "measured, so anything reporting on that population is left alone. "
+            "Filtering these would not produce a curated fact; it would "
+            "produce a false one.")
+        for name, why in curate.UNFILTERED_FACTS:
+            st.markdown(f"- **{name}** — {why}")
 
 
 # THE MURMURENT BRANDED FOOTER, ported from the site's own definition:
@@ -218,47 +428,163 @@ def show_gate(stratum: str, metric: str) -> None:
 # panels
 # --------------------------------------------------------------------------
 
-@st.dialog("Docked pose", width="large")
-def show_pose_dialog(approach: str, approach_name: str, top: pd.DataFrame) -> None:
-    """Full-width pose viewer with its controls spelled out.
+def row_value(frame: pd.DataFrame, row: pd.Series, name: str) -> str | None:
+    """A row's value for `name` as a string, or None when it is absent or NaN.
+
+    Written as a plain function rather than a closure inside `locate_pose`
+    because `tests/test_app_names.py` walks each function's own scope and does
+    not model enclosing ones — a nested helper reading `frame` from outside
+    trips the guard that exists to catch exactly that mistake in panels.
+    """
+    if name not in frame.columns:
+        return None
+    val = row.get(name)
+    return str(val) if pd.notna(val) else None
+
+
+def locate_pose(approach: str, frame: pd.DataFrame, row: pd.Series) -> Path | None:
+    """The pose file for one row, using the frame's own answer when it has one.
+
+    `pose_path` is recorded by T_3/T_4 and is authoritative; `dock_id` is the
+    fallback, because covalent pose files are named by a hash that shares
+    nothing with `candidate_id` — deriving the name from the candidate id found
+    nothing and rendered as missing data rather than as a lookup bug.
+    """
+    return p3d.find_pose(approach, str(row["candidate_id"]),
+                         dock_id=row_value(frame, row, "dock_id"),
+                         pose_path=row_value(frame, row, "pose_path"))
+
+
+def render_pose_viewer(approach: str, approach_name: str,
+                       frame: pd.DataFrame, row: pd.Series, *,
+                       key: str, height: int = 620) -> None:
+    """The docked-pose viewer: labelled surface, every mode, and an export.
 
     3Dmol.js has no on-screen controls at all -- no buttons, no hint that
     right-drag zooms or that Ctrl+drag pans. Someone who tries left-drag alone
     finds the view rotates and never centres, and reasonably concludes it is
     broken. The control table is not decoration; it is the only affordance.
+
+    ALL MODES ARE AVAILABLE, AND ONE IS SELECTED BY DEFAULT. Overlaying nine
+    sticks by default reads as a single impossible molecule, which is why the
+    old viewer showed one — but the fix for that is a control, not a truncation.
     """
-    ids = list(top["candidate_id"])
-    c1, c2 = st.columns([3, 2])
-    pick = c1.selectbox(
-        "candidate", ids, key=f"dlg_pose_{approach}",
-        format_func=lambda c: (
-            f"#{int(top.loc[top.candidate_id == c, 'rank'].iloc[0])} · {c}"))
-    framing = c2.selectbox(
-        "framing", ["ligand", "pocket", "all"], key=f"dlg_zoom_{approach}",
+    cid = str(row["candidate_id"])
+    pose_file = locate_pose(approach, frame, row)
+    if pose_file is None:
+        st.info(f"no docked pose file found for {cid}")
+        return
+
+    poses = p3d.read_poses(pose_file)
+    if not poses:
+        st.warning(f"`{pose_file.name}` holds no readable binding mode.")
+        return
+
+    # WHICH SCORE THE FILE IS SORTED BY, SAID BEFORE THE PICKER. gnina returns
+    # modes in CNNscore order and the frame's `affinity_kcal` is read off the
+    # FIRST record, so "pose 1" is the CNN's choice and not the affinity's.
+    order_score = p3d.FILE_ORDER_SCORE.get(pose_file.suffix.lower().lstrip("."), "")
+    aff_score = ("minimizedAffinity" if pose_file.suffix.lower() == ".sdf"
+                 else "vina_affinity")
+    better = p3d.hidden_better_pose(poses, shown=1, score=aff_score)
+
+    c1, c2, c3 = st.columns([3, 2, 2])
+    mode = c1.radio("which modes", ["best (pose 1)", "pick", "overlay all"],
+                    horizontal=True, key=f"posemode_{key}",
+                    help="'overlay all' answers the question a single pose "
+                         "cannot: do the modes agree about where the ligand "
+                         "sits, or scatter across the site?")
+    if mode == "pick":
+        chosen = c2.multiselect("pose(s)", [p.index for p in poses], default=[1],
+                                key=f"posepick_{key}")
+        show = tuple(chosen) or (1,)
+    elif mode == "overlay all":
+        show = tuple(p.index for p in poses)
+    else:
+        show = (1,)
+    framing = c3.selectbox(
+        "framing", ["ligand", "pocket", "all"], key=f"posezoom_{key}",
         help="Changing this re-renders and RESETS the view — it is also how "
              "you recover from having rotated or panned somewhere unhelpful.")
 
-    prow = top.loc[top.candidate_id == pick].iloc[0]
-    # dock_id, not candidate_id: covalent pose files are named by a separate
-    # hash that shares nothing with the candidate id.
-    pose = p3d.find_pose(
-        approach, str(pick),
-        dock_id=(str(prow["dock_id"]) if "dock_id" in top.columns
-                 and pd.notna(prow.get("dock_id")) else None))
-    if pose is None:
-        st.info(f"no docked pose file found for {pick}")
-        return
+    if better is not None:
+        idx, gap = better
+        st.warning(
+            f"**Pose 1 is not the best-scoring mode in this file.** Pose {idx} "
+            f"has a `{aff_score}` better by **{gap:.2f} kcal/mol**. The file is "
+            f"ordered by `{order_score}` and the frame's rank metric is read "
+            "off the first record, so the two gnina scores disagree about this "
+            "candidate. Switch to *pick* or *overlay all* to see it.")
 
-    components.html(p3d.pose_html(pose, zoom_on=framing, height=620), height=640)
+    components.html(
+        p3d.pose_html(pose_file, show=show, zoom_on=framing, height=height),
+        height=height + 20)
+
     st.caption(
-        f"**{approach_name}** · `{pose.name}` · receptor 6VAJ as a cartoon, "
-        "**Cys113 in yellow sticks**, ligand in cyan. The grey surface is the "
-        "pocket wall within 12 residues of Cys113 — a whole-protein surface "
-        "would hide the ligand."
-        + (" Vina writes all nine binding modes into one file; only the "
-           "top-scoring one is drawn." if pose.suffix == ".pdbqt" else ""))
-    with st.expander("how to move the view", expanded=True):
+        f"**{approach_name}** · `{pose_file.name}` · {len(poses)} binding mode(s), "
+        f"showing {len(show)}. The receptor is a **surface** with the three "
+        "sub-pockets coloured and labelled; **Cys113 is in yellow sticks**; the "
+        "first shown pose is cyan and thicker than the rest. A dashed yellow "
+        "bond appears only when a pose is actually within bonding distance of "
+        "the Cys113 SG — T_1/T_2 are non-covalent and correctly get none.")
+
+    with st.expander("the three sub-pockets — what each one is", expanded=False):
+        st.markdown(p3d.subpocket_legend())
+        st.caption(
+            "Residue numbers are checked against "
+            "`6VAJ_prepared.pdb` at test time (`verify_subpockets`), not "
+            "transcribed — a mislabelled pocket is worse than an unlabelled "
+            "one. Regions are kept disjoint: the sulfopin paper's wider "
+            "proline-pocket description also includes Thr152/His157, which are "
+            "coloured with the catalytic tetrad here.")
+
+    with st.expander(f"all {len(poses)} modes and their scores"):
+        st.caption(
+            "★ marks the best pose on each score. Note the direction differs: "
+            "`minimizedAffinity` and `vina_affinity` are kcal/mol and **lower "
+            "is better**; `CNNscore`, `CNNaffinity` and `CNN_VS` are "
+            "dimensionless and **higher is better**.")
+        st.dataframe(pd.DataFrame(p3d.pose_score_table(poses)),
+                     use_container_width=True, hide_index=True)
+
+    # THE HAND-OFF (issue #3.1). The embedded viewer cannot measure a distance,
+    # mutate a residue or render a figure, and anything a chemist wants to DO
+    # with a pose happens in PyMOL or ChimeraX. The alternative to this button
+    # is that they hunt for the file by hand — which for T_3/T_4 means knowing
+    # that pose files are named by dock_id, the exact lookup that has already
+    # caught this project out once.
+    is_cov = D.APPROACHES[approach]["stratum"] == "covalent"
+    try:
+        bundle = p3d.pose_bundle(pose_file, covalent=is_cov)
+    except OSError as exc:  # noqa: BLE001 - an unreadable receptor is not fatal
+        bundle = None
+        st.caption(f"export unavailable: {exc}")
+    if bundle is not None:
+        st.download_button(
+            "⤓ open in PyMOL / ChimeraX — pose file + receptor + session script",
+            data=bundle, file_name=f"{cid}_poses.zip", mime="application/zip",
+            key=f"posedl_{key}", use_container_width=True,
+            help="A zip with all binding modes, the shared prepared receptor, "
+                 "and a .pml that reproduces this exact view — sub-pocket "
+                 "selections generated from the same definitions the GUI uses, "
+                 "so the session and this page cannot disagree. Run "
+                 "`pymol view_pin1.pml`.")
+
+    with st.expander("how to move the view", expanded=False):
         st.markdown(p3d.CONTROLS)
+
+
+@st.dialog("Docked poses", width="large")
+def show_pose_dialog(approach: str, approach_name: str, top: pd.DataFrame) -> None:
+    """Full-width pose viewer, opened from a shortlist column."""
+    ids = list(top["candidate_id"])
+    pick = st.selectbox(
+        "candidate", ids, key=f"dlg_pose_{approach}",
+        format_func=lambda c: (
+            f"#{int(top.loc[top.candidate_id == c, 'rank'].iloc[0])} · {c}"))
+    prow = top.loc[top.candidate_id == pick].iloc[0]
+    render_pose_viewer(approach, approach_name, top, prow,
+                       key=f"dlg_{approach}", height=560)
 
 
 def panel_candidates() -> None:
@@ -267,21 +593,16 @@ def panel_candidates() -> None:
                "comparable with each other and are deliberately not merged.")
     honest_limits()
 
-    # THE CURATOR FILTER (issue #1, general note 1). Removes rows a chemist has
-    # ruled out and preserves the existing order. It deliberately does NOT
+    # THE CURATOR FILTER (issue #1 note 1; issue #3.2). Removes rows a chemist
+    # has ruled out and preserves the existing order. It deliberately does NOT
     # re-score: the gate has measured that the underlying ranking does not
     # demonstrably enrich (D0041) and is partly a size ranking (D0043), so
     # inventing a second ordering on top of an unvalidated one would compound
     # the problem. Dropping molecules you have ruled out is safe either way.
-    with st.expander("curate — filter these lists by chemistry you have ruled out"):
-        st.caption(
-            "One constraint per line. `no chlorine` · `no [Cl]` (SMARTS works "
-            "too) · `require sulfonamide` · `mw < 450` · `sp2_bonds <= 8` for "
-            "less conjugation · `rotatable_bonds <= 6`. "
-            f"Known group names: {', '.join(sorted(curate.NAMED_GROUPS))}.")
-        spec = st.text_area("constraints", value="", height=90,
-                            placeholder="no chlorine\nmw < 450")
-    st.session_state["_curate_spec"] = spec
+    #
+    # The control itself now lives in the SIDEBAR so it reaches every panel;
+    # this panel only consumes it.
+    curation_header("Shortlists")
 
     list_choice = st.radio(
         "which shortlist",
@@ -296,6 +617,10 @@ def panel_candidates() -> None:
     # SAY IT ONCE, AT THE TOP. Which list a reader is looking at changes which
     # molecules exist on the page, so it cannot be something they infer from a
     # per-approach caption further down.
+    # NOT CURATED, ON PURPOSE. These counts describe what the synthesizable
+    # rebuild did to each approach's whole quota, over the full generated
+    # population. Curation happens downstream of the rebuild and cannot change
+    # what it did, so filtering them would report a number that was never true.
     _deltas = {k: D.shortlist_delta(k) for k in D.APPROACHES}
     _dropped = sum(d["dropped"] for d in _deltas.values())
     _promoted = sum(d["promoted"] for d in _deltas.values())
@@ -330,21 +655,12 @@ def panel_candidates() -> None:
             if s.empty:
                 st.info("no shortlist yet")
                 continue
-            if spec.strip():
-                try:
-                    n_before = len(s)
-                    s, applied = curate.apply(s, spec)
-                    st.info(
-                        f"**curated: {len(s)} of {n_before}** · "
-                        + " · ".join(f"`{r.text}` −{r.removed}" for r in applied))
-                except curate.ConstraintError as exc:
-                    # Refused, not silently ignored: a mis-parsed constraint
-                    # that filters nothing is indistinguishable from a working
-                    # one that finds nothing, and a chemist would act on it.
-                    st.error(f"constraint not applied — {exc}")
-                if s.empty:
-                    st.warning("every candidate was filtered out")
-                    continue
+            s, _applied = curated(s, "Shortlists",
+                                  label=cfg["name"].split("·")[0].strip())
+            if s.empty:
+                st.warning("every candidate in this approach was filtered out "
+                           "by the curation constraints")
+                continue
             verdict = str(s["gate_verdict"].iloc[0]) if "gate_verdict" in s else "UNGATED"
             st.markdown(
                 f"{gate_badge(verdict)} **{verdict}** · metric "
@@ -520,25 +836,67 @@ def panel_candidates() -> None:
                          use_container_width=True):
                 show_pose_dialog(key, cfg["name"], top)
 
+    unfiltered_facts_note()
+
 
 def panel_dossier() -> None:
     st.header("Per-candidate dossier")
     st.caption("Everything recorded about one candidate, including the SMILES "
                "in a form you can copy into any other tool.")
 
+    # THE DOSSIER IS THE PANEL THE BUG WAS REPORTED AGAINST (issue #3.2). The
+    # curation filter was typed into the shortlist panel and stopped there, so
+    # a chemist who had excluded a whole chemotype still found it offered here
+    # as a candidate in good standing.
+    rules = curation_header("Candidate dossier")
+
     c1, c2 = st.columns([1, 2])
     approach = c1.selectbox("approach", list(D.APPROACHES),
                             format_func=lambda k: D.APPROACHES[k]["name"])
-    s = D.shortlist(approach)
-    if s.empty:
+    s_all = D.shortlist(approach)
+    if s_all.empty:
         st.info("no shortlist for this approach yet")
         return
-    s = s.sort_values("rank")
-    labels = {r["candidate_id"]: f"#{int(r['rank'])} · {r['candidate_id']}"
-              for _, r in s.iterrows()}
+    s_all = s_all.sort_values("rank")
+
+    # AN EXPLICIT ESCAPE HATCH, DEFAULT OFF. Hiding the excluded molecules is
+    # the point, but "why exactly did my constraint drop this one" is a fair
+    # question and answering it must not require clearing the filter.
+    show_excluded = False
+    if rules:
+        show_excluded = st.checkbox(
+            "also list candidates the curation filter excluded", value=False,
+            key=f"dossier_show_excluded_{approach}",
+            help="Off by default. Excluded candidates are labelled ✗ in the "
+                 "picker so an inspected molecule is never mistaken for one "
+                 "still in contention.")
+    s, _applied = curated(s_all, "Candidate dossier",
+                          label=D.APPROACHES[approach]["name"].split("·")[0].strip())
+    excluded_ids = set(s_all["candidate_id"]) - set(s["candidate_id"])
+    if s.empty and not show_excluded:
+        st.warning("Every candidate in this approach was excluded by the "
+                   "curation constraints. Tick the box above to inspect one "
+                   "anyway, or relax the filter in the sidebar.")
+        return
+
+    pick_from = s_all if show_excluded else s
+    labels = {r["candidate_id"]:
+              ("✗ " if r["candidate_id"] in excluded_ids else "")
+              + f"#{int(r['rank'])} · {r['candidate_id']}"
+              for _, r in pick_from.iterrows()}
     cid = c2.selectbox("candidate", list(labels), format_func=lambda k: labels[k])
-    row = s[s["candidate_id"] == cid].iloc[0]
+    row = pick_from[pick_from["candidate_id"] == cid].iloc[0]
     cfg = D.APPROACHES[approach]
+    if cid in excluded_ids:
+        st.error(
+            "**This candidate is EXCLUDED by your current curation "
+            "constraints.** It is shown because you asked to see excluded "
+            "candidates; it is not part of the curated shortlist.")
+
+    # Everything below reads columns off the frame the row actually came from.
+    # Binding it once here keeps a curated-to-empty frame from silently losing
+    # its schema and hiding sections that the candidate does have data for.
+    s = pick_from
 
     # --- structure(s) -----------------------------------------------------
     is_covalent = "adduct_smiles" in s.columns and pd.notna(row.get("adduct_smiles"))
@@ -588,7 +946,13 @@ def panel_dossier() -> None:
     verdict = str(row.get("gate_verdict", "UNGATED"))
     cols = st.columns(5)
     cols[0].metric(cfg["metric"], f"{row.get(cfg['metric'], float('nan')):.2f}")
-    cols[1].metric("rank", f"{int(row['rank'])} of {int(row.get('group_n_docked', 0))}")
+    # NEVER RE-DERIVED UNDER CURATION. "3rd of 1,204 docked" is a fact about
+    # the docked population; recomputing the denominator over the curated
+    # shortlist would give a number that was never true of anything.
+    cols[1].metric("rank", f"{int(row['rank'])} of {int(row.get('group_n_docked', 0))}",
+                   help="Out of everything this approach docked — not out of "
+                        "the curated shortlist. Curation does not change what "
+                        "was ranked.")
     le = row.get("ligand_efficiency")
     cols[2].metric("ligand efficiency", f"{le:.3f}" if pd.notna(le) else "—")
     dg = row.get("dG_kcal")
@@ -743,10 +1107,24 @@ def panel_dossier() -> None:
         st.dataframe(pd.DataFrame([{a: row[a] for a in axes}]),
                      use_container_width=True, hide_index=True)
 
+    # --- the docked pose, in the pocket ------------------------------------
+    # THE DOSSIER IS WHERE "EVERYTHING RECORDED ABOUT ONE CANDIDATE" LIVES, and
+    # until now the pose was reachable only from a dialog on another panel. It
+    # is full width here, which is the width the viewer actually needs.
+    st.divider()
+    st.markdown("#### Docked pose in the Pin1 pocket")
+    render_pose_viewer(approach, cfg["name"], s, row,
+                       key=f"dossier_{approach}_{cid}", height=600)
+
     # Structural convergence: did any OTHER approach reach this molecule?
     # Reported as a rank when the identical molecule was ranked elsewhere, and
     # as the nearest shortlisted analogue otherwise -- an empty panel would let
     # "nobody else found it" read as "the lookup is broken".
+    #
+    # DELIBERATELY NOT CURATED. "Was this molecule also ranked by another
+    # approach" is a fact about the pipeline's output; a chemist's constraints
+    # cannot un-rank it, and filtering the lookup would turn a real convergence
+    # into an apparent absence of one.
     smi = row.get("canonical_smiles")
     if pd.notna(smi):
         conv = D.cross_approach_ranks(str(smi), approach)
@@ -785,6 +1163,8 @@ def panel_dossier() -> None:
         for k, v in flags.items():
             st.markdown(f"- `{k}`: {v}")
 
+    unfiltered_facts_note()
+
 
 def panel_convergence() -> None:
     st.header("Structural convergence")
@@ -797,10 +1177,18 @@ def panel_convergence() -> None:
         "under related protocols, so their errors are correlated and agreement "
         "may report a shared bias rather than a real signal. T_1 is seed-free, "
         "so its agreement with a seeded approach at least is not ancestral.")
+    curation_header("Convergence")
 
     pool = D.all_shortlists()
     if pool.empty or "canonical_smiles" not in pool.columns:
         st.info("no shortlists to compare yet")
+        return
+    # Pairs are drawn FROM the shortlists, so a pair whose members the chemist
+    # has ruled out is not evidence about anything still in contention.
+    pool, _cur = curated(pool, "Convergence", label="pooled shortlists")
+    if pool.empty:
+        st.warning("every shortlisted candidate was excluded by the curation "
+                   "constraints — no pairs left to compare")
         return
 
     from rdkit import Chem, DataStructs, RDLogger
@@ -837,30 +1225,62 @@ def panel_convergence() -> None:
                 "That is itself informative — the approaches are exploring "
                 "genuinely different regions.")
 
+    unfiltered_facts_note()
+
 
 def panel_axes() -> None:
     st.header("Shared physicochemical axes")
     st.caption("Computed by the identical RDKit call for all four approaches "
                "(shared/descriptors.py), which is what makes pooling these — "
                "and only these — legitimate.")
+    curation_header("Shared axes")
+
     pool = D.all_shortlists()
     if pool.empty:
         st.info("no shortlists yet")
         return
+    pool, applied = curated(pool, "Shared axes", label="pooled shortlists")
+    if pool.empty:
+        st.warning("every shortlisted candidate was excluded by the curation "
+                   "constraints — no distribution left to summarise")
+        return
+
     axes = [a for a in D.SHARED_AXES if a in pool.columns]
     if not axes:
         st.info("no descriptor columns on the frames")
         return
     axis = st.selectbox("axis", axes)
+
+    # A NUMERIC CONSTRAINT TRUNCATES THE AXIS IT NAMES, so the median below is
+    # partly the filter's doing rather than the approach's. `curate.PROPERTIES`
+    # and `shared/descriptors.py` make the identical RDKit call for each of
+    # these pairs, so this is an exact truncation, not an approximate one — and
+    # a reader comparing "T_1 median MW" across two filter settings would
+    # otherwise read their own constraint as a property of T_1.
+    bounded = curate.bounded_axes(applied)
+    if axis in bounded:
+        st.warning(
+            f"**`{axis}` is bounded by your own constraint `{bounded[axis]}`.** "
+            "The median below describes the molecules the filter left, not what "
+            "the approach produced. Clear that constraint before reading this "
+            "axis as a property of the approach.")
+    other = {k: v for k, v in bounded.items() if k != axis}
+    if other:
+        st.caption("Also bounded by your constraints, in the table below: "
+                   + ", ".join(f"`{k}` ({v})" for k, v in other.items()))
+
     st.bar_chart(pool.pivot_table(index="approach", values=axis, aggfunc="median"))
     st.dataframe(
         pool.groupby("approach")[axes].median().round(2),
         use_container_width=True)
 
+    unfiltered_facts_note()
+
 
 def panel_within_stratum() -> None:
     st.header("Within-stratum re-score — two leaderboards, never one")
     st.caption("Cross-stratum ordering is not implied and is not offered.")
+    curation_header("Within-stratum")
 
     fps = D.protocol_fingerprints()
     t3, t4 = fps.get("t3", set()), fps.get("t4", set())
@@ -879,6 +1299,9 @@ def panel_within_stratum() -> None:
             ("Non-covalent (T_1 + T_2)", ("t1", "t2"), "non_covalent", "vina_affinity"),
             ("Covalent (T_3 + T_4)", ("t3", "t4"), "covalent", "affinity_kcal")):
         st.subheader(label)
+        # The gate is measured on known actives against property-matched
+        # decoys. No candidate of ours is in that calculation, so curation has
+        # nothing to say about it and it is shown unfiltered.
         show_gate(stratum, metric)
         if stratum == "covalent" and t3 and t4 and t3 != t4:
             st.info("leaderboard withheld — see the fingerprint mismatch above")
@@ -889,14 +1312,22 @@ def panel_within_stratum() -> None:
             st.info("no candidates yet")
             continue
         pooled = pd.concat(frames, ignore_index=True)
+        pooled, _cur = curated(pooled, "Within-stratum", label=label)
+        if pooled.empty:
+            st.warning("every candidate in this stratum was excluded by the "
+                       "curation constraints")
+            continue
         cols = [c for c in ("approach", "candidate_id", metric,
                             "ligand_efficiency", "dG_kcal") if c in pooled.columns]
         st.dataframe(pooled.sort_values(metric)[cols].head(20),
                      use_container_width=True, hide_index=True)
 
+    unfiltered_facts_note()
+
 
 def panel_decisions() -> None:
     st.header("Choreography decision log")
+    curation_header("Decisions")
     ds = D.decisions_all()
     if not ds:
         st.info("no decision records found")
@@ -938,6 +1369,7 @@ def panel_decisions() -> None:
 def panel_why_this_file() -> None:
     st.header("Why is this file like this?")
     st.caption("The panel that replaces grepping four formats.")
+    curation_header("Why this file?")
     frag = st.text_input("path fragment", placeholder="warhead_classes / receptor.yaml")
     if not frag:
         return
@@ -954,6 +1386,7 @@ def panel_why_this_file() -> None:
 
 def panel_provenance() -> None:
     st.header("Run provenance")
+    curation_header("Provenance")
     approach = st.selectbox("approach", list(D.APPROACHES),
                             format_func=lambda k: D.APPROACHES[k]["name"])
     ms = D.manifests(approach)
@@ -975,6 +1408,7 @@ def panel_provenance() -> None:
 
 def panel_open_questions() -> None:
     st.header("Open questions")
+    curation_header("Open questions")
     q = D.open_questions()
     if not q:
         st.success("Nothing is marked proposed, pending or unverified.")
@@ -1002,6 +1436,23 @@ st.sidebar.caption("Integration is a presentation and human-decision layer. "
                    "It surfaces and organises evidence; it does not output a "
                    "winner.")
 choice = st.sidebar.radio("panel", list(PANELS))
+
+# EVERY PANEL NAME MUST HAVE A DECLARED CURATION SCOPE. Checked here at start-up
+# rather than when someone clicks the tab: a panel added without a scope should
+# fail immediately and visibly, not filter (or fail to filter) by accident three
+# clicks into a session. Same class of defect as the shortlist column that was
+# selected by the name already there rather than by the one that answered the
+# question.
+_declared = {s.panel for s in getattr(curate, "PANEL_SCOPE", ())}
+_undeclared = [p for p in PANELS if p not in _declared]
+if _undeclared:
+    st.sidebar.error(
+        f"**Panels with no curation scope declared:** {', '.join(_undeclared)}. "
+        "Add them to `curate.PANEL_SCOPE`.")
+
+# The curation control lives HERE, not inside a panel, because the sidebar is
+# the only thing present on every page (issue #3.2).
+curation_sidebar()
 st.sidebar.divider()
 
 # WHICH CODE IS ACTUALLY LOADED. Streamlit re-runs this script on every
@@ -1018,20 +1469,9 @@ try:
                     capture_output=True, text=True).stdout.strip()
     st.sidebar.caption(f"code: `{_head}`")
 
-    # COMPARE EACH MODULE'S IMPORT-TIME MTIME WITH ITS CURRENT ONE. The first
-    # version of this compared the helper modules' CURRENT mtimes against the
-    # newest file in the directory -- so editing app.py alone made it cry stale,
-    # every time, including immediately after a restart. It never knew when
-    # anything was imported. Each helper now freezes its own mtime at import
-    # (LOADED_MTIME), which is the only value that answers the question.
-    _stale = [m.__name__ for m in (D, depict, curate, p3d)
-              if getattr(m, "LOADED_MTIME", None) is not None
-              and Path(m.__file__).stat().st_mtime > m.LOADED_MTIME + 1]
-    if _stale:
-        st.sidebar.error(
-            f"**Running stale code:** `{'`, `'.join(_stale)}` changed on disk "
-            "since this process imported them. Streamlit does not re-import "
-            "helper modules — restart the app.")
+    # The stale-module check itself now runs at the TOP of this file, before any
+    # helper attribute is dereferenced -- see STALE-MODULE GUARD. Reaching this
+    # line means it already passed, so there is nothing to repeat here.
 except Exception:  # noqa: BLE001 - a version badge must never break the page
     pass
 
