@@ -737,6 +737,31 @@ st.sidebar.caption("Integration is a presentation and human-decision layer. "
                    "winner.")
 choice = st.sidebar.radio("panel", list(PANELS))
 st.sidebar.divider()
+
+# WHICH CODE IS ACTUALLY LOADED. Streamlit re-runs this script on every
+# interaction but does NOT re-import local helper modules -- they stay in
+# sys.modules from process start. So editing pose3d.py and clicking around
+# gives a TypeError about an argument the file on disk plainly has, and the
+# obvious conclusion ("the fix didn't work") is wrong. Showing the loaded
+# commit next to the working-tree commit makes a stale process visible.
+try:
+    import subprocess as _sp
+
+    _repo = str(APP_DIR.parent.parent)
+    _head = _sp.run(["git", "-C", _repo, "rev-parse", "--short", "HEAD"],
+                    capture_output=True, text=True).stdout.strip()
+    _loaded = max(Path(m.__file__).stat().st_mtime
+                  for m in (D, depict, curate, p3d) if getattr(m, "__file__", None))
+    _newest = max(p.stat().st_mtime for p in APP_DIR.glob("*.py"))
+    st.sidebar.caption(f"code: `{_head}`")
+    if _newest > _loaded + 1:
+        st.sidebar.error(
+            "**This process is running stale code.** A module on disk is newer "
+            "than the one loaded. Streamlit does not re-import helper modules — "
+            "restart the app.")
+except Exception:  # noqa: BLE001 - a version badge must never break the page
+    pass
+
 st.sidebar.caption("The GUI reads; it does not own (D0008). Everything shown is "
                    "a rendering of files in the repo or the append-only tree.")
 PANELS[choice]()
