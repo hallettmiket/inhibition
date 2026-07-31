@@ -32,6 +32,7 @@ the cost of dropping a good candidate is invisible and permanent.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from rdkit import Chem, RDLogger
 
@@ -44,6 +45,11 @@ class Rule:
     smarts: str
     why: str
     max_allowed: int = 0
+    #: Optional counter used INSTEAD of `smarts` when the property cannot be
+    #: expressed as a substructure. Stereogenic phosphorus is the case that
+    #: forced this: it depends on the substituents being four DIFFERENT groups,
+    #: which SMARTS cannot say. Rules with a predicate carry `smarts=""`.
+    predicate: "Callable[[Chem.Mol], int] | None" = None
 
 
 #: Each rule fires when its SMARTS matches more than `max_allowed` times.
@@ -71,6 +77,32 @@ RULES: tuple[Rule, ...] = (
     Rule("nitrogen_nitrogen_nitrogen_chain",
          "[NX3][NX3][NX3]",
          "A non-aromatic N-N-N chain outside a tetrazole/azide is unstable."),
+    # ---- added 2026-07-31 (D0048). Both checked against every parseable
+    # reference binder: neither fires on any of them. A rule that rejects a
+    # known Pin1 binder is not a synthesizability rule, it is a bug -- two
+    # earlier proposals died exactly that way (EGCG, PiB), and a third
+    # (`any phosphorus`) would have killed four, because Pin1 is a
+    # phosphate-binding enzyme and a phosphorus ban bans its own pharmacophore.
+    Rule("acyl_phosphate",
+         # Safe ONLY because it demands a carbonyl carbon on the ester oxygen.
+         # `[CX4][OX2][PX4]` -- an ordinary alkyl phosphate -- kills Wildemann,
+         # Guo-Pfizer, Liu-Pei and Jiang-Pei.
+         "[CX3](=[OX1])[OX2][PX4]",
+         "A mixed carboxylic-phosphoric anhydride. A high-energy acyl-transfer "
+         "group that biology uses precisely because it is transient (acetyl "
+         "phosphate, aminoacyl-adenylate, the E2-P aspartyl phosphate). In a "
+         "5-membered ring it is doubly activated: cyclic phosphates hydrolyse "
+         "~1e6-1e8 faster than acyclic ones from ring strain, and both "
+         "hydrolysis modes relieve it. Such a compound cannot survive dilution "
+         "into an assay buffer, so a docking score computed on it describes a "
+         "species that does not exist."),
+    Rule("stereogenic_phosphorus",
+         "",
+         "A stereogenic phosphorus centre. P-stereogenic synthesis needs a "
+         "chiral auxiliary or a resolution even where the most money has been "
+         "spent on it (ProTides). Not impossible, but not something to hand a "
+         "collaborator without saying so.",
+         predicate=lambda mol: _n_stereogenic_phosphorus(mol)),
     Rule("more_than_four_contiguous_heteroatoms",
          "[!#6;!#1][!#6;!#1][!#6;!#1][!#6;!#1]",
          "Four heteroatoms in a row is almost always a generator artefact."),
@@ -79,6 +111,29 @@ RULES: tuple[Rule, ...] = (
          "A cyclopropane carbon shared with a second ring. Bicyclobutane-like "
          "strain; makeable only by dedicated routes, not incidentally."),
 )
+
+
+
+def _n_stereogenic_phosphorus(mol) -> int:
+    """Stereogenic phosphorus atoms, assigned or not.
+
+    FindPotentialStereo rather than FindMolChiralCenters: CIP labelling raises
+    "Digraph generation failed: more than 100000 nodes" on the large peptidic
+    molecules in the reference set, and a rule that crashes on a known binder
+    is worse than no rule.
+    """
+    from rdkit.Chem import rdMolDescriptors  # noqa: F401  (keeps import local)
+    try:
+        info = Chem.FindPotentialStereo(mol)
+    except Exception:  # noqa: BLE001
+        return 0
+    n = 0
+    for e in info:
+        if str(e.type).endswith("Atom_Tetrahedral"):
+            a = mol.GetAtomWithIdx(e.centeredOn)
+            if a.GetSymbol() == "P":
+                n += 1
+    return n
 
 
 def violations(smiles: str) -> list[Rule]:
@@ -93,10 +148,17 @@ def violations(smiles: str) -> list[Rule]:
         return [Rule("unparseable", "", "not a valid molecule")]
     out = []
     for rule in RULES:
-        patt = Chem.MolFromSmarts(rule.smarts)
-        if patt is None:
-            continue
-        if len(m.GetSubstructMatches(patt)) > rule.max_allowed:
+        if rule.predicate is not None:
+            try:
+                n = rule.predicate(m)
+            except Exception:  # noqa: BLE001 - a rule must not kill the caller
+                continue
+        else:
+            patt = Chem.MolFromSmarts(rule.smarts)
+            if patt is None:
+                continue
+            n = len(m.GetSubstructMatches(patt))
+        if n > rule.max_allowed:
             out.append(rule)
     return out
 

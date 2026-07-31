@@ -377,6 +377,10 @@ class TwoTierResult:
         out["excused_alert_total"] = len(self.excused)
         out["alert_gate_pass"] = self.passes_gate
         out["alert_gate_reason"] = self.reason
+        # The two-tier path DOES apply a real gate (max_rgroup_alerts), so a
+        # True here means a threshold was tested and cleared. Contrast the
+        # whole-molecule path — see screen_frame.
+        out["alert_gate_applied"] = True
         return out
 
 
@@ -467,9 +471,26 @@ def screen_frame(df: pd.DataFrame, smiles_col: str = "canonical_smiles", *,
         else:
             r = screen(s)
             cols = r.to_columns(prefix="whole_")
+            # `alert_gate_pass = True` MUST NOT BE EMITTED WHEN NO GATE RAN.
+            #
+            # `disqualifying` defaults to () and is never passed by any caller,
+            # so `bad` was always 0 and this column was `True` for every row —
+            # 4,803 of 4,803 for T_1. It read as "passed the alert filter" and
+            # meant "no filter was configured". T_1's rank-#10 molecule carries
+            # catechol, ortho-hydroquinone and phosphor alerts and was `True`.
+            #
+            # PI decision 2026-07-31: report, do not gate. T_1's alerts stay
+            # advisory — a catechol rule would reject EGCG, a known Pin1 binder,
+            # and two earlier alert-derived rules died the same way. But the
+            # column must say which it is, so `alert_gate_pass` is NA when no
+            # gate ran and `alert_gate_applied` records the fact.
+            applied = bool(disqualifying)
             bad = sum(r.counts.get(c, 0) for c in disqualifying)
-            cols["alert_gate_pass"] = bad == 0
+            cols["alert_gate_applied"] = applied
+            cols["alert_gate_pass"] = (bad == 0) if applied else pd.NA
             cols["alert_gate_reason"] = (
+                "no disqualifying catalog configured — alerts are ADVISORY, "
+                "not gated" if not applied else
                 "" if bad == 0 else
                 f"{bad} hit(s) in disqualifying catalog(s) {list(disqualifying)}")
             records.append(cols)
