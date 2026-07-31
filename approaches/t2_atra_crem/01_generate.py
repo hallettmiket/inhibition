@@ -48,6 +48,7 @@ REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import io as dio                      # noqa: E402
+from shared import pocket_size as ps              # noqa: E402
 from shared import smiles as smi                  # noqa: E402
 
 log = logging.getLogger("t2-generate")
@@ -66,6 +67,8 @@ def load_config() -> dict:
         "radius": int(exp["radius"]),
         "max_degree": int(exp.get("max_degree", 1)),
         "frontier_cap": int(exp.get("frontier_cap", 200_000)),
+        "max_heavy_atoms": int(exp.get("max_heavy_atoms",
+                                       ps.MAX_HEAVY_ATOMS)),
         "mutate": exp.get("mutate") or {},
         "grow": exp.get("grow") or {},
         "seed_name": cfg["approach"]["seed"],
@@ -149,6 +152,7 @@ def generate(cfg: dict, seed_smiles: str) -> tuple[pd.DataFrame, dict]:
         log.info("degree %d: %d raw products from %d parent(s)",
                  degree, len(produced), len(frontier))
         next_frontier: list[str] = []
+        pruned_oversize = 0
         for row in produced:
             canon = smi.canonical(row["smiles"])
             if canon is None:
@@ -157,6 +161,19 @@ def generate(cfg: dict, seed_smiles: str) -> tuple[pd.DataFrame, dict]:
             if not key or key in seen:
                 continue
             seen.add(key)
+            # THE GOVERNOR (issue #1, note 2). Pruned BETWEEN enumeration and
+            # reseeding, not afterwards: an oversized molecule that becomes a
+            # seed produces an entire oversized lineage, so keeping it costs
+            # more at every subsequent degree. Its InChIKey stays in `seen`, so
+            # a pruned molecule is not re-enumerated by another parent later.
+            #
+            # Deliberately weak. 55 heavy atoms is ~1.6x what the 1018 A^3
+            # pocket admits at tight packing and clears every known
+            # non-peptidic Pin1 binder (shared/pocket_size.py). It removes what
+            # cannot fit under any pose; it does not shape the chemistry.
+            if not ps.fits_pocket(canon, max_heavy=cfg["max_heavy_atoms"]):
+                pruned_oversize += 1
+                continue
             records.append({"canonical_smiles": canon,
                             "candidate_id": smi.candidate_id(canon, prefix=APPROACH),
                             "approach": APPROACH,
@@ -167,8 +184,10 @@ def generate(cfg: dict, seed_smiles: str) -> tuple[pd.DataFrame, dict]:
             if len(records) >= cfg["frontier_cap"]:
                 truncated = True
                 break
-        log.info("degree %d: %d new unique molecules (%d cumulative)",
-                 degree, len(next_frontier), len(records))
+        log.info("degree %d: %d new unique molecules (%d cumulative); "
+                 "governor pruned %d oversize (> %d heavy atoms)",
+                 degree, len(next_frontier), len(records), pruned_oversize,
+                 cfg["max_heavy_atoms"])
         if truncated:
             log.warning("FRONTIER CAP %d reached at degree %d — enumeration is "
                         "TRUNCATED, not complete", cfg["frontier_cap"], degree)

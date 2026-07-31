@@ -44,6 +44,7 @@ REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import io as dio                      # noqa: E402
+from shared import pocket_size as ps              # noqa: E402
 from shared import smiles as smi                  # noqa: E402
 
 log = logging.getLogger("t3-generate")
@@ -129,6 +130,29 @@ def verify(df: pd.DataFrame) -> pd.DataFrame:
     if bad.any():
         log.warning("%d/%d generated molecules lost the scaffold or the warhead "
                     "and are stamped (not deleted)", int(bad.sum()), len(out))
+
+    # POCKET CEILING (issue #1, note 3). T_3's oversized R-groups are NOT the
+    # product of multiple decoration cycles: LibInvent runs ONCE here
+    # (n_smiles: 20000, one attachment point), so there are no cycles to limit.
+    # The prior produces large decorations in a single pass. The lever that
+    # actually exists is a size ceiling.
+    #
+    # Stamped, never deleted. `rejected_at` is how every other stage records a
+    # rejection, and keeping the row means the size distribution of what was
+    # removed stays visible in the frame rather than only in a log line.
+    from rdkit import Chem  # local: keeps module import cost off the CLI path
+    out["heavy_atoms"] = [
+        (m.GetNumHeavyAtoms() if (m := Chem.MolFromSmiles(str(s))) else None)
+        for s in out["canonical_smiles"]]
+    already = out["rejected_at"].notna() if "rejected_at" in out.columns \
+        else pd.Series(False, index=out.index)
+    newly = out["heavy_atoms"].gt(ps.MAX_HEAVY_ATOMS).fillna(False) & ~already
+    out.loc[newly, "rejected_at"] = "exceeds_pocket_ceiling"
+    if newly.any():
+        log.warning("%d/%d generated molecules exceed the %d heavy-atom pocket "
+                    "ceiling and are stamped (not deleted); median generated "
+                    "size %s heavy atoms", int(newly.sum()), len(out),
+                    ps.MAX_HEAVY_ATOMS, out["heavy_atoms"].median())
     return out
 
 

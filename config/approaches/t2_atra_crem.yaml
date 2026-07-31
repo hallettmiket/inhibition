@@ -41,6 +41,15 @@ expansion:
   # MD and never finish.
   max_degree: 1
   frontier_cap: 200000
+
+  # The governor (issue #1, note 2). Pocket-derived ceiling applied BETWEEN
+  # enumeration and reseeding, so an oversized molecule never becomes a seed
+  # and never spawns an oversized lineage. 55 is ~1.6x what the 1018 A^3
+  # Pin1 catalytic site admits at tight packing, and clears every known
+  # non-peptidic binder including BJP-06-005-3 at 52 heavy atoms. Loose on
+  # purpose: it removes what cannot fit under any pose, nothing more.
+  # Derivation and the test that pins it: shared/pocket_size.py.
+  max_heavy_atoms: 55
   max_replacements: null          # null = take every valid replacement
 
   # PINNED, not inherited (D0018). CReM defaults max_size to 10 heavy atoms.
