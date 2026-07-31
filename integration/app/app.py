@@ -104,6 +104,49 @@ def show_gate(stratum: str, metric: str) -> None:
 # panels
 # --------------------------------------------------------------------------
 
+@st.dialog("Docked pose", width="large")
+def show_pose_dialog(approach: str, approach_name: str, top: pd.DataFrame) -> None:
+    """Full-width pose viewer with its controls spelled out.
+
+    3Dmol.js has no on-screen controls at all -- no buttons, no hint that
+    right-drag zooms or that Ctrl+drag pans. Someone who tries left-drag alone
+    finds the view rotates and never centres, and reasonably concludes it is
+    broken. The control table is not decoration; it is the only affordance.
+    """
+    ids = list(top["candidate_id"])
+    c1, c2 = st.columns([3, 2])
+    pick = c1.selectbox(
+        "candidate", ids, key=f"dlg_pose_{approach}",
+        format_func=lambda c: (
+            f"#{int(top.loc[top.candidate_id == c, 'rank'].iloc[0])} · {c}"))
+    framing = c2.selectbox(
+        "framing", ["ligand", "pocket", "all"], key=f"dlg_zoom_{approach}",
+        help="Changing this re-renders and RESETS the view — it is also how "
+             "you recover from having rotated or panned somewhere unhelpful.")
+
+    prow = top.loc[top.candidate_id == pick].iloc[0]
+    # dock_id, not candidate_id: covalent pose files are named by a separate
+    # hash that shares nothing with the candidate id.
+    pose = p3d.find_pose(
+        approach, str(pick),
+        dock_id=(str(prow["dock_id"]) if "dock_id" in top.columns
+                 and pd.notna(prow.get("dock_id")) else None))
+    if pose is None:
+        st.info(f"no docked pose file found for {pick}")
+        return
+
+    components.html(p3d.pose_html(pose, zoom_on=framing, height=620), height=640)
+    st.caption(
+        f"**{approach_name}** · `{pose.name}` · receptor 6VAJ as a cartoon, "
+        "**Cys113 in yellow sticks**, ligand in cyan. The grey surface is the "
+        "pocket wall within 12 residues of Cys113 — a whole-protein surface "
+        "would hide the ligand."
+        + (" Vina writes all nine binding modes into one file; only the "
+           "top-scoring one is drawn." if pose.suffix == ".pdbqt" else ""))
+    with st.expander("how to move the view", expanded=True):
+        st.markdown(p3d.CONTROLS)
+
+
 def panel_candidates() -> None:
     st.header("Shortlists — four approaches, side by side")
     st.caption("Each column is ranked by ITS OWN metric. The columns are not "
@@ -231,33 +274,15 @@ def panel_candidates() -> None:
                                 width=150, height=120),
                     unsafe_allow_html=True)
 
-            # THE POSE, IN THE POCKET (issue #1). A ligand rendered alone is a
-            # conformer, not a pose: every claim a docked pose makes is about
-            # the ligand relative to the protein. The receptor is always drawn.
-            with st.expander("docked poses (in the receptor)"):
-                top = s.sort_values("rank").head(9)
-                ids = list(top["candidate_id"])
-                pick = st.selectbox(
-                    "candidate", ids, key=f"pose_{key}",
-                    format_func=lambda c: (
-                        f"#{int(top.loc[top.candidate_id == c, 'rank'].iloc[0])} · {c}"))
-                prow = top.loc[top.candidate_id == pick].iloc[0]
-                # dock_id, not candidate_id: the covalent pose files are named
-                # by a separate hash that shares nothing with the candidate id.
-                pose = p3d.find_pose(
-                    key, str(pick),
-                    dock_id=(str(prow["dock_id"])
-                             if "dock_id" in top.columns
-                             and pd.notna(prow.get("dock_id")) else None))
-                if pose is None:
-                    st.info(f"no docked pose file found for {pick}")
-                else:
-                    st.caption(
-                        f"`{pose.name}` · receptor 6VAJ, cartoon; **Cys113 in "
-                        "yellow sticks**; ligand in cyan. The grey surface is "
-                        "the pocket wall within 12 residues of Cys113 — a "
-                        "whole-protein surface would hide the ligand.")
-                    components.html(p3d.pose_html(pose), height=500)
+            # THE POSE OPENS IN A DIALOG, NOT IN THIS COLUMN. A ligand rendered
+            # alone is a conformer, not a pose -- but a pose rendered into a
+            # quarter-width column is barely better. The 3D canvas was 700 px
+            # inside a ~300 px column, so the scene sat off-frame and could not
+            # be recovered with the mouse. st.dialog gives it the full width.
+            top = s.sort_values("rank").head(9)
+            if st.button("view docked poses ⤢", key=f"posebtn_{key}",
+                         use_container_width=True):
+                show_pose_dialog(key, cfg["name"], top)
 
 
 def panel_dossier() -> None:
@@ -437,9 +462,14 @@ def panel_dossier() -> None:
                     "periodic boundary, which reads as dissociation and is not "
                     "(D0038).")
                 if st.button("build / show movie", key=f"movie_{cid}"):
-                    html = p3d.trajectory_html(*traj)
+                    try:
+                        html = p3d.trajectory_html(*traj)
+                    except p3d.MovieTooLarge as exc:
+                        html = None
+                        st.error(str(exc))
                     if html:
-                        components.html(html, height=500)
+                        components.html(html, height=640)
+                        st.markdown(p3d.CONTROLS)
                     else:
                         st.info("could not build the movie for this trajectory")
 

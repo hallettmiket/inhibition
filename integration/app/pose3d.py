@@ -104,12 +104,38 @@ def find_trajectory(approach: str, candidate_id: str,
     return None
 
 
-def pose_html(sdf: Path, *, width: int = 700, height: int = 480,
-              surface: bool = True) -> str:
-    """The docked pose inside the receptor, with Cys113 called out."""
+#: How to drive a 3Dmol.js canvas. Written out because the viewer offers no
+#: on-screen affordances whatsoever -- no buttons, and nothing indicates that
+#: right-drag zooms or Ctrl+drag pans. A reader who tries only left-drag
+#: concludes the view is stuck off-centre and unusable.
+CONTROLS = """
+| action | mouse | trackpad |
+|---|---|---|
+| **rotate** | left-click + drag | one-finger drag |
+| **zoom** | scroll wheel, or right-click + drag | two-finger scroll / pinch |
+| **pan** — shift the molecule sideways | middle-click + drag, or **Ctrl** + left-drag | **Ctrl** + one-finger drag |
+| **slab** — cut away the front | **Ctrl** + right-drag | — |
+| **reset** | change the *framing* control and back | same |
+"""
+
+
+def pose_html(sdf: Path, *, width: int | None = None, height: int = 620,
+              surface: bool = True, zoom_on: str = "ligand") -> str:
+    """The docked pose inside the receptor, with Cys113 called out.
+
+    `width=None` makes the canvas fill its container. This matters more than it
+    sounds: the viewer was fixed at 700 px inside a one-of-four column roughly
+    300 px wide, so most of the scene sat off-canvas and no amount of mouse work
+    brought it back. The complaint was that the image could not be centred; the
+    cause was that the canvas was wider than the space it was drawn into.
+
+    `zoom_on` sets the opening framing -- "ligand" fills the view with the
+    binding site, "pocket" backs off to show the surrounding fold, "all" shows
+    the whole protein for orientation.
+    """
     import py3Dmol
 
-    v = py3Dmol.view(width=width, height=height)
+    v = py3Dmol.view(width=width or "100%", height=height)
     v.addModel(RECEPTOR.read_text(), "pdb")
     v.setStyle({"model": 0}, {"cartoon": {"color": "spectrum", "opacity": 0.65}})
     # The catalytic cysteine, drawn as sticks so its SG is locatable by eye.
@@ -133,7 +159,16 @@ def pose_html(sdf: Path, *, width: int = 700, height: int = 480,
         v.addModel(sdf.read_text(), "sdf")
     v.setStyle({"model": 1}, {"stick": {"colorscheme": "cyanCarbon",
                                         "radius": 0.16}})
-    v.zoomTo({"model": 1})
+    if zoom_on == "all":
+        v.zoomTo()
+    elif zoom_on == "pocket":
+        v.zoomTo({"model": 0, "resi": list(range(CATALYTIC_RESI - 12,
+                                                 CATALYTIC_RESI + 12))})
+    else:
+        v.zoomTo({"model": 1})
+        # Back off slightly: zoomTo on a small ligand crops the pocket walls
+        # out of frame, which is the context the pose exists to show.
+        v.zoom(0.7)
     return v._make_html()
 
 
