@@ -21,11 +21,12 @@ covalent gate is still UNDERPOWERED. So no shortlist here is evidence that the
 molecules at the top bind, and a rank displayed without that verdict would imply
 a confidence nothing supports.
 
-THE RANKINGS ARE PARTLY SIZE RANKINGS (D0043). spearman(heavy_atoms, score) is
-+0.745 for T_3 and has the same meaning in all four approaches: bigger scores
-better. That is a mechanism for the WEAK verdict, since the decoys are matched
-on molecular weight. Ligand efficiency is not the fix — it over-corrects to
--0.938 and becomes a smallness ranking.
+THE RANKINGS ARE PARTLY SIZE RANKINGS (D0043). spearman(heavy_atoms, rank
+metric) is -0.617 for T_1, -0.479 for T_3 and -0.230 for T_2, all
+lower-is-better, so larger molecules score better in three of four approaches.
+T_4 is the exception at +0.181. That is a mechanism for the WEAK verdict, since
+the decoys are matched on molecular weight. Ligand efficiency is not the fix —
+it over-corrects to -0.938 and becomes a smallness ranking.
 
 THE SCORE-FREE SIGNALS ARE THE DEFENSIBLE ONES. Structural convergence and the
 shared physicochemical axes need no commensurability between metrics, which is
@@ -75,9 +76,10 @@ def honest_limits() -> None:
         "and the interval contains chance, so docking does not demonstrably "
         "enrich for known Pin1 binders. The covalent gate remains UNDERPOWERED.\n\n"
         "**The rankings are partly size rankings** (D0043). Spearman between "
-        "heavy-atom count and score is +0.745 for T_3, −0.617 for T_1, +0.305 "
-        "for T_4 and −0.230 for T_2 — all four meaning larger molecules score "
-        "better. T_3's shortlist has a median 39 heavy atoms against 25 "
+        "heavy-atom count and each approach's OWN rank metric (all "
+        "lower-is-better): −0.617 T_1, −0.479 T_3, −0.230 T_2 — larger "
+        "molecules score better in all three. T_4 runs the other way at "
+        "+0.181. T_3's shortlist has a median 39 heavy atoms against 25 "
         "generated. Read every rank with that in mind.\n\n"
         "Inhibition versus activation is unresolved, and there is no wet-lab "
         "ground truth for any candidate.")

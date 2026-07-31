@@ -28,6 +28,41 @@ evidence:
 
 # The molecules are not too big; the ranking prefers big molecules
 
+> ## Correction, 2026-07-31
+>
+> **The T_3 and T_4 numbers below were computed on `cnn_affinity`, which is not
+> their ranking metric.** Both rank on `affinity_kcal`; `cnn_affinity` is
+> explicitly flagged uncalibrated for covalent docking (D0011) and is carried as
+> advisory only. Recomputed on the metric that actually orders the shortlists:
+>
+> | approach | rank metric | rho | direction |
+> |---|---|---|---|
+> | T_1 | `vina_affinity` | −0.617 | bigger scores **better** |
+> | T_3 | `affinity_kcal` | **−0.479** | bigger scores **better** |
+> | T_2 | `vina_affinity` | −0.230 | bigger scores **better** |
+> | T_4 | `affinity_kcal` | **+0.181** | bigger scores **worse** |
+>
+> All four metrics here are lower-is-better, so the signs are directly
+> comparable. Two things change:
+>
+> **T_3's size dependence is weaker than reported** — −0.479, not the +0.745
+> quoted below. The finding survives; its magnitude does not.
+>
+> **T_4 runs the other way.** The claim below that "all four mean the same
+> thing: bigger molecules score better" is FALSE for T_4 on its real ranking
+> metric: larger molecules score slightly worse. The size bias holds for T_1,
+> T_2 and T_3 only.
+>
+> The error was mine and it is the project's recurring one — a column chosen by
+> plausible name rather than by checking which one the ranker reads. It was
+> caught because `rank_shortlist.rank()` refuses any metric not declared in
+> `LOWER_IS_BETTER` with its direction, rather than assuming one. The guard was
+> written for exactly this and it worked.
+>
+> Everything else below — the shortlist/generated size gap, the ligand-efficiency
+> over-correction, the pocket ceiling — is unaffected: those were computed on
+> heavy-atom counts and on T_1/T_2, not on the covalent metrics.
+
 ## What was reported and what I first assumed
 
 Issue #1: *"the decorated r group is quite massive, resulting in most of the
