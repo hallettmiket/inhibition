@@ -66,6 +66,117 @@ def gate_badge(verdict: str) -> str:
             "FAIL": "🔴", "UNGATED": "⚪"}.get(str(verdict).upper(), "⚪")
 
 
+# THE MURMURENT BRANDED FOOTER, ported from the site's own definition:
+# `overrides/partials/copyright.html` + the `.mm-brand-footer` rules in
+# `docs/stylesheets/extra.css` in the murmurent repo. Markup, class names,
+# colours and logo order all follow that source rather than an approximation of
+# the rendered page, so the two stay recognisably the same object.
+#
+# THE COLOURS ARE THE BRAND, not decoration: #201436 (--purple-deep) with a 3px
+# #F0A757 (--tiger) top accent. Dropping them makes this a generic grey footer.
+#
+# THE LAND ACKNOWLEDGEMENT IS PART OF THE FOOTER, reproduced verbatim including
+# the diacritics in "Lūnaapéewak" -- a transliteration stripped of its accents
+# is a different word.
+#
+# LOGOS ARE EMBEDDED AS DATA URIs. Streamlit serves no static directory for
+# arbitrary app assets, and an <img src> pointing at a repo path renders as a
+# broken icon. They are downscaled copies (3x their CSS height, for retina) of
+# the originals in murmurent's docs/assets/logos, kept in this repo so the GUI
+# does not depend on the murmurent checkout being present next to it.
+ASSETS = APP_DIR / "assets" / "logos"
+
+_LOGO_LINKS = [
+    ("lab-logo.png", "https://mikehallett.science", "Hallett Lab",
+     "mm-logo-lab"),
+    ("schulich.png", "https://www.schulich.uwo.ca/",
+     "Schulich School of Medicine &amp; Dentistry", "mm-logo-schulich"),
+    ("western.png", "https://www.uwo.ca/", "Western University",
+     "mm-logo-western"),
+]
+
+
+def _data_uri(path: Path) -> str | None:
+    """base64 data URI for an image, or None if it is missing."""
+    try:
+        import base64
+        return ("data:image/png;base64,"
+                + base64.b64encode(path.read_bytes()).decode("ascii"))
+    except OSError:
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def _footer_html() -> str:
+    """Build the footer once; the base64 payload does not change per rerun."""
+    imgs = []
+    for fname, href, alt, cls in _LOGO_LINKS:
+        uri = _data_uri(ASSETS / fname)
+        if uri is None:
+            # A missing logo must not take the footer -- and must not silently
+            # look like a design choice either. The text link stands in.
+            imgs.append(f'<a href="{href}" target="_blank" rel="noopener" '
+                        f'class="mm-logo-missing">{alt}</a>')
+            continue
+        imgs.append(
+            f'<a href="{href}" target="_blank" rel="noopener">'
+            f'<img class="{cls}" src="{uri}" alt="{alt}"></a>')
+    return f"""
+<style>
+.mm-brand-footer {{
+  width: 100%;
+  background: #201436;                 /* --purple-deep */
+  border-top: 3px solid #F0A757;       /* --tiger */
+  color: rgba(255, 255, 255, 0.85);
+  padding: 16px 24px;
+  margin-top: 2.5rem;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  border-radius: 2px;
+}}
+.mm-brand-bar {{
+  max-width: 1220px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}}
+.mm-brand-bar a {{ border-bottom: 0; line-height: 0; }}
+.mm-brand-footer img {{ display: block; width: auto !important; max-width: none; }}
+.mm-brand-footer img.mm-logo-lab      {{ height: 30px !important; border-radius: 2px; }}
+.mm-brand-footer img.mm-logo-schulich {{ height: 22px !important; filter: brightness(0) invert(1); opacity: 0.85; }}
+.mm-brand-footer img.mm-logo-western  {{ height: 18px !important; }}
+.mm-brand-footer .mm-dept {{ color: rgba(255, 255, 255, 0.72); flex-grow: 1; }}
+.mm-brand-footer .mm-logo-missing {{ color: rgba(255,255,255,0.6); line-height: 1.4; }}
+.mm-brand-footer .mm-ack {{
+  max-width: 1220px;
+  margin: 10px auto 0;
+  font-style: italic;
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.7);
+}}
+</style>
+<div class="mm-brand-footer">
+  <div class="mm-brand-bar">
+    {"".join(imgs)}
+    <span class="mm-dept">Built by the Hallett Lab &middot; Department of
+    Biochemistry &middot; London, ON, Canada</span>
+  </div>
+  <div class="mm-ack">
+    We acknowledge that Western University is located on the traditional lands
+    of the Anishinaabek, Haudenosaunee, L&#363;naap&#233;ewak and Attawandaron
+    peoples.
+  </div>
+</div>
+"""
+
+
+def site_footer() -> None:
+    """Render the murmurent branded footer at the bottom of the page."""
+    st.markdown(_footer_html(), unsafe_allow_html=True)
+
+
 def honest_limits() -> None:
     st.warning(
         "**Honest limits.** No authoritative cross-method ranking exists here — "
@@ -927,3 +1038,6 @@ except Exception:  # noqa: BLE001 - a version badge must never break the page
 st.sidebar.caption("The GUI reads; it does not own (D0008). Everything shown is "
                    "a rendering of files in the repo or the append-only tree.")
 PANELS[choice]()
+
+# Last, so it sits below whichever panel rendered.
+site_footer()
