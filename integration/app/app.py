@@ -48,6 +48,7 @@ sys.path.insert(0, str(APP_DIR.parent.parent))
 
 import data as D                                  # noqa: E402
 import depict                                     # noqa: E402
+import curate                                     # noqa: E402
 import pose3d as p3d                              # noqa: E402
 
 st.set_page_config(page_title="Dance with Inhibition — integration",
@@ -109,6 +110,22 @@ def panel_candidates() -> None:
                "comparable with each other and are deliberately not merged.")
     honest_limits()
 
+    # THE CURATOR FILTER (issue #1, general note 1). Removes rows a chemist has
+    # ruled out and preserves the existing order. It deliberately does NOT
+    # re-score: the gate has measured that the underlying ranking does not
+    # demonstrably enrich (D0041) and is partly a size ranking (D0043), so
+    # inventing a second ordering on top of an unvalidated one would compound
+    # the problem. Dropping molecules you have ruled out is safe either way.
+    with st.expander("curate — filter these lists by chemistry you have ruled out"):
+        st.caption(
+            "One constraint per line. `no chlorine` · `no [Cl]` (SMARTS works "
+            "too) · `require sulfonamide` · `mw < 450` · `sp2_bonds <= 8` for "
+            "less conjugation · `rotatable_bonds <= 6`. "
+            f"Known group names: {', '.join(sorted(curate.NAMED_GROUPS))}.")
+        spec = st.text_area("constraints", value="", height=90,
+                            placeholder="no chlorine\nmw < 450")
+    st.session_state["_curate_spec"] = spec
+
     cols = st.columns(len(D.APPROACHES))
     for col, (key, cfg) in zip(cols, D.APPROACHES.items()):
         with col:
@@ -117,6 +134,21 @@ def panel_candidates() -> None:
             if s.empty:
                 st.info("no shortlist yet")
                 continue
+            if spec.strip():
+                try:
+                    n_before = len(s)
+                    s, applied = curate.apply(s, spec)
+                    st.info(
+                        f"**curated: {len(s)} of {n_before}** · "
+                        + " · ".join(f"`{r.text}` −{r.removed}" for r in applied))
+                except curate.ConstraintError as exc:
+                    # Refused, not silently ignored: a mis-parsed constraint
+                    # that filters nothing is indistinguishable from a working
+                    # one that finds nothing, and a chemist would act on it.
+                    st.error(f"constraint not applied — {exc}")
+                if s.empty:
+                    st.warning("every candidate was filtered out")
+                    continue
             verdict = str(s["gate_verdict"].iloc[0]) if "gate_verdict" in s else "UNGATED"
             st.markdown(
                 f"{gate_badge(verdict)} **{verdict}** · metric "
