@@ -44,6 +44,7 @@ from shared import covalent_adduct as cad           # noqa: E402
 from shared import covalent_protocol as cp          # noqa: E402
 from shared import enrichment_gate as eg            # noqa: E402
 from shared import reference_set as rs              # noqa: E402
+from shared import smiles as smi                    # noqa: E402
 from shared.manifest import Manifest                # noqa: E402
 
 log = logging.getLogger("gate")
@@ -249,16 +250,42 @@ def build_jobs(stratum: str, workdir: Path) -> list[dict]:
     log.info("[%s] %d actives, %d decoys (excluded: %s)",
              stratum, len(actives), len(decoys), excluded)
 
+    # IDS ARE DERIVED FROM THE MOLECULE, NOT ITS ROW POSITION.
+    #
+    # `act_{i:03d}` numbered actives by their index in this frame. The results
+    # file is append-only and resumable, so when the active set changed --
+    # adding Ieda, and exclusions moving as decoy pools were deepened -- every
+    # molecule after the change shifted position and was written again under a
+    # NEW id. Tian-chloropyrimidine-covalent-6a ended up as both act_002 and
+    # act_003: docked twice, counted as two actives, double-weighted in the
+    # AUC. The gate reported "7 actives" for 6 distinct molecules, and
+    # BJP-06-005-3 never entered at all because the resumed run saw its slot
+    # already filled.
+    #
+    # `smiles.candidate_id` exists for exactly this and its docstring says so:
+    # deterministic from the InChIKey "so that a resumed or re-run stage
+    # produces the same ids". Nothing here should have been sequential.
     jobs: list[dict] = []
-    for i, r in actives.iterrows():
-        jobs.append({"id": f"act_{i:03d}", "name": r["name"],
+    for _, r in actives.iterrows():
+        cid = smi.candidate_id(str(r["canonical_smiles"]), prefix="act")
+        if cid is None:
+            log.error("active %r has an unusable SMILES; skipping", r["name"])
+            continue
+        jobs.append({"id": cid, "name": r["name"],
                      "smiles": r["canonical_smiles"], "label": 1,
                      "warhead_class": ACTIVE_WARHEAD_CLASS.get(r["name"], "chloroacetamide"),
                      "workdir": str(workdir), "stratum": stratum})
-    for i, r in decoys.iterrows():
+    seen_act = {j["id"] for j in jobs}
+    if len(seen_act) != len(jobs):
+        raise SystemExit("two actives share an InChIKey — the reference set "
+                         "carries the same molecule twice")
+    for _, r in decoys.iterrows():
         wc = (str(r.get("warhead_classes", "")).split("|")[0]
               if stratum == "covalent" else "")
-        jobs.append({"id": f"dec_{i:04d}", "name": r["chembl_id"],
+        cid = smi.candidate_id(str(r["smiles"]), prefix="dec")
+        if cid is None:
+            continue
+        jobs.append({"id": cid, "name": r["chembl_id"],
                      "smiles": r["smiles"], "label": 0,
                      "warhead_class": wc or "chloroacetamide",
                      "workdir": str(workdir), "stratum": stratum})
@@ -273,7 +300,13 @@ def run_stratum(stratum: str) -> pd.DataFrame:
     # pre-reaction run; reusing it would silently resume onto the old docks and
     # report the old gate under a new protocol fingerprint. Append-only means it
     # stays where it is.
-    results_path = workdir / f"results_{cp.LIGAND_FORM}_classmatched.jsonl"
+    # RESULTS_VERSION exists because this file is append-only and resumable, and
+    # a resume is only safe while the ids mean the same thing. The positional
+    # ids that preceded this bump wrote one molecule under two ids; resuming
+    # onto that file would inherit both. Bump it whenever the id scheme or the
+    # candidate set changes in a way that makes old rows unmergeable.
+    results_path = (workdir /
+                    f"results_{cp.LIGAND_FORM}_classmatched_v2.jsonl")
 
     done: set[str] = set()
     if results_path.is_file():
