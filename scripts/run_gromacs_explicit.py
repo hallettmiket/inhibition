@@ -51,7 +51,8 @@ APPROACHES = {
 }
 
 
-def discover(approaches: list[str], limit: int | None) -> list[dict]:
+def discover(approaches: list[str], limit: int | None,
+             selection_col: str = "shortlist") -> list[dict]:
     """Shortlisted candidates that have the Amber inputs solvation needs."""
     from shared import io as dio
     jobs = []
@@ -62,10 +63,10 @@ def discover(approaches: list[str], limit: int | None) -> list[dict]:
         except Exception as exc:  # noqa: BLE001
             log.warning("%s: no frame (%s)", a, exc)
             continue
-        if "shortlist" not in df.columns:
-            log.warning("%s: frame %s has no shortlist column", a, frame.name)
+        if selection_col not in df.columns:
+            log.warning("%s: frame %s has no %s column", a, frame.name, selection_col)
             continue
-        s = df[df["shortlist"].fillna(False)].drop_duplicates("candidate_id")
+        s = df[df[selection_col].fillna(False)].drop_duplicates("candidate_id")
         root = DATA / cfg["experiment"] / cfg["mmgbsa"]
         for _, r in s.iterrows():
             src = root / str(r["candidate_id"])
@@ -142,6 +143,9 @@ def main() -> None:
                          "mercy of one outlier, and the implicit tier showed "
                          "run-to-run swings of 5-12x on the candidates that "
                          "matter (D0038).")
+    ap.add_argument("--selection-col", default="shortlist",
+                    help="boolean column selecting candidates; use "
+                         "shortlist_synth for the synthesizable list")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--out", default=str(DATA / "00_shared_substrate"
@@ -151,7 +155,8 @@ def main() -> None:
                         format="%(levelname)s %(name)s: %(message)s")
 
     gpus = [int(g) for g in args.gpus.split(",") if g.strip()]
-    jobs = discover(args.approach or ["t1", "t2"], args.limit)
+    jobs = discover(args.approach or ["t1", "t2"], args.limit,
+                    selection_col=args.selection_col)
     if not jobs:
         raise SystemExit("no shortlisted candidate has the Amber inputs needed")
     # One job per (candidate, replicate). Interleaved by replicate so that if
