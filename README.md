@@ -8,6 +8,19 @@ This is a murmurent **choreography**: a problem statement many people attack,
 each with their own **approach**. The pipeline code lives here; the generic
 machinery for *describing* choreographies belongs in the murmurent repo.
 
+> ### New here? Read these two first
+>
+> 1. **[`docs/state_of_the_project.md`](docs/state_of_the_project.md)** — what
+>    we are trying to find out, what is established, what is ruled out, and what
+>    to do next. This README tells you how to *run* things; that tells you
+>    *why*.
+> 2. **[`docs/how_this_project_breaks.md`](docs/how_this_project_breaks.md)** —
+>    every substantive bug found here has been the same bug. Read it before
+>    trusting a number or writing code.
+>
+> Then `decisions/` (45 records — they record what was wrong and why it looked
+> right), and GitHub **#4** (the plan) and **#6** (open decisions).
+
 - **Spec:** [issue #108](https://github.com/hallettmiket/murmurent/issues/108),
   Rev 3 (comment `5083543621`) + implementation plan (comment `5083611947`).
 - **Authors:** Mike Hallett (hallett.mike.t@gmail.com), with Claude Code.
