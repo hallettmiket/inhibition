@@ -1,0 +1,179 @@
+# How this project breaks
+
+*Written 2026-07-31, at handover. Read this before the README.*
+
+Every substantive bug found in this project has been the same bug.
+
+> **A value taken by position, name, or default rather than by identity —
+> failing silently, because both the right and wrong candidates are populated
+> and plausible.**
+
+Not one of them raised an exception. Not one produced an obviously wrong
+number. Every single one produced a number that looked exactly like the number
+it should have produced, and was computed from the wrong thing.
+
+If you learn one thing from this document, learn to recognise that shape. The
+next instance is already in the code; it just hasn't been looked at yet.
+
+---
+
+## The catalogue
+
+Each entry: what was taken, what should have been taken, and how it surfaced.
+The last column is the one to study — **almost nothing here was caught by a
+test, because the code was doing exactly what it was written to do.**
+
+| # | The value taken | What it should have been | How it surfaced |
+|---|---|---|---|
+| 1 | The shortlist column named `shortlist` | `shortlist_synth`, the rebuilt list with rule failures replaced | The PI noticed unsynthesizable compounds still on screen |
+| 2 | Active ids numbered `act_{i:03d}` by **frame position** | An id derived from the molecule | One active counted twice, another never entered — found while re-reading gate output |
+| 3 | `rows[0]` of gnina's results table | The **affinity-best** pose; gnina sorts by CNN score | Found while building a multi-pose viewer, not while auditing the metric |
+| 4 | `cnn_affinity` as T_3/T_4's rank metric in an analysis | `affinity_kcal`, the actual ranking column | The `LOWER_IS_BETTER` direction registry refused the column |
+| 5 | A **hand-maintained** list of columns to drop before a merge | The columns actually being merged in | `_x`/`_y` suffixes appeared in the output frame |
+| 6 | `warhead_classes_7.csv`, pinned by hand | `_8`, which existed and contained the correction | Noticed while reading the library, by luck |
+| 7 | `pin1_reference_binders_3.csv`, pinned by hand | `_4`, written minutes earlier | Caught only because I went looking for who reads the file |
+| 8 | A cache keyed on `class_id` alone | Keyed on `class_id` **and the query** | Served a stale 3-molecule pool after the query was relaxed |
+| 9 | A cache keyed on `candidate_id` alone | Keyed on candidate **and protonation** | Caught *before* it bit, by asking what the key omits |
+| 10 | `nunique()` on free-text `warhead_class` | Canonical `class_id` — one warhead, two prose strings | Counting gave exactly the floor of 6; the correct count is 4 |
+| 11 | The default H-DAB-style assumption that alerts were gated | `alert_gate_pass` is `True` for all 4,803 T_1 rows | A blacksmith checked a molecule's alerts and found them computed but unused |
+| 12 | `resi 101..125`, a **sequence window** | The measured 8 Å pocket shell | Excluded the entire Arg loop from a figure nobody had checked |
+| 13 | The stale-module detector placed at the **bottom** of `app.py` | Before any helper attribute is read | It ran 30 lines after the crash it exists to explain |
+
+---
+
+## The four disguises
+
+### 1. Selection by name
+
+Two columns exist. Both are populated. Both are plausible. The code names one.
+
+Instances **1, 4, 10**. The tell: a column name that *describes* what you want
+rather than being derived from the thing that defines it. `shortlist` sounds
+like the shortlist. `cnn_affinity` sounds like an affinity. `warhead_class`
+sounds like a class.
+
+**Defence:** derive the name from the thing that owns it. `rank_shortlist`
+refuses any metric not declared in `LOWER_IS_BETTER` *with its direction* —
+that guard caught #4 and is the only reason it was caught.
+
+### 2. Selection by position
+
+The first row. The *i*th element. The order the file happens to be in.
+
+Instances **2, 3, 5**. The tell: an index used where an identity was meant.
+`rows[0]` is correct only if the row order encodes the property you want — and
+in #3 it encoded a *different* score than the one being read off it.
+
+**Defence:** if you index, write down what guarantees the order. If you can't,
+you have this bug.
+
+### 3. Pinned defaults that go stale
+
+A constant naming a version. It was right when written. The file it names still
+exists and still parses, so nothing ever complains.
+
+Instances **6, 7**, and the pattern behind **8, 9** (a cache key is a pin on
+its inputs). This has now happened **three times** with reference files.
+
+**Defence:** `shared/reference_set.latest_reference()` resolves by glob;
+`tests/test_reference_version.py` walks the AST and fails on any stale
+executable literal. A pin cannot announce that it is out of date — only a
+comparison against the directory can.
+
+### 4. A guard that is scoped out, mis-ordered, or vacuous
+
+The check exists. It runs. It just doesn't cover the case, or it runs too late,
+or it cannot fail.
+
+Instances **11, 12, 13** — plus two of my own tests during this session:
+
+* `test_stale_guard`'s first version counted only dotted `curate.X` reads.
+  Making the crashing line defensive with `getattr` left it **zero accesses to
+  check** — it passed for free and would have kept passing through a
+  reintroduced regression.
+* The version-pin test flagged four "offenders" that were all **docstrings**.
+  Fixing the prose was right; so was narrowing the test to executable code.
+
+**Defence:** for every guard, ask *what would make this pass when it should
+fail?* If the answer is "the thing it inspects being absent," assert the thing
+is present.
+
+---
+
+## Why this project produces this bug so reliably
+
+Not carelessness. Three structural causes, all of which will still be there
+after handover:
+
+**The pipeline is wide and every stage has near-miss neighbours.** Four
+approaches × several metrics × several selection columns × versioned reference
+files. Almost every value has a plausible sibling one identifier away.
+
+**Nearly every quantity is a plausible float.** A binding affinity of −5.85 and
+one of −6.86 both look like binding affinities. There is no type error, no
+range violation, nothing a schema catches. Only a *comparison against what the
+value was supposed to mean* catches it.
+
+**The outputs are read by eye at the end of a long chain.** By the time a
+number reaches the GUI it has passed through generation, annotation, docking,
+ranking, shortlisting and merging. A defect at stage two is indistinguishable
+from a real result at stage six.
+
+---
+
+## How they actually got caught
+
+Worth being honest, because it should change how you spend your attention.
+
+| route | count |
+|---|---|
+| Someone looked at output and it didn't match expectation | 5 |
+| Found while building something else entirely | 4 |
+| An existing guard fired | 2 |
+| Deliberate audit for this class of defect | 2 |
+
+**The two that a guard caught are the two where a guard existed.** The direction
+registry caught #4; the append-only manifest caught a provenance error. Every
+other one needed a human noticing something looked off.
+
+That ratio is the argument for writing guards — not for auditing harder.
+
+---
+
+## What to do when you find the next one
+
+1. **Fix the class, not the case.** #7 wasn't fixed by editing a constant to
+   `_4`; it was fixed by making version resolution impossible to pin.
+2. **Write the guard so it fails loudly.** `canonical_class()` *raises* on an
+   unmapped warhead rather than returning it unchanged, because returning it
+   unchanged is how it becomes its own chemotype.
+3. **Check the guard can fail.** See the two vacuous tests above.
+4. **Write a decision record** — including what was wrong and *why it looked
+   right*. The "why it looked right" is the part that helps the next person.
+5. **Ask what else shares the shape.** #9 was caught *before* it bit, by asking
+   what a cache key omits right after #8 taught us to ask.
+
+---
+
+## Where I would look next
+
+Untested hypotheses. Offered as leads, not findings.
+
+* **Every other cache.** #8 and #9 were both keys that omitted an input. Grep
+  for `if .*\.is_file\(\).*: return` and ask what the path omits.
+* **Every `[0]`, `.iloc[0]`, `.head(1)` on a scored frame.** #3 was one of
+  these. What guarantees that order?
+* **`n_docked` and other denominators.** If any is computed after a filter that
+  a reader doesn't know about, every percentage derived from it is wrong.
+* **The remaining hand-maintained lists.** #5 was one. Any literal list of
+  column names that must stay in sync with code more than a few lines away.
+* **T_1's alerts (#11) are computed and unused.** That was found; whether
+  anything *else* is computed-and-unused has not been checked.
+
+---
+
+## The one-sentence version
+
+If a number in this project is wrong, it is almost certainly because something
+selected it by **where it sat** or **what it was called**, rather than by
+**what it is** — and it will look completely normal.
