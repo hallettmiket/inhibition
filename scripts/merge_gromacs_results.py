@@ -89,14 +89,38 @@ def analyse_one(job: dict) -> dict:
 
 
 def discover(approaches: list[str]) -> list[dict]:
+    """Every trajectory to analyse, INCLUDING the per-replicate ones.
+
+    THE REPLICATE LAYOUT IS NESTED. A candidate directory holds the shared
+    solvation and minimisation; each replicate gets its own `repN/` with its own
+    `prod.xtc`. This previously looked only at `wd/prod.xtc`, so it would have
+    found the 48 original single runs, missed all 240 replicates, and reported
+    the old numbers as the new result -- succeeding silently, which is the
+    failure mode this project keeps meeting.
+
+    A flat `prod.xtc` is still picked up and labelled `replicate: 0`, so the
+    original campaign stays analysable and cannot be mistaken for replicate 1.
+    """
     jobs = []
     for a in approaches:
         root = DATA / EXPERIMENTS[a] / "gromacs"
         if not root.is_dir():
             continue
         for wd in sorted(p for p in root.iterdir() if p.is_dir()):
-            if (wd / "prod.xtc").is_file() and (wd / "prod.xtc").stat().st_size:
-                jobs.append({"approach": a, "id": wd.name, "wd": str(wd)})
+            flat = wd / "prod.xtc"
+            if flat.is_file() and flat.stat().st_size:
+                jobs.append({"approach": a, "id": wd.name, "wd": str(wd),
+                             "replicate": 0})
+            for rep in sorted(wd.glob("rep*")):
+                xtc = rep / "prod.xtc"
+                if not (rep.is_dir() and xtc.is_file() and xtc.stat().st_size):
+                    continue
+                try:
+                    n = int(rep.name[3:])
+                except ValueError:
+                    continue
+                jobs.append({"approach": a, "id": wd.name, "wd": str(rep),
+                             "replicate": n})
     return jobs
 
 
