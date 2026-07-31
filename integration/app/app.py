@@ -13,11 +13,19 @@ quantities produced under different protocols, so there is no defensible way to
 sort all four together, and this app never does. It shows them side by side and
 lets a human decide.
 
-EVERY RANK CARRIES ITS GATE (D0031). On class-matched decoys the covalent gate
-reads ROC-AUC 0.537 and the non-covalent 0.535 — both indistinguishable from
-chance. So no shortlist here is evidence that the molecules at the top bind, and
-a rank displayed without that verdict would imply a confidence nothing supports.
-The verdict is shown beside every ranking, not buried in a methods note.
+EVERY RANK CARRIES ITS GATE. The non-covalent gate has issued a verdict —
+WEAK, ROC-AUC 0.599, CI [0.311, 0.874], EF1% 0.0, over 6 actives and 6
+independent chemotypes (D0041). It is the first non-UNDERPOWERED verdict in the
+project and it says docking does not demonstrably enrich for known binders. The
+covalent gate is still UNDERPOWERED. So no shortlist here is evidence that the
+molecules at the top bind, and a rank displayed without that verdict would imply
+a confidence nothing supports.
+
+THE RANKINGS ARE PARTLY SIZE RANKINGS (D0043). spearman(heavy_atoms, score) is
++0.745 for T_3 and has the same meaning in all four approaches: bigger scores
+better. That is a mechanism for the WEAK verdict, since the decoys are matched
+on molecular weight. Ligand efficiency is not the fix — it over-corrects to
+-0.938 and becomes a smallness ranking.
 
 THE SCORE-FREE SIGNALS ARE THE DEFENSIBLE ONES. Structural convergence and the
 shared physicochemical axes need no commensurability between metrics, which is
@@ -32,6 +40,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 APP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(APP_DIR))
@@ -39,6 +48,7 @@ sys.path.insert(0, str(APP_DIR.parent.parent))
 
 import data as D                                  # noqa: E402
 import depict                                     # noqa: E402
+import pose3d as p3d                              # noqa: E402
 
 st.set_page_config(page_title="Dance with Inhibition — integration",
                    layout="wide")
@@ -56,11 +66,19 @@ def gate_badge(verdict: str) -> str:
 def honest_limits() -> None:
     st.warning(
         "**Honest limits.** No authoritative cross-method ranking exists here — "
-        "the four metrics are different quantities. On class-matched decoys "
-        "docking is indistinguishable from chance on this receptor (covalent "
-        "ROC-AUC 0.537, non-covalent 0.535, EF1% 0.0 for both; D0031), so no "
-        "shortlist is evidence of binding. Inhibition versus activation is "
-        "unresolved, and there is no wet-lab ground truth for any candidate.")
+        "the four metrics are different quantities.\n\n"
+        "**The non-covalent gate has now issued a verdict: WEAK** "
+        "(ROC-AUC 0.599, 95% CI [0.311, 0.874], **EF1% 0.0**, over 6 actives / "
+        "6 independent chemotypes; D0041). The point estimate is above chance "
+        "and the interval contains chance, so docking does not demonstrably "
+        "enrich for known Pin1 binders. The covalent gate remains UNDERPOWERED.\n\n"
+        "**The rankings are partly size rankings** (D0043). Spearman between "
+        "heavy-atom count and score is +0.745 for T_3, −0.617 for T_1, +0.305 "
+        "for T_4 and −0.230 for T_2 — all four meaning larger molecules score "
+        "better. T_3's shortlist has a median 39 heavy atoms against 25 "
+        "generated. Read every rank with that in mind.\n\n"
+        "Inhibition versus activation is unresolved, and there is no wet-lab "
+        "ground truth for any candidate.")
 
 
 def show_gate(stratum: str, metric: str) -> None:
@@ -180,6 +198,27 @@ def panel_candidates() -> None:
                                  for r, v in zip(top["rank"], top[cfg["metric"]])],
                                 width=150, height=120),
                     unsafe_allow_html=True)
+
+            # THE POSE, IN THE POCKET (issue #1). A ligand rendered alone is a
+            # conformer, not a pose: every claim a docked pose makes is about
+            # the ligand relative to the protein. The receptor is always drawn.
+            with st.expander("docked poses (in the receptor)"):
+                top = s.sort_values("rank").head(9)
+                ids = list(top["candidate_id"])
+                pick = st.selectbox(
+                    "candidate", ids, key=f"pose_{a}",
+                    format_func=lambda c: (
+                        f"#{int(top.loc[top.candidate_id == c, 'rank'].iloc[0])} · {c}"))
+                pose = p3d.find_pose(a, str(pick))
+                if pose is None:
+                    st.info(f"no docked pose file found for {pick}")
+                else:
+                    st.caption(
+                        f"`{pose.name}` · receptor 6VAJ, cartoon; **Cys113 in "
+                        "yellow sticks**; ligand in cyan. The grey surface is "
+                        "the pocket wall within 12 residues of Cys113 — a "
+                        "whole-protein surface would hide the ligand.")
+                    components.html(p3d.pose_html(pose), height=500)
 
 
 def panel_dossier() -> None:
