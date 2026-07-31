@@ -65,6 +65,48 @@ OBABEL = "/data/lab_vm/envs/dwi_cheminf/bin/obabel"
 SEARCH_DEPTH = 20      # D0017 — the adoption evidence does not hold below this
 THREADS = 8000
 NICE = 19
+
+# LIGANDS ARE PROTONATED FOR pH 7.4, NOT DOCKED AS DRAWN (issue #5, @tt8804).
+#
+# Until 2026-07-31 every ligand was built with `Chem.AddHs()` on the neutral
+# SMILES and converted with a bare `obabel` call -- docked exactly as written.
+# That is wrong for most of what this project generates. Measured over the five
+# T_2 seed neighbourhoods:
+#
+#   guo_pfizer    83.4% carry a phosphate    -> dianion at pH 7.4
+#   atra          86.6% a carboxylic acid    -> anion
+#   du_xu         85.5% a carboxylic acid    -> anion
+#   potter_astex  86.7% a basic amine        -> cation
+#   liu_2024_c3   largely neutral
+#
+# Each neighbourhood inherits its seed's ionizable group at ~85%, so comparing
+# neutral-form scores across seeds compares four charge states all pretending to
+# be neutral.
+#
+# WHAT THIS CHANGES AND WHAT IT DOES NOT. Vina carries no electrostatic term,
+# and obabel writes all-zero partial charges into the PDBQT either way -- both
+# verified here. So this does NOT make Vina "see" the charge, and the concern
+# that a basic Lys63/Arg68/Arg69 subsite electrostatically rewards anions is not
+# reachable through Vina's scoring function at all. What it changes is ATOM
+# TYPING: deprotonating a phosphate drops two polar hydrogens (30 -> 28 atoms on
+# 21b), and Vina's H-bond term counts donors from those `HD` atoms. Docking the
+# neutral acid presents H-bond donors that do not exist at physiological pH.
+LIGAND_PH = 7.4
+
+# THE PREP CACHE MUST BE KEYED ON THE PROTONATION, NOT JUST THE CANDIDATE.
+#
+# `_prepare_one` short-circuits on `if out.is_file()`, and the path was
+# `ligands/<candidate_id>.pdbqt` -- carrying nothing about how it was prepared.
+# Adding `-p 7.4` without changing the path would silently re-dock the SAME
+# neutral files and report success; 399 MB (liu), 231 MB (du_xu) and 45 MB
+# (atra) of stale neutral PDBQTs were already on disk when this landed.
+#
+# Same defect as the class-pool cache keyed on `class_id` alone, which served a
+# stale 3-molecule pool after its query was relaxed. A cache keyed on less than
+# its inputs is a cache that lies. The tag goes in the directory name so the old
+# and new sets coexist -- the tree is append-only and nothing is deleted.
+LIGAND_PREP_TAG = f"ph{LIGAND_PH:g}"
+
 # Ligand prep is embarrassingly parallel and would happily take all 224 cores.
 # The project budget lives in shared/compute.py (raised to 50 by @mhallet on
 # 2026-07-28).
@@ -96,7 +138,11 @@ def _prepare_one(job: dict) -> dict:
         w = Chem.SDWriter(str(sdf))
         w.write(m)
         w.close()
-        conv = subprocess.run([OBABEL, str(sdf), "-O", str(out)],
+        # -p protonates for the given pH: it strips the acidic hydrogens and
+        # adds basic ones, so the PDBQT carries the physiological ionization
+        # rather than the drawn one. See LIGAND_PH.
+        conv = subprocess.run([OBABEL, str(sdf), "-O", str(out),
+                               "-p", str(LIGAND_PH)],
                               capture_output=True, text=True, timeout=120)
         sdf.unlink(missing_ok=True)
         if conv.returncode != 0 or not out.is_file():
@@ -175,7 +221,10 @@ def run(*, experiment: str, approach: str, frame_prefix: str, gpu: int,
     """Dock one approach's survivors and merge the result onto its frame."""
     os.nice(NICE)
     work = DATA_ROOT / experiment / "docking"
-    ligand_dir, out_dir = work / "ligands", work / "poses"
+    # Ligand dir carries the prep tag so a protonation change cannot be served
+    # from a cache built under different settings -- see LIGAND_PREP_TAG.
+    ligand_dir = work / f"ligands_{LIGAND_PREP_TAG}"
+    out_dir = work / f"poses_{LIGAND_PREP_TAG}"
 
     frame_path = dio.latest(DATA_ROOT / experiment, frame_prefix, ".parquet")
     if frame_path is None:
@@ -226,6 +275,10 @@ def run(*, experiment: str, approach: str, frame_prefix: str, gpu: int,
                 "threads": THREADS,
                 "box": BOX_EXPANDED.name,
                 "gpu": gpu,
+                # In the manifest so a frame states its own protonation rather
+                # than leaving a reader to infer it from the run date.
+                "ligand_ph": LIGAND_PH,
+                "ligand_prep_tag": LIGAND_PREP_TAG,
                 "rank_metric": "vina_affinity (kcal/mol, lower better)",
                 "enrichment_caveat":
                     "D0016: non-covalent enrichment on this pocket is ROC-AUC "
