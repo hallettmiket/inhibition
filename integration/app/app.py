@@ -238,10 +238,10 @@ def panel_candidates() -> None:
                 top = s.sort_values("rank").head(9)
                 ids = list(top["candidate_id"])
                 pick = st.selectbox(
-                    "candidate", ids, key=f"pose_{a}",
+                    "candidate", ids, key=f"pose_{key}",
                     format_func=lambda c: (
                         f"#{int(top.loc[top.candidate_id == c, 'rank'].iloc[0])} · {c}"))
-                pose = p3d.find_pose(a, str(pick))
+                pose = p3d.find_pose(key, str(pick))
                 if pose is None:
                     st.info(f"no docked pose file found for {pick}")
                 else:
