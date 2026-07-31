@@ -50,6 +50,7 @@ import data as D                                  # noqa: E402
 import depict                                     # noqa: E402
 import curate                                     # noqa: E402
 import pose3d as p3d                              # noqa: E402
+from shared import synthesizability as syn        # noqa: E402
 
 st.set_page_config(page_title="Dance with Inhibition — integration",
                    layout="wide")
@@ -169,6 +170,13 @@ def panel_candidates() -> None:
                             placeholder="no chlorine\nmw < 450")
     st.session_state["_curate_spec"] = spec
 
+    demote = st.checkbox(
+        "sort candidates failing a synthesizability rule to the bottom",
+        value=True,
+        help="On by default: a compound the lab would not make should not hold "
+             "a top-25 slot. Nothing is deleted and the original metric rank is "
+             "kept in the `rank` column. Uncheck to see the raw metric order.")
+
     cols = st.columns(len(D.APPROACHES))
     for col, (key, cfg) in zip(cols, D.APPROACHES.items()):
         with col:
@@ -197,7 +205,37 @@ def panel_candidates() -> None:
                 f"{gate_badge(verdict)} **{verdict}** · metric "
                 f"`{cfg['metric']}` (lower better) · {cfg['mechanism']} · "
                 f"seed: {cfg['seed']}")
-            show = [c for c in ("rank", "candidate_id", cfg["metric"],
+            # SYNTHESIZABILITY IS SHOWN, NEVER RANKED ON (issue #1). The Lu lab
+            # would not make a compound that fails these, so a failure has to be
+            # VISIBLE in the list a chemist reads — but the rules are structural
+            # red flags, not a score, and folding them into the ordering would
+            # add a second unvalidated ranking to one the gate has already
+            # measured as not demonstrably enriching (D0041).
+            #
+            # SAscore is displayed beside them deliberately: the two disagree
+            # often, and seeing where is how the rules earn or lose trust.
+            s = s.copy()
+            s["synth"] = [
+                ("⚠ " + ", ".join(r.name for r in syn.violations(str(x)))
+                 if syn.violations(str(x)) else "✓")
+                for x in s["canonical_smiles"]]
+            n_fail = int((s["synth"] != "✓").sum())
+            if n_fail:
+                st.error(
+                    f"**{n_fail} of {len(s)} fail a structural synthesizability "
+                    "rule** and are highlighted below. They are NOT removed and "
+                    "NOT reranked — the `synth` column names the rule.")
+                st.caption(
+                    "`SAscore` sits beside it for comparison (lower = the "
+                    "heuristic thinks it is easier to make). The two agree only "
+                    "partly — SAscore separates rule-failures from rule-passes "
+                    "at AUC 0.74 (T_1), 0.83 (T_2), 0.75 (T_3), where 0.5 would "
+                    "be no information. So neither replaces the other: SAscore "
+                    "misses specific impossibilities, and the rules say nothing "
+                    "about how hard a route is.")
+
+            show = [c for c in ("rank", "candidate_id", "synth", "SAscore",
+                                cfg["metric"],
                                 "ligand_efficiency", "dG_kcal",
                                 "dG_ensemble_interaction_kcal",
                                 "dG_ensemble_interaction_sem_kcal",
@@ -205,8 +243,34 @@ def panel_candidates() -> None:
                                 "dG_ensemble_kcal", "dG_ensemble_sem_kcal",
                                 "warhead_class")
                     if c in s.columns]
-            st.dataframe(s.sort_values("rank")[show].head(25),
-                         use_container_width=True, hide_index=True)
+            # DEMOTE, DO NOT DELETE (PI decision, issue #1). A compound the Lu
+            # lab would not synthesise should not occupy a top-25 slot, so
+            # failures sort BELOW every passing candidate while keeping their
+            # metric order within each group. They stay visible and keep their
+            # original `rank`, because the frame's rank is provenance and the
+            # demotion is a reading order -- deleting them would make the list
+            # look clean while hiding why it changed.
+            s["_synth_fail"] = s["synth"].str.startswith("⚠")
+            if demote:
+                s = s.sort_values(["_synth_fail", "rank"])
+                s["shown_as"] = range(1, len(s) + 1)
+                show_cols = ["shown_as"] + [c for c in show if c != "shown_as"]
+            else:
+                s = s.sort_values("rank")
+                show_cols = show
+            _t = s[show_cols].head(25)
+            st.dataframe(
+                _t.style.apply(
+                    lambda row: ["background-color: rgba(255,75,75,0.16)"
+                                 if str(row.get("synth", "✓")).startswith("⚠")
+                                 else "" for _ in row], axis=1),
+                use_container_width=True, hide_index=True)
+            if demote and n_fail:
+                promoted = int((~s["_synth_fail"].head(25)).sum())
+                st.caption(
+                    f"`shown_as` is the reading order after demotion; `rank` is "
+                    f"the original metric rank, untouched. {promoted} candidates "
+                    "now occupy the top slots that failures held.")
             if "dG_kcal" in s.columns and s["dG_kcal"].notna().any():
                 st.caption(f"MM-GBSA dG on {int(s['dG_kcal'].notna().sum())} of "
                            f"{len(s)} — an INDEPENDENT estimate, not confirmation "
