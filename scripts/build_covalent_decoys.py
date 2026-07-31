@@ -3,7 +3,7 @@ Purpose: Build the class-matched covalent decoy set (D0031).
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-28
 Input: data/reference/pin1_reference_binders_2.csv (frozen actives)
-Output: append_only/.../decoys/decoys_covalent_9.csv + provenance
+Output: append_only/.../decoys/decoys_covalent_10.csv + provenance
 
 Run:  python scripts/build_covalent_decoys.py [--force-fetch] [--n-per-active 50]
 
@@ -38,7 +38,7 @@ ACTIVES = REPO / "data" / "reference" / "pin1_reference_binders_3.csv"
 # append_only, not immutable: immutable/ is read-only by project rule, and the
 # earlier versions were written there before that was enforced.
 OUT = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate/decoys")
-OUT_NAME = "decoys_covalent_9.csv"
+OUT_NAME = "decoys_covalent_10.csv"
 
 # The covalent actives, mapped to the library class each one actually belongs
 # to. Kept here rather than parsed from the free-text `warhead_class` column,

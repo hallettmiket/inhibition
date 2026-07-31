@@ -21,6 +21,11 @@ from pathlib import Path
 
 import mkdocs_gen_files
 
+REPO_ = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_))
+from shared import reference_set as rs   # noqa: E402
+from shared import warhead_library as wl  # noqa: E402
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
@@ -112,11 +117,11 @@ def gen_reference_page() -> None:
             "reactivity window**.\n\n"
         )
         for name, title, note in [
-            ("pin1_reference_binders_1.csv", "Master set — novelty axis",
+            (rs.DEFAULT_MASTER.name, "Master set — novelty axis",
              "Rows marked `UNVERIFIED` are excluded from the novelty computation."),
-            ("pin1_covalent_cys113_anchors_2.csv", "Covalent Cys113 anchors — reactivity window",
+            (rs.DEFAULT_ANCHORS.name, "Covalent Cys113 anchors — reactivity window",
              "`reference_set.py` refuses `UNVERIFIED` rows into the window."),
-            ("warhead_classes_2.csv", "Warhead classes — T_4 enumeration",
+            (wl.DEFAULT_LIBRARY.name, "Warhead classes — T_4 enumeration",
              "`warhead_library.enumerable()` defaults to `VERIFIED` only."),
             ("pin1_reactivity_kinetics_1.csv", "Measured reactivity kinetics",
              "Digitized from a figure to ~1 significant figure. Bound a window with "
@@ -175,7 +180,7 @@ def gen_status_page() -> None:
         )
         try:
             from shared import warhead_library as wl
-            lib = wl.load(REPO / "data" / "reference" / "warhead_classes_2.csv")
+            lib = wl.load()   # whatever warhead_library actually defaults to
             blocked = lib[lib["structure_status"] != "VERIFIED"]
             f.write("### Warhead classes not enumerable\n\n")
             f.write("| Class | Status | Why |\n|---|---|---|\n")

@@ -111,6 +111,9 @@ ACTIVE_WARHEAD_CLASS = {
     "Reddi-2023-4g": "sulfamate_acetamide",
     # SNAr aryl chloride, NOT a chloroacetamide — different mechanism entirely.
     "Tian-chloropyrimidine-covalent-6a": "snar_chloroazine",
+    # Aryl Michael acceptor; the acrylamide class cannot hold it
+    # (substituted beta carbon) -- see D0042 and the cinnamamide row.
+    "Ieda-2019-(S)-2": "cinnamamide",
 }
 
 
@@ -226,7 +229,7 @@ def build_jobs(stratum: str, workdir: Path) -> list[dict]:
         # the class held 3 decoys and its active was untestable; it now holds
         # 1449 and Tian gets 23 property-matched decoys.
         dfile = (Path("/data/lab_vm/append_only/inhibition/00_shared_substrate")
-                 / "decoys" / "decoys_covalent_9.csv")
+                 / "decoys" / "decoys_covalent_10.csv")
     else:
         dfile = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate"
                      "/decoys/decoys_non_covalent_2.csv")
