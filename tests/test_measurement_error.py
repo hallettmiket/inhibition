@@ -28,6 +28,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from shared import enrichment_gate as eg  # noqa: E402
 
 
+#: Canonical warhead class_ids, cycled over the synthetic actives.
+#
+# These fixtures declare `stratum="covalent"`, and since D0045 the covalent
+# gate counts chemotypes by warhead class and REFUSES to fall back to
+# structural clustering when the column is absent. That refusal is the point --
+# a silent fallback would reintroduce the exact defect D0045 removed -- so the
+# fixture supplies the column rather than the gate relaxing its guard.
+#
+# These tests are about measurement error, not chemotype counting, so the
+# values only need to be real class_ids and distinct enough not to collapse the
+# denominator by accident.
+_WARHEADS = ["chloroacetamide", "sulfamate acetamide",
+             "cinnamamide (aryl Michael acceptor; acrylamide-class)"]
+
+
 def _frame(n_act=3, n_dec=30, sep=3.0, sem=0.2, seed=1) -> pd.DataFrame:
     """Actives separated from decoys by `sep`, each with error bar `sem`."""
     import numpy as np
@@ -35,9 +50,11 @@ def _frame(n_act=3, n_dec=30, sep=3.0, sem=0.2, seed=1) -> pd.DataFrame:
     rows = []
     for i in range(n_act):
         rows.append({"canonical_smiles": f"C{'C'*i}O", "label": 1,
+                     "warhead_class": _WARHEADS[i % len(_WARHEADS)],
                      "dG": -10.0 - sep + rng.normal(0, 0.5), "sem": sem})
     for i in range(n_dec):
         rows.append({"canonical_smiles": f"N{'C'*i}", "label": 0,
+                     "warhead_class": None,
                      "dG": -10.0 + rng.normal(0, 0.5), "sem": sem})
     return pd.DataFrame(rows)
 

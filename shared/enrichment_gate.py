@@ -66,6 +66,65 @@ class EnrichmentGateError(RuntimeError):
 # Chemotype clustering — the honest denominator
 # ---------------------------------------------------------------------------
 
+def chemotype_ids(actives, stratum: str,
+                  threshold: float = 0.4) -> tuple[list[int], str]:
+    """Chemotype id per active, plus the NAME of the method used.
+
+    COVALENT USES WARHEAD CLASS; NON-COVALENT USES STRUCTURE (D0045).
+
+    The gate already matches decoys by warhead class on the covalent stratum,
+    because affinity is not comparable across warheads (D0031). It then counted
+    chemotypes by whole-molecule ECFP4 similarity, which is a different notion
+    of "independent" — and on this set the two are close to orthogonal:
+
+      Sulfopin (chloroacetamide) clusters WITH Reddi-4d/4g (sulfamate),
+        because they share the sulfolane scaffold — different warheads, same
+        structural cluster.
+      BJP-06-005-3 (also chloroacetamide) splits OFF from Sulfopin — same
+        warhead, different structural cluster.
+
+    Using one definition to build the comparison and another to size it is
+    incoherent. Warhead class is the axis the covalent comparison is already
+    built on, and it is the stricter of the two here (4 classes vs 6 clusters
+    on the current lead-tier actives), which is the right way for the choice to
+    fall when the person choosing wants a verdict.
+
+    A non-covalent binder has no warhead, so that stratum keeps structural
+    clustering — there is nothing else to use.
+
+    Returns
+    -------
+    (ids, method)
+        `method` is recorded in the gate token so a reader never has to guess
+        which definition produced a count.
+    """
+    if stratum == "covalent":
+        if "warhead_class" not in getattr(actives, "columns", []):
+            raise EnrichmentGateError(
+                "covalent stratum needs a `warhead_class` column to count "
+                "chemotypes by warhead (D0045); got none")
+        from . import warhead_library as wl
+
+        canon = [wl.canonical_class(w) for w in actives["warhead_class"]]
+        # An active whose warhead is not established cannot support a class
+        # claim. It still counts as an ACTIVE; it just adds no chemotype.
+        seen: dict[str, int] = {}
+        ids = []
+        for c in canon:
+            if c is None:
+                ids.append(-1)
+                continue
+            ids.append(seen.setdefault(c, len(seen)))
+        return ids, "warhead_class"
+    smiles = actives["canonical_smiles"].tolist()
+    return cluster_chemotypes(smiles, threshold), f"ecfp4_butina_{threshold}"
+
+
+def n_chemotypes(ids: list[int]) -> int:
+    """Distinct chemotypes, excluding the -1 'unestablished' marker."""
+    return len({i for i in ids if i >= 0})
+
+
 def cluster_chemotypes(smiles: list[str], threshold: float = 0.4) -> list[int]:
     """Single-linkage ECFP4 clustering; returns a cluster id per molecule.
 
@@ -184,6 +243,10 @@ class GateResult:
     roc_auc_ci: tuple[float, float]
     ef_1pct: float
     bedroc: float
+    # HOW the chemotypes were counted, carried into the token. Two defensible
+    # definitions give 4 and 6 on the same actives against a floor of 6
+    # (D0045), so a bare count is not interpretable without this.
+    chemotype_method: str = "unspecified"
     per_chemotype_auc: dict[str, float] = field(default_factory=dict)
     # Set only when a per-candidate measurement error is supplied. Kept
     # SEPARATE from roc_auc_ci because the two answer different questions
@@ -341,13 +404,15 @@ def evaluate(scored: pd.DataFrame, *, metric: str, stratum: str,
     labels = df["label"].astype(int).tolist()
 
     actives = df[df.label == 1]
-    cids = cluster_chemotypes(actives["canonical_smiles"].tolist(), chemotype_threshold)
-    n_chemo = len(set(cids))
+    cids, chemotype_method = chemotype_ids(actives, stratum, chemotype_threshold)
+    n_chemo = n_chemotypes(cids)
+    log.info("[%s] chemotypes counted by %s: %d", stratum, chemotype_method,
+             n_chemo)
 
     res = GateResult(
         metric=metric, stratum=stratum, higher_is_better=higher_is_better,
         n_actives=int(sum(labels)), n_decoys=int(len(labels) - sum(labels)),
-        n_chemotypes=n_chemo,
+        n_chemotypes=n_chemo, chemotype_method=chemotype_method,
         roc_auc=roc_auc(scores, labels, higher_is_better=higher_is_better),
         roc_auc_ci=bootstrap_ci(scores, labels, higher_is_better=higher_is_better,
                                 n_boot=n_boot),

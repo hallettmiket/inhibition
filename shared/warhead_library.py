@@ -49,6 +49,77 @@ DEFAULT_LIBRARY = _REPO_ROOT / "data" / "reference" / "warhead_classes_10.csv"
 
 UNRESOLVED = "UNRESOLVED"
 
+# ---------------------------------------------------------------------------
+# Free-text warhead descriptions -> the canonical class_id vocabulary
+# ---------------------------------------------------------------------------
+# The reference set's `warhead_class` column is PROSE, written per row by
+# whoever curated the entry. The warhead library's `class_id` is a controlled
+# vocabulary. Counting `nunique()` on the prose is wrong and it errs in the
+# dangerous direction -- it OVERCOUNTS:
+#
+#   "chloroacetamide"                            \  the same warhead,
+#   "chloroacetamide (N-methyl peptidomimetic)"  /  counted as two classes
+#
+# On the current lead-tier actives the prose gives 6 classes and the canonical
+# mapping gives 4. Six is the gate's floor, so the sloppy count clears it and
+# the correct one does not (D0045). A string-uniqueness count would have
+# certified a verdict the evidence does not support.
+#
+# EXPLICIT, AND LOUD ON ANYTHING NEW. This is a hand-checked mapping of the
+# exact strings present, not a fuzzy matcher. A warhead description that is not
+# in here raises rather than silently becoming its own class -- which is the
+# same failure in a new costume.
+_PROSE_TO_CLASS_ID: dict[str, str] = {
+    "chloroacetamide": "chloroacetamide",
+    "chloroacetamide (N-methyl peptidomimetic)": "chloroacetamide",
+    "sulfamate acetamide": "sulfamate_acetamide",
+    "cinnamamide (aryl Michael acceptor; acrylamide-class)": "cinnamamide",
+    "2-chloro-5-nitropyrimidine (SNAr electrophile, X-ray-confirmed "
+    "Cys113 adduct)": "snar_chloroazine",
+    "1;4-naphthoquinone (Michael acceptor)": "naphthoquinone_c2",
+    # KPT-6566 is self-immolative: it RELEASES a naphthoquinone, so its
+    # reactive species is that class. It is promiscuous and dual-mechanism, so
+    # it is tiered out of `lead` anyway -- mapped for completeness, not use.
+    "aryl-sulfonyl-acetate (self-immolative -> 1;4-naphthoquinone)":
+        "naphthoquinone_c2",
+    "3-bromo-4;5-dihydroisoxazole (BDHI)": "bdhi_c4",
+}
+
+
+class WarheadClassError(RuntimeError):
+    """A warhead description has no canonical class."""
+
+
+def canonical_class(prose: str | None) -> str | None:
+    """Canonical ``class_id`` for a reference set's free-text warhead.
+
+    Returns None for a genuinely absent or unverified warhead -- a
+    non-covalent binder has none, and an entry whose warhead has not been
+    established should not be assigned one. Callers must decide what an
+    unknown means for them; the gate excludes it from the chemotype count
+    rather than inventing a class for it.
+
+    Raises
+    ------
+    WarheadClassError
+        If the string is present, non-trivial, and not in the mapping. Adding
+        an active with a new warhead description is exactly when someone must
+        decide which class it belongs to, so this fails at that moment instead
+        of quietly inflating the denominator later.
+    """
+    if prose is None:
+        return None
+    s = str(prose).strip()
+    if not s or s.lower() in {"nan", "none", UNRESOLVED.lower(), "unverified"}:
+        return None
+    if s in _PROSE_TO_CLASS_ID:
+        return _PROSE_TO_CLASS_ID[s]
+    raise WarheadClassError(
+        f"warhead description {s!r} has no canonical class_id. Add it to "
+        "shared.warhead_library._PROSE_TO_CLASS_ID after deciding which class "
+        "it belongs to — do not let it become its own class by default, which "
+        "would inflate the chemotype count the gate's floor depends on.")
+
 # Ordered from best-founded to least. Membership in this tuple is the whole
 # vocabulary — an unknown status is an error, not a silently-tolerated value.
 STATUS_TIERS: tuple[str, ...] = (
