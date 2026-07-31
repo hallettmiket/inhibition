@@ -5,7 +5,7 @@ date: 2026-07-30
 status: accepted
 approach: shared
 decided_by: '@mhallet'
-origin: audit
+origin: adversary
 supersedes: []
 superseded_by: null
 affects:

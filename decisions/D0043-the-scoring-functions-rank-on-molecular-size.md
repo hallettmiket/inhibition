@@ -5,7 +5,7 @@ date: 2026-07-30
 status: accepted
 approach: shared
 decided_by: '@mhallet'
-origin: audit
+origin: adversary
 supersedes: []
 superseded_by: null
 affects:
@@ -14,11 +14,12 @@ affects:
   - approaches/t2_atra_crem/01_generate.py
   - decisions/D0041-the-first-verdict-docking-does-not-demonstrably-enrich.md
 evidence:
-  - 'spearman(heavy_atoms, cnn_affinity) T_3 = +0.745 (n=4080, p~0)'
-  - 'spearman(heavy_atoms, vina_affinity) T_1 = -0.617 (n=3233, p~0)'
-  - 'spearman(heavy_atoms, cnn_affinity) T_4 = +0.305 (n=1683)'
-  - 'spearman(heavy_atoms, vina_affinity) T_2 = -0.230 (n=1882)'
-  - 'all four signs mean the same thing: larger molecules score better'
+  - 'CORRECTED 2026-07-31 — on each approach RANK metric, all lower-is-better:'
+  - 'spearman(heavy_atoms, vina_affinity) T_1 = -0.617 (n=3233): bigger scores better'
+  - 'spearman(heavy_atoms, affinity_kcal) T_3 = -0.479 (n=4080): bigger scores better'
+  - 'spearman(heavy_atoms, vina_affinity) T_2 = -0.230 (n=1882): bigger scores better'
+  - 'spearman(heavy_atoms, affinity_kcal) T_4 = +0.181 (n=1683): bigger scores WORSE'
+  - 'SUPERSEDED: the original +0.745 T_3 / +0.305 T_4 used cnn_affinity, which is not the rank metric'
   - 'T_3 generated median 25 heavy atoms; T_3 SHORTLIST median 39, max 51'
   - 'T_3 scaffold is 12 heavy atoms, so shortlisted R-groups have median 27 — over twice the scaffold'
   - 'ligand_efficiency over-corrects: spearman(heavy_atoms, LE) T_1 = -0.938'
