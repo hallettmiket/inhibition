@@ -51,6 +51,7 @@ GROMACS_DIRS = {
     "t2": DATA / "02_t2_atra_crem" / "gromacs",
 }
 
+LIGAND_RESNAMES = ("MOL", "LIG", "UNL")
 CATALYTIC_RESI = 113
 
 
@@ -185,7 +186,7 @@ MAX_EMBED_BYTES = 4_000_000
 
 
 def trajectory_html(xtc: Path, tpr: Path, *, n_frames: int = 15,
-                    width: int = 700, height: int = 480) -> str | None:
+                    width: int | None = None, height: int = 620) -> str | None:
     """An animated MD trajectory, or None if it cannot be built or is too big.
 
     WHY SO FEW FRAMES. `whole.xtc` already contains ONLY the solute -- the
@@ -226,14 +227,31 @@ def trajectory_html(xtc: Path, tpr: Path, *, n_frames: int = 15,
             "n_frames.")
 
     import py3Dmol
-    v = py3Dmol.view(width=width, height=height)
-    v.addModelsAsFrames(out.read_text(), "pdb")
-    v.setStyle({"cartoon": {"color": "spectrum", "opacity": 0.6}})
-    v.addStyle({"hetflag": True},
-               {"stick": {"colorscheme": "cyanCarbon", "radius": 0.18}})
+
+    text = out.read_text()
+    # SELECT THE LIGAND BY RESIDUE NAME, NOT BY hetflag. `gmx trjconv` writes
+    # every atom as an ATOM record -- there is not one HETATM in the file -- so
+    # {"hetflag": True} matches nothing. The ligand was therefore never styled
+    # as sticks AND zoomTo had an empty selection, which is why the animation
+    # opened somewhere arbitrary and would not centre on the molecule.
+    resn = next((r for r in LIGAND_RESNAMES
+                 if f" {r} " in text or f"\n{r}" in text
+                 or any(line[17:20].strip() == r
+                        for line in text.splitlines()[:4000]
+                        if line.startswith(("ATOM", "HETATM")))), None)
+    lig_sel = {"resn": resn} if resn else {"hetflag": True}
+
+    v = py3Dmol.view(width=width or "100%", height=height)
+    v.addModelsAsFrames(text, "pdb")
+    v.setStyle({"cartoon": {"color": "spectrum", "opacity": 0.55}})
+    v.addStyle(lig_sel, {"stick": {"colorscheme": "cyanCarbon", "radius": 0.22}})
     v.addStyle({"resi": CATALYTIC_RESI},
                {"stick": {"colorscheme": "yellowCarbon", "radius": 0.2}})
-    v.zoomTo({"hetflag": True})
+    # Centre on the ligand, then back off so the pocket it sits in is visible.
+    # zoomTo on a ~40-atom ligand alone fills the canvas with the ligand and
+    # crops away the protein it is supposed to be staying inside.
+    v.zoomTo(lig_sel)
+    v.zoom(0.6)
     v.animate({"loop": "forward", "interval": 80})
     return v._make_html()
 
