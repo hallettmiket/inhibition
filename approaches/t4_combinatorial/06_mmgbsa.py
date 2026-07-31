@@ -98,6 +98,9 @@ def score_one(row: pd.Series, lib, receptor_cache: dict) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="T_4 step 9: covalent MM-GBSA.")
+    ap.add_argument("--selection-col", default="shortlist",
+                    help="which boolean column selects candidates; "
+                         "use shortlist_synth for the synthesizable list")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--no-write", action="store_true",
                     help="compute and cache result.json only; write no frame. "
@@ -114,12 +117,13 @@ def main() -> None:
     WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
     df, frame_path = dio.latest_frame(EXPERIMENT, "t4")
-    if "shortlist" not in df.columns:
-        raise SystemExit("frame has no shortlist — run 04_rank_within_class.py first")
+    if args.selection_col not in df.columns:
+        raise SystemExit(f"frame has no {args.selection_col!r} column — run "
+                         "04_rank_within_class.py first")
     if "dock_id" not in df.columns:
         raise SystemExit("frame has no dock_id — re-run 03_covalent_dock.py (D0022)")
 
-    todo = df[df["shortlist"].fillna(False)].copy()
+    todo = df[df[args.selection_col].fillna(False)].copy()
     # ONE SYSTEM PER MOLECULE, NOT PER ROUTE (D0029). Three warhead classes reach
     # an identical adduct, so the shortlist carries the same molecule up to three
     # times. Scoring each row minimised the SAME 2,400-atom system repeatedly:

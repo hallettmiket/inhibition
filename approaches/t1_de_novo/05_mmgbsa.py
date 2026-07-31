@@ -53,6 +53,9 @@ EXPERIMENT = "01_t1_de_novo"
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="T_1 (de novo, DiffSBDD): MM-GBSA rescoring.")
+    ap.add_argument("--selection-col", default="shortlist",
+                    help="which boolean column selects candidates; "
+                         "use shortlist_synth for the synthesizable list")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--workers", type=int, default=compute.MAX_CPU_WORKERS,
                     help="concurrent candidates; the project budget "
@@ -62,7 +65,7 @@ def main() -> None:
                         format="%(levelname)s %(name)s: %(message)s")
 
     merged, out, results, failures, changed = runner.run(
-        experiment=EXPERIMENT, approach="t1",
+        selection_col=args.selection_col, experiment=EXPERIMENT, approach="t1",
         workers=args.workers, limit=args.limit)
 
     print(f"\nT_1 (de novo, DiffSBDD) MM-GBSA (T5 physics rescoring) -> "

@@ -110,6 +110,7 @@ def score_one(job: dict) -> dict:
 
 
 def run(*, experiment: str, approach: str, work_dirname: str = "mmgbsa_2",
+        selection_col: str = "shortlist",
         workers: int = compute.MAX_CPU_WORKERS, limit: int | None = None):
     """Score one approach's shortlist and merge the result onto its frame."""
     data = DATA_ROOT / experiment
@@ -118,14 +119,18 @@ def run(*, experiment: str, approach: str, work_dirname: str = "mmgbsa_2",
     work_root.mkdir(parents=True, exist_ok=True)
 
     df, frame_path = dio.latest_frame(experiment, approach)
-    if "shortlist" not in df.columns:
-        raise SystemExit("frame has no shortlist — run the ranking stage first")
+    # WHICH SHORTLIST. Re-selecting for synthesizability (issue #1) promoted
+    # molecules from below the old cut, and those have no physics computed at
+    # all -- 9 of T_1's 25. Naming the column rather than hardcoding "shortlist"
+    # is what lets the new list be filled without redefining the old one.
+    if selection_col not in df.columns:
+        raise SystemExit(f"frame has no {selection_col!r} column")
 
-    todo = df[df["shortlist"].fillna(False)].copy()
+    todo = df[df[selection_col].fillna(False)].copy()
     if limit:
         todo = todo.head(limit)
-    log.info("[%s] MM-GBSA on %d shortlisted candidates from %s (%d workers)",
-             approach, len(todo), frame_path.name, workers)
+    log.info("[%s] MM-GBSA on %d candidates (%s) from %s (%d workers)",
+             approach, len(todo), selection_col, frame_path.name, workers)
 
     todo = prot.protonate_frame(todo)
     changed = int(todo["charge_changed"].sum())
@@ -242,6 +247,7 @@ def score_one_covalent(job: dict) -> dict:
 
 
 def run_covalent(*, experiment: str, approach: str, work_dirname: str = "mmgbsa",
+                 selection_col: str = "shortlist",
                  workers: int = compute.MAX_CPU_WORKERS, limit: int | None = None,
                  classes: set[str] | None = None):
     """Score one covalent approach's shortlist, one system per MOLECULE.
@@ -263,11 +269,11 @@ def run_covalent(*, experiment: str, approach: str, work_dirname: str = "mmgbsa"
     work_root.mkdir(parents=True, exist_ok=True)
 
     df, frame_path = dio.latest_frame(experiment, approach)
-    for col in ("shortlist", "dock_id"):
+    for col in (selection_col, "dock_id"):
         if col not in df.columns:
             raise SystemExit(f"frame has no {col!r} — run the earlier stages first")
 
-    todo = df[df["shortlist"].fillna(False)].copy()
+    todo = df[df[selection_col].fillna(False)].copy()
     if classes:
         todo = todo[todo["warhead_class"].isin(classes)]
     n_rows = len(todo)

@@ -49,6 +49,9 @@ EXPERIMENT = "03_t3_reinvent"
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="T_3 step 5: covalent MM-GBSA.")
+    ap.add_argument("--selection-col", default="shortlist",
+                    help="which boolean column selects candidates; "
+                         "use shortlist_synth for the synthesizable list")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--workers", type=int, default=compute.MAX_CPU_WORKERS,
                     help="concurrent candidates; the project budget "
@@ -58,7 +61,7 @@ def main() -> None:
                         format="%(levelname)s %(name)s: %(message)s")
 
     merged, out, results, failures = runner.run_covalent(
-        experiment=EXPERIMENT, approach="t3",
+        selection_col=args.selection_col, experiment=EXPERIMENT, approach="t3",
         workers=args.workers, limit=args.limit)
 
     print(f"\nT_3 covalent MM-GBSA (T5 physics rescoring) -> "
