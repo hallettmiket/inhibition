@@ -48,25 +48,46 @@ GROMACS_DIRS = {
 CATALYTIC_RESI = 113
 
 
-def find_pose(approach: str, candidate_id: str) -> Path | None:
-    """The docked SDF for one candidate, or None.
+class MovieTooLarge(RuntimeError):
+    """The rendered movie would exceed what a browser will embed."""
 
-    Candidate ids carry an approach prefix (`t4_ab12…`) while the docking
-    filenames do not (`d_ab12…_docked.sdf`), so both spellings are tried rather
-    than assuming one — a mismatch here shows up as "no pose available", which
-    looks like missing data instead of a naming bug.
+
+def find_pose(approach: str, candidate_id: str,
+              dock_id: str | None = None) -> Path | None:
+    """The docked pose file for one candidate, or None.
+
+    THE FILENAME CANNOT BE DERIVED FROM THE CANDIDATE ID, AND GUESSING IT FAILED
+    SILENTLY. The covalent approaches name pose files by a SEPARATE `dock_id`
+    (`d_31fe9e96d8bb_docked.sdf`) that shares no hash with `candidate_id`
+    (`t3_31d6edc305b0`) — the overlap between the two sets is exactly zero
+    across 4080 files. An earlier version built the name from `candidate_id`,
+    found nothing, and rendered "no docked pose file found", which reads as
+    missing data rather than as a lookup bug. Pass `dock_id` from the frame.
+
+    THE TWO STRATA ALSO USE DIFFERENT LAYOUTS AND FORMATS:
+      T_3, T_4 (gnina, covalent)  docking/d_<dock_id>_docked.sdf
+      T_1, T_2 (Vina, non-covalent)  docking/poses/<candidate_id>_out.pdbqt
+    Both are returned; `pose_html` dispatches on the suffix.
     """
     d = DOCKING_DIRS.get(approach)
     if d is None or not d.is_dir():
         return None
-    stem = candidate_id.split("_", 1)[-1]
-    for name in (f"{candidate_id}_docked.sdf", f"d_{stem}_docked.sdf",
-                 f"{stem}_docked.sdf"):
-        p = d / name
-        if p.is_file() and p.stat().st_size > 0:
-            return p
-    hits = sorted(d.glob(f"*{stem}*_docked.sdf"))
-    return hits[0] if hits else None
+
+    # Non-covalent: Vina writes PDBQT into a poses/ subdirectory.
+    poses = d / "poses"
+    if poses.is_dir():
+        for name in (f"{candidate_id}_out.pdbqt", f"{candidate_id}.pdbqt"):
+            p = poses / name
+            if p.is_file() and p.stat().st_size > 0:
+                return p
+
+    # Covalent: gnina writes SDF named by dock_id.
+    if dock_id:
+        for name in (f"{dock_id}_docked.sdf", f"{dock_id}.sdf"):
+            p = d / name
+            if p.is_file() and p.stat().st_size > 0:
+                return p
+    return None
 
 
 def find_trajectory(approach: str, candidate_id: str,
@@ -101,26 +122,49 @@ def pose_html(sdf: Path, *, width: int = 700, height: int = 480,
         v.addSurface("VDW", {"opacity": 0.55, "color": "lightgrey"},
                      {"model": 0, "resi": list(range(CATALYTIC_RESI - 12,
                                                      CATALYTIC_RESI + 12))})
-    v.addModel(sdf.read_text(), "sdf")
+    # PDBQT is PDB plus partial-charge/type columns; py3Dmol parses it as PDB.
+    # Vina writes every mode into one file, so only the FIRST is shown --
+    # showing all nine overlaid looks like one impossible molecule.
+    if sdf.suffix.lower() == ".pdbqt":
+        text = sdf.read_text()
+        first = text.split("ENDMDL")[0] + "ENDMDL\n" if "ENDMDL" in text else text
+        v.addModel(first, "pdb")
+    else:
+        v.addModel(sdf.read_text(), "sdf")
     v.setStyle({"model": 1}, {"stick": {"colorscheme": "cyanCarbon",
                                         "radius": 0.16}})
     v.zoomTo({"model": 1})
     return v._make_html()
 
 
-def trajectory_html(xtc: Path, tpr: Path, *, n_frames: int = 60,
-                    width: int = 700, height: int = 480) -> str | None:
-    """An animated MD trajectory of the solute, or None if it cannot be built.
+#: Streamlit embeds the viewer HTML inline. Past roughly this size the browser
+#: renders nothing at all and the click looks like a dead button -- which is
+#: exactly what a 12 MB movie did. Guarded rather than hoped about.
+MAX_EMBED_BYTES = 4_000_000
 
-    Converts the PBC-corrected trajectory to a multi-model PDB of protein +
-    ligand only. Water and ions are dropped: they are ~90% of a 30k-atom system
-    and would make the viewer unusable while showing nothing a reader needs.
+
+def trajectory_html(xtc: Path, tpr: Path, *, n_frames: int = 15,
+                    width: int = 700, height: int = 480) -> str | None:
+    """An animated MD trajectory, or None if it cannot be built or is too big.
+
+    WHY SO FEW FRAMES. `whole.xtc` already contains ONLY the solute -- the
+    PBC-correction step wrote protein + ligand and dropped ~27,600 waters and
+    ions. What remains is 2,391 atoms, and at 60 frames that is 12 MB of inline
+    HTML. Streamlit embeds the viewer directly in the page and the browser
+    silently renders nothing above a few MB, so the button appeared dead. Frame
+    count is the only lever that does not require re-deriving an index.
+
+    A BACKBONE SELECTION WAS TRIED AND IS WRONG HERE. `gmx select` indexes
+    against `prod.tpr` (30,037 atoms) while `whole.xtc` holds 2,391, so every
+    index past the solute overruns the trajectory and trjconv aborts with a
+    mismatch. Any future selection must be built against the solute subset, not
+    the full topology.
     """
+    ndx = xtc.parent / "analysis.ndx"
+    if not ndx.is_file():
+        return None
     out = xtc.parent / f"movie_{n_frames}.pdb"
     if not out.is_file():
-        ndx = xtc.parent / "analysis.ndx"
-        if not ndx.is_file():
-            return None
         try:
             subprocess.run(
                 [str(GMX), "trjconv", "-s", str(tpr), "-f", str(xtc),
@@ -133,6 +177,12 @@ def trajectory_html(xtc: Path, tpr: Path, *, n_frames: int = 60,
             return None
     if not out.is_file() or out.stat().st_size == 0:
         return None
+    if out.stat().st_size > MAX_EMBED_BYTES:
+        log_size = out.stat().st_size / 1e6
+        raise MovieTooLarge(
+            f"{out.name} is {log_size:.1f} MB; above ~{MAX_EMBED_BYTES/1e6:.0f} MB "
+            "the browser renders nothing and the control looks broken. Reduce "
+            "n_frames.")
 
     import py3Dmol
     v = py3Dmol.view(width=width, height=height)

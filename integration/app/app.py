@@ -241,7 +241,14 @@ def panel_candidates() -> None:
                     "candidate", ids, key=f"pose_{key}",
                     format_func=lambda c: (
                         f"#{int(top.loc[top.candidate_id == c, 'rank'].iloc[0])} · {c}"))
-                pose = p3d.find_pose(key, str(pick))
+                prow = top.loc[top.candidate_id == pick].iloc[0]
+                # dock_id, not candidate_id: the covalent pose files are named
+                # by a separate hash that shares nothing with the candidate id.
+                pose = p3d.find_pose(
+                    key, str(pick),
+                    dock_id=(str(prow["dock_id"])
+                             if "dock_id" in top.columns
+                             and pd.notna(prow.get("dock_id")) else None))
                 if pose is None:
                     st.info(f"no docked pose file found for {pick}")
                 else:
