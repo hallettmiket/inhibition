@@ -172,18 +172,50 @@ def panel_candidates() -> None:
                             placeholder="no chlorine\nmw < 450")
     st.session_state["_curate_spec"] = spec
 
-    demote = st.checkbox(
-        "sort candidates failing a synthesizability rule to the bottom",
-        value=True,
-        help="On by default: a compound the lab would not make should not hold "
-             "a top-25 slot. Nothing is deleted and the original metric rank is "
-             "kept in the `rank` column. Uncheck to see the raw metric order.")
+    list_choice = st.radio(
+        "which shortlist",
+        ["synthesizable (rule failures replaced)", "raw metric top-25"],
+        index=0, horizontal=True,
+        help="DEFAULT: rule failures are REMOVED from the quota and the "
+             "next-best passing candidates take their slots — a different set "
+             "of molecules, not a reordering. Switch to the raw list to see "
+             "what the metric alone selected.")
+    prefer_synth = list_choice.startswith("synthesizable")
+
+    # SAY IT ONCE, AT THE TOP. Which list a reader is looking at changes which
+    # molecules exist on the page, so it cannot be something they infer from a
+    # per-approach caption further down.
+    _deltas = {k: D.shortlist_delta(k) for k in D.APPROACHES}
+    _dropped = sum(d["dropped"] for d in _deltas.values())
+    _promoted = sum(d["promoted"] for d in _deltas.values())
+    if prefer_synth and _dropped:
+        st.success(
+            f"### ✅ Non-synthesizable compounds have been filtered out\n"
+            f"**{_dropped} candidates that fail a structural synthesizability "
+            f"rule were removed** from these shortlists, and **{_promoted} "
+            f"next-best passing candidates were promoted** into the freed "
+            f"slots. Per approach — "
+            + " · ".join(f"{D.APPROACHES[k]['name'].split('·')[0].strip()} "
+                         f"−{d['dropped']}"
+                         for k, d in _deltas.items() if d["dropped"])
+            + ". These are different molecules from the raw metric top-25, not "
+              "a re-ordering of it. Switch to *raw metric top-25* above to see "
+              "what the score alone selected.")
+    elif prefer_synth:
+        st.info("Synthesizability filter active — no candidate in any "
+                "approach's quota failed a rule, so these lists are identical "
+                "to the raw metric top-25.")
+    else:
+        st.warning(
+            f"### ⚠️ Showing the RAW metric list — filter OFF\n"
+            f"These lists still contain {_dropped} compound(s) that fail a "
+            "structural synthesizability rule (highlighted below).")
 
     cols = st.columns(len(D.APPROACHES))
     for col, (key, cfg) in zip(cols, D.APPROACHES.items()):
         with col:
             st.subheader(cfg["name"])
-            s = D.shortlist(key)
+            s = D.shortlist(key, prefer_synth=prefer_synth)
             if s.empty:
                 st.info("no shortlist yet")
                 continue
@@ -222,11 +254,32 @@ def panel_candidates() -> None:
                  if syn.violations(str(x)) else "✓")
                 for x in s["canonical_smiles"]]
             n_fail = int((s["synth"] != "✓").sum())
+            delta = D.shortlist_delta(key)
+            using_synth = (s["shortlist_column"].iloc[0] == D.SYNTH_COLUMN
+                           if "shortlist_column" in s.columns else False)
+            if using_synth:
+                if delta["dropped"]:
+                    st.success(
+                        f"**synthesizable list** — {delta['dropped']} rule "
+                        f"failures removed, {delta['promoted']} replacements "
+                        "promoted into their slots. These are different "
+                        "molecules from the raw top-25, not a reordering.")
+                else:
+                    st.success(
+                        "**synthesizable list** — no candidate in this "
+                        "approach's quota failed a rule, so it is identical to "
+                        "the raw top-25.")
+            elif delta["available"]:
+                st.warning(
+                    f"**raw metric list** — includes {n_fail} rule "
+                    f"failure(s), highlighted. The synthesizable list drops "
+                    f"{delta['dropped']} and promotes {delta['promoted']} "
+                    "replacements.")
             if n_fail:
                 st.error(
                     f"**{n_fail} of {len(s)} fail a structural synthesizability "
-                    "rule** and are highlighted below. They are NOT removed and "
-                    "NOT reranked — the `synth` column names the rule.")
+                    "rule** and are highlighted below — the `synth` column "
+                    "names the rule.")
                 st.caption(
                     "`SAscore` sits beside it for comparison (lower = the "
                     "heuristic thinks it is easier to make). The two agree only "
@@ -236,7 +289,8 @@ def panel_candidates() -> None:
                     "misses specific impossibilities, and the rules say nothing "
                     "about how hard a route is.")
 
-            show = [c for c in ("rank", "candidate_id", "synth", "SAscore",
+            show = [c for c in ("display_rank", "rank", "candidate_id",
+                                "synth", "SAscore",
                                 cfg["metric"],
                                 "ligand_efficiency", "dG_kcal",
                                 "dG_ensemble_interaction_kcal",
@@ -245,21 +299,21 @@ def panel_candidates() -> None:
                                 "dG_ensemble_kcal", "dG_ensemble_sem_kcal",
                                 "warhead_class")
                     if c in s.columns]
-            # DEMOTE, DO NOT DELETE (PI decision, issue #1). A compound the Lu
-            # lab would not synthesise should not occupy a top-25 slot, so
-            # failures sort BELOW every passing candidate while keeping their
-            # metric order within each group. They stay visible and keep their
-            # original `rank`, because the frame's rank is provenance and the
-            # demotion is a reading order -- deleting them would make the list
-            # look clean while hiding why it changed.
+            # FILTERED, NOT REORDERED (PI decision, issue #1). The synthesizable
+            # list is a genuinely different SET: failures are out of the quota
+            # and the next-best passers are in. Sorting is therefore just by
+            # that list's own rank.
+            #
+            # Failures are still demoted and highlighted here as a SAFETY NET.
+            # On the synthesizable list nothing should trip it -- if a row does
+            # light up, the rebuild is stale relative to the rules and that must
+            # be visible rather than assumed away.
             s["_synth_fail"] = s["synth"].str.startswith("⚠")
-            if demote:
-                s = s.sort_values(["_synth_fail", "rank"])
-                s["shown_as"] = range(1, len(s) + 1)
-                show_cols = ["shown_as"] + [c for c in show if c != "shown_as"]
-            else:
-                s = s.sort_values("rank")
-                show_cols = show
+            sort_by = ["_synth_fail"] + (["display_rank"]
+                                         if "display_rank" in s.columns
+                                         else ["rank"])
+            s = s.sort_values(sort_by)
+            show_cols = show
             _t = s[show_cols].head(25)
             st.dataframe(
                 _t.style.apply(
@@ -267,12 +321,17 @@ def panel_candidates() -> None:
                                  if str(row.get("synth", "✓")).startswith("⚠")
                                  else "" for _ in row], axis=1),
                 use_container_width=True, hide_index=True)
-            if demote and n_fail:
-                promoted = int((~s["_synth_fail"].head(25)).sum())
+            if using_synth and n_fail:
+                st.error(
+                    f"{n_fail} row(s) on the SYNTHESIZABLE list still fail a "
+                    "rule. That should be impossible — rerun "
+                    "`scripts/reshortlist_synthesizable.py`; the rules have "
+                    "changed since the list was rebuilt.")
+            if using_synth and delta["dropped"]:
                 st.caption(
-                    f"`shown_as` is the reading order after demotion; `rank` is "
-                    f"the original metric rank, untouched. {promoted} candidates "
-                    "now occupy the top slots that failures held.")
+                    "`display_rank` is this list's own 1..N order; `rank` is "
+                    "the original metric rank, untouched — gaps in it are the "
+                    "removed failures.")
             if "dG_kcal" in s.columns and s["dG_kcal"].notna().any():
                 st.caption(f"MM-GBSA dG on {int(s['dG_kcal'].notna().sum())} of "
                            f"{len(s)} — an INDEPENDENT estimate, not confirmation "

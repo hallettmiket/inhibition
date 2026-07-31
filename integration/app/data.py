@@ -70,19 +70,77 @@ def load_frame(approach: str) -> tuple[pd.DataFrame | None, str]:
         return None, f"no frame: {exc}"
 
 
-def shortlist(approach: str) -> pd.DataFrame:
-    """The approach's shortlisted candidates, with its own metric named."""
+# THE SHORTLIST THE GUI SHOWS BY DEFAULT (PI decision, issue #1).
+#
+# `shortlist` is the raw metric top-N. `shortlist_synth` is the same quota
+# rebuilt with structural-synthesizability failures REMOVED and the next-best
+# passing candidates promoted in their place (scripts/reshortlist_synthesizable.py).
+#
+# Default to the synthesizable list. The instruction was explicit: a compound
+# that fails these rules should not hold a top-25 slot. Showing the raw list
+# with failures merely sorted to the bottom satisfies neither reading of that,
+# and worse, it HIDES the promoted replacements entirely — they are not in the
+# raw shortlist at all, so no amount of reordering can surface them.
+SYNTH_COLUMN = "shortlist_synth"
+BASE_COLUMN = "shortlist"
+
+
+def shortlist_column(df: pd.DataFrame, prefer_synth: bool = True) -> str:
+    """Which selection column to read, falling back when the rebuild is absent.
+
+    An approach whose frame predates the rebuild has no `shortlist_synth`; it
+    must still render, and it must not silently look as though it were filtered.
+    Callers get the column name back so they can say which one they used.
+    """
+    if prefer_synth and SYNTH_COLUMN in df.columns:
+        return SYNTH_COLUMN
+    return BASE_COLUMN
+
+
+def shortlist(approach: str, prefer_synth: bool = True) -> pd.DataFrame:
+    """The approach's shortlisted candidates, with its own metric named.
+
+    Carries `shortlist_column` and `display_rank` so the caller can label which
+    list this is without re-deriving it.
+    """
     df, _ = load_frame(approach)
-    if df is None or "shortlist" not in df.columns:
+    if df is None:
         return pd.DataFrame()
-    s = df[df["shortlist"].fillna(False)].copy()
+    col = shortlist_column(df, prefer_synth)
+    if col not in df.columns:
+        return pd.DataFrame()
+    s = df[df[col].fillna(False)].copy()
     s["approach"] = approach
+    s["shortlist_column"] = col
+    # The synthesizable list has its own contiguous 1..N ordering; the raw
+    # `rank` is kept alongside as provenance, never overwritten.
+    rank_col = "rank_synth" if (col == SYNTH_COLUMN
+                                and "rank_synth" in s.columns) else "rank"
+    s["display_rank"] = s[rank_col] if rank_col in s.columns else pd.NA
     s["metric_name"] = APPROACHES[approach]["metric"]
     s["metric_value"] = s.get(APPROACHES[approach]["metric"])
     return s
 
 
-def all_shortlists() -> pd.DataFrame:
+def shortlist_delta(approach: str) -> dict:
+    """How the synthesizable list differs from the raw one, for labelling.
+
+    Returns counts of promoted (in synth, not in raw) and dropped (in raw, not
+    in synth) candidates. A panel that silently swapped one list for the other
+    would be as misleading as the reordering this replaced.
+    """
+    df, _ = load_frame(approach)
+    if df is None or SYNTH_COLUMN not in df.columns or BASE_COLUMN not in df.columns:
+        return {"available": False, "promoted": 0, "dropped": 0, "kept": 0}
+    raw = df[BASE_COLUMN].fillna(False)
+    syn = df[SYNTH_COLUMN].fillna(False)
+    return {"available": True,
+            "promoted": int((syn & ~raw).sum()),
+            "dropped": int((raw & ~syn).sum()),
+            "kept": int((raw & syn).sum())}
+
+
+def all_shortlists(prefer_synth: bool = True) -> pd.DataFrame:
     """Every approach's shortlist, pooled for the score-free panels ONLY.
 
     Pooling rows is not pooling scores. `metric_value` carries a different
@@ -90,7 +148,7 @@ def all_shortlists() -> pd.DataFrame:
     comparable is the shared physicochemical axes and structural identity, which
     is exactly what the convergence and axes panels use.
     """
-    frames = [shortlist(a) for a in APPROACHES]
+    frames = [shortlist(a, prefer_synth) for a in APPROACHES]
     frames = [f for f in frames if len(f)]
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 

@@ -29,33 +29,44 @@ sys.path.insert(0, str(REPO))
 
 from shared import annotate as ann                 # noqa: E402
 from shared import io as dio                       # noqa: E402
+from shared import seeds as sd                     # noqa: E402
 
 log = logging.getLogger("t2-annotate")
 
-EXPERIMENT = "02_t2_atra_crem"
 APPROACH = "t2"
+DEFAULT_SEED = "atra"
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="T_2 step 2: annotate.")
+    sd.add_seed_argument(ap, APPROACH)
     ap.add_argument("--alert-limit", type=int, default=None,
                     help="reject above this many alerts (default: annotate only)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    df, frame_path = dio.latest_frame(EXPERIMENT, APPROACH)
+    seed_name = args.seed or DEFAULT_SEED
+    try:
+        rec = sd.resolve(APPROACH, seed_name)
+    except sd.SeedError as exc:
+        raise SystemExit(str(exc)) from exc
+    experiment = rec["experiment"]
+    log.info("seed %s -> experiment %s", seed_name, experiment)
+
+    df, frame_path = dio.latest_frame(experiment, APPROACH)
     log.info("loaded %s (%d rows)", frame_path.name, len(df))
 
     out_df = ann.annotate(df, approach=APPROACH, alert_limit=args.alert_limit)
 
     out = dio.write_full_frame(
-        out_df, approach=APPROACH, experiment=EXPERIMENT, stage="t2_annotate",
+        out_df, approach=APPROACH, experiment=experiment, stage="t2_annotate",
         params={"alert_scoping": "whole molecule",
                 "alert_limit": args.alert_limit,
+                "seed_name": seed_name,
                 "novelty": "1 - max Tanimoto (ECFP4) vs the external set"},
         inputs={"d2_frame": frame_path})
 
-    print(f"\nT_2 annotation -> {out}")
+    print(f"\nT_2 annotation (seed {seed_name}) -> {out}")
     print(f"  {len(out_df)} candidates, "
           f"{int(out_df['rejected_at'].notna().sum())} stamped rejected and retained")
     for col, label in (("MW", "MW"), ("cLogP", "cLogP"), ("QED", "QED"),

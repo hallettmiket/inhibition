@@ -31,6 +31,8 @@ deleting a file that a manifest names makes that run unverifiable.
 
 | `append_only/.../01_t1_de_novo/gromacs/t1_1224c0ee20c2/rep1/step*.pdb` | — | 2026-07-30 | ~1400 LINCS constraint-violation dumps from a production run that exploded. They are GROMACS diagnostics for a failure already recorded in `rep1_traceback.txt`, and carry no information the traceback lacks. Any candidate that blows up will produce a similar pile. | yes — but the protected-path hook blocks deletion under `/data/lab_vm`, so this needs a route around it |
 
+| `append_only/.../99_smoke_degree2/` | — | 2026-07-31 | Smoke test of `scripts/sample_t2_degree2.py`: 12 of ATRA's 1,882 degree-1 parents, 307 molecules kept at p=0.00603. Written only to verify the sampler's global dedup, the governor and the Bernoulli draw before committing a real run. `99_` prefixed so it sorts away from the real experiments and cannot be mistaken for one. It confirmed the degree-2 population estimate to 1.01x and has no other value. | yes — nothing consumes it |
+
 ## Note on the governed data root
 
 Large derived outputs live under `/data/lab_vm/append_only/inhibition/` and are

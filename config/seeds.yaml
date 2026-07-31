@@ -5,16 +5,43 @@
 # Author:  Mike Hallett (with Claude Code)
 # Date:    2026-07-27
 #
-# WHY ONLY TWO SEEDS (Rev 3 design decision): the frozen reference set was
-# checked for other candidate seeds and the remaining validated binders are
-# either promiscuous aggregators (EGCG, PiB, juglone, KPT-6566) or non-drug-like
-# peptidomimetics (BJP-06-005-3, the reversible active-site peptides). Both make
-# poor starting points. Strategy diversity in this choreography comes from the
-# four different approaches, NOT from multiplying seeds.
+# WHY ONLY TWO SEEDS (Rev 3) AND WHY THAT CHANGED (2026-07-31).
+#
+# Rev 3 declared two seeds because the reference set of the time offered nothing
+# else: the remaining validated binders were promiscuous aggregators (EGCG, PiB,
+# juglone, KPT-6566) or non-drug-like peptidomimetics (BJP-06-005-3, the
+# reversible active-site peptides). That was true of pin1_reference_binders_1.csv
+# and is STALE for _3.csv, which carries four non-covalent binders that are
+# neither promiscuous nor peptidic and are ALL more potent than ATRA. ATRA is
+# low-uM and promiscuity-flagged: it was the only option, not the best one.
+#
+# T_2 therefore runs from five seeds. This is not a retreat from "diversity
+# comes from the four approaches". T_2's declared weakness is that it never
+# leaves its seed's chemotype; running one operator from five starting points
+# converts that limitation into a controlled comparison — same radius, same
+# pins, five chemotypes.
+#
+# ONE APPROACH ID, MANY EXPERIMENTS. Every seed writes under approach `t2` into
+# its OWN experiment directory (`t2_experiment` below). `t2` stays in
+# schema.VALID_APPROACHES, the gates and the decision vocabulary need no
+# widening, and the frames cannot mix because latest_frame() keys on the
+# experiment directory. The GUI presents these as ONE approach with a seed
+# selector, not as five approaches.
+#
+# NEIGHBOURHOOD SIZE IS NOT COMPARABLE ACROSS SEEDS. Measured yields at the
+# pinned radius 2 differ by 9x (ATRA 1,882; Liu-2024-C3 16,817). More draws
+# gives a better best-of-pool for extreme-value reasons alone, so comparing TOP
+# scores across seeds is an artefact unless N is matched. Compare score
+# DISTRIBUTIONS, or best-of-N at matched N. Same trap as D0043.
+#
+# EVERY RADIUS BELOW WAS PROBED, NOT INHERITED (D0018). Yields measured
+# 2026-07-31 against chembl33_sa2_f5 with this approach's pinned mutate/grow
+# sizes, recorded per seed as `probe_yield`.
 
 seeds:
   atra:
     used_by: [t2]
+    t2_experiment: "02_t2_atra_crem"     # the original series; do not rename
     name: ATRA
     full_name: "all-trans retinoic acid"
     canonical_smiles: "CC1=C(C(CCC1)(C)C)/C=C/C(=C/C=C/C(=C/C(=O)O)/C)/C"
@@ -22,9 +49,107 @@ seeds:
     potency: "low-uM (binds + degrades Pin1)"
     promiscuity_flag: true
     citation: "Wei 2015, Nat Med, 10.1038/nm.3839"
+    radius: 2
+    probe_yield: {r1: 14929, r2: 1882, r3: 0, r4: 0}
     notes: >
       A known WEAK non-covalent Pin1 inhibitor. T_2 holds nothing fixed — the
       whole graph is mutable — so no protected substructure is declared here.
+      The ONLY seed here that dies at radius 3: a conjugated polyene's 3-bond
+      context has no precedent in ChEMBL33. Its neighbourhood is also the
+      smallest by 5-9x, which is a property of this molecule and not of T_2.
+
+  # ---------------------------------------------------------------------
+  # Alternative T_2 seeds, added 2026-07-31. All four are non-covalent,
+  # promiscuity_flag n, and more potent than ATRA. Radius 2 is pinned for all
+  # of them to MATCH ATRA's operator — every one also survives radius 3, so 2
+  # is a choice here rather than the only option it was for ATRA.
+  # ---------------------------------------------------------------------
+  liu_2024_c3:
+    used_by: [t2]
+    t2_experiment: "02b_t2_liu_c3_crem"
+    name: "Liu-2024-C3"
+    canonical_smiles: "N#Cc1ccc(-c2ccc(-n3cc(CC(NC(=O)C4(c5ccccc5)CC4)C(=O)NC4CC(O)C4)nn3)cc2)cc1"
+    mechanism: non_covalent
+    potency: "Kd 130 nM (SPR); IC50 660 nM (FP substrate competition)"
+    promiscuity_flag: false
+    pdb: 9INR
+    citation: "Liu 2024, J Med Chem 67(17):15780, 10.1021/acs.jmedchem.4c01412 (PMID 39229909); ChEMBL5589996; co-crystal 9INR ligand A1D9K"
+    radius: 2
+    probe_yield: {r1: 36834, r2: 16817, r3: 10156, r4: 6683}
+    notes: >
+      The strongest available T_2 seed and better than ATRA on every axis this
+      file uses to justify a seed: ~10x more potent, not promiscuity-flagged,
+      and the only non-covalent binder in the reference set with its own
+      co-crystal (9INR). At 41 heavy atoms it is also the largest seed here.
+      MEASURED 2026-07-31: the 55-atom governor still pruned ZERO of its 16,806
+      products, contradicting the expectation written here first. The pins cap
+      growth at +8 (grow max_atoms) and +4 (mutate max_inc), so 41 -> 49 at
+      worst and the ceiling is never reached. The governor does nothing at
+      degree 1 for ANY seed in this file; it exists for degree > 1, where an
+      oversized product would seed an oversized lineage.
+
+  potter_astex:
+    used_by: [t2]
+    t2_experiment: "02c_t2_potter_crem"
+    name: "Potter-Astex-indole-furancarboxamide"
+    canonical_smiles: "COC(=O)[C@@H](Cc1nc2ccccc2[nH]1)NC(=O)c1cc(-c2ccc(CN)cc2)oc1C"
+    mechanism: non_covalent
+    potency: "IC50 25 nM"
+    promiscuity_flag: false
+    citation: "Potter 2010, Bioorg Med Chem Lett, 10.1016/j.bmcl.2009.11.090; ChEMBL CHEMBL595291 (target CHEMBL2288)"
+    radius: 2
+    probe_yield: {r1: 46108, r2: 9192, r3: 1675, r4: 805}
+    notes: >
+      Fragment-derived and PHOSPHATE-FREE, which is the axis on which most
+      potent Pin1 binders fail — a phosphonate buys affinity and costs cell
+      permeability. That makes this the most developable starting point here
+      even though Du-Xu and Guo-Pfizer report tighter Ki.
+
+  du_xu:
+    used_by: [t2]
+    t2_experiment: "02d_t2_duxu_crem"
+    name: "Du-Xu-naphthalenecarboxamide"
+    canonical_smiles: "O=C(N[C@H](C/C=C/c1cccc(F)c1)C(=O)O)c1ccc2ccccc2c1"
+    mechanism: non_covalent
+    potency: "Ki 6 nM"
+    promiscuity_flag: false
+    citation: "Du 2021, Bioorg Med Chem, 10.1016/j.bmc.2020.115878; ChEMBL CHEMBL1090715 (target CHEMBL2288)"
+    radius: 2
+    probe_yield: {r1: 34174, r2: 9744, r3: 1786, r4: 645}
+    # PROVENANCE CAVEAT CARRIED FORWARD from pin1_reference_binders_3.csv, not
+    # silently dropped by copying only the SMILES: the source paper's title
+    # emphasises a thiazole series and this deposited structure has no thiazole
+    # ring, so it may be a reference/intermediate compound rather than the
+    # flagship analogue. Ki 6 nM is therefore attached to a structure that has
+    # not been spot-checked against the SI. Fine as a NEIGHBOURHOOD SEED, where
+    # what matters is that the scaffold is a real Pin1 chemotype; NOT admissible
+    # as a gate active or a potency anchor until someone reads the SI.
+    notes: >
+      Carboxylic acid in place of the usual phosphonate. See the provenance
+      caveat above before quoting its potency anywhere.
+
+  guo_pfizer:
+    used_by: [t2]
+    t2_experiment: "02e_t2_guo_crem"
+    name: "Guo-Pfizer-benzothiophene-phosphonate"
+    canonical_smiles: "O=C(N[C@@H](COP(=O)(O)O)Cc1cccc(F)c1)c1cc2ccccc2s1"
+    mechanism: non_covalent
+    potency: "Ki 6 nM (reproduced 6-50 nM across 5 independent papers, 2009-2021)"
+    promiscuity_flag: false
+    citation: "Guo 2009, Bioorg Med Chem Lett, 10.1016/j.bmcl.2009.08.034; re-tested in Moore 2013, Zhao 2018, Xu 2016, Du 2021"
+    radius: 2
+    probe_yield: {r1: 31813, r2: 8674, r3: 1666, r4: 402}
+    # RUN AS A CONTROL, NOT AS A LEAD. The phosphonate is the best-replicated
+    # potency in the whole reference set (5 independent papers) and is also the
+    # classic Pin1 cell-permeability dead end. Its value here is as a
+    # high-affinity anchor for the cross-seed comparison: if CReM's neighbourhood
+    # of a 6 nM binder does not out-score CReM's neighbourhood of low-uM ATRA on
+    # the docking metric, that is evidence about the METRIC (cf. D0041), not
+    # about the seeds. Do not promote its output to synthesis without a
+    # phosphonate-replacement step.
+    notes: >
+      Included deliberately as a positive control for the cross-seed comparison.
+      Read the warning above before shortlisting anything from it.
 
   sulfopin:
     used_by: [t3, t4]
@@ -95,7 +220,20 @@ unseeded_approaches: [t1]
 # here and listing an approach under used_by re-runs that approach from the new
 # start point with no code change.
 extension_note: >
-  To run an approach from an additional seed, add a block above with a verified
-  canonical SMILES and a citation, then list the approach in its used_by. Do not
-  add a seed drawn from the promiscuous or non-drug-like entries in the frozen
-  reference set without recording why.
+  To run T_2 from an additional seed: add a block above with a verified
+  canonical SMILES and a citation, list t2 in its used_by, give it its OWN
+  t2_experiment directory, then run
+  `01_generate.py --seed <name> --probe` and pin the resulting radius. The
+  probe is not optional — ATRA yields nothing at radius 3 while every other
+  seed here yields thousands, so an inherited radius is how this approach
+  enumerates an empty frontier and reports success (D0018). Do not add a seed
+  drawn from the promiscuous or non-drug-like entries in the reference set
+  without recording why.
+
+  T_3/T_4 ARE A DIFFERENT MATTER. They do not merely start from Sulfopin, they
+  encode its sulfolane core as a hard constraint with declared attachment
+  points and a wildcard-free alert_scoping_smarts. Reseeding them means
+  authoring that decomposition for the new molecule — which substructure is the
+  core, where the warhead attaches, where the R-group attaches. That is a
+  chemistry judgement per seed, not a config edit, and this note should not be
+  read as promising otherwise.

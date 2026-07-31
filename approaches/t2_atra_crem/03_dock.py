@@ -36,14 +36,17 @@ REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import noncovalent_dock_run as runner    # noqa: E402
+from shared import seeds as sd                       # noqa: E402
 
 log = logging.getLogger("t2-dock")
 
-EXPERIMENT = "02_t2_atra_crem"
+APPROACH = "t2"
+DEFAULT_SEED = "atra"
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="T_2 (ATRA analogues, CReM) step 3: non-covalent docking.")
+    ap = argparse.ArgumentParser(description="T_2 (CReM neighbourhood) step 3: non-covalent docking.")
+    sd.add_seed_argument(ap, APPROACH)
     ap.add_argument("--gpu", type=int, required=True,
                     help="GPU device id; must not be one a covalent dock is using")
     ap.add_argument("--limit", type=int, default=None,
@@ -52,11 +55,18 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO,
                         format="%(levelname)s %(name)s: %(message)s")
 
+    seed_name = args.seed or DEFAULT_SEED
+    try:
+        rec = sd.resolve(APPROACH, seed_name)
+    except sd.SeedError as exc:
+        raise SystemExit(str(exc)) from exc
+    log.info("seed %s -> experiment %s", seed_name, rec["experiment"])
+
     merged, out, survivors, n_docked, elapsed = runner.run(
-        experiment=EXPERIMENT, approach="t2", frame_prefix="D2",
+        experiment=rec["experiment"], approach=APPROACH, frame_prefix="D2",
         gpu=args.gpu, limit=args.limit)
 
-    print(f"\nT_2 (ATRA analogues, CReM) non-covalent docking -> "
+    print(f"\nT_2 (seed {seed_name}) non-covalent docking -> "
           f"{out if out else '(no frame written — partial run)'}")
     print(f"  docked successfully {n_docked} / {len(survivors)}")
     print(f"  engine              Vina-GPU 2.1, search_depth {runner.SEARCH_DEPTH} (D0017)")
