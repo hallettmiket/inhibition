@@ -23,8 +23,28 @@ import mkdocs_gen_files
 
 REPO_ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_))
-from shared import reference_set as rs   # noqa: E402
-from shared import warhead_library as wl  # noqa: E402
+
+
+def latest_reference(stem: str) -> str:
+    """Highest integer-versioned `<stem>_N.csv` under data/reference.
+
+    Resolved by GLOB, not by importing the loader that reads it. The docs are
+    built in CI with only mkdocs + pandas installed -- importing
+    `shared.reference_set` would pull in RDKit and break `mkdocs build
+    --strict`. Globbing gets the same answer with no dependency, and it still
+    cannot go stale: a new version is picked up the moment it is written.
+
+    This page previously named `warhead_classes_2.csv` and
+    `pin1_reference_binders_1.csv` as hard-coded strings, which is why the
+    rendered status page carried a load error for weeks.
+    """
+    ref = REPO_ / "data" / "reference"
+    hits = []
+    for p in ref.glob(f"{stem}_*.csv"):
+        tail = p.stem[len(stem) + 1:]
+        if tail.isdigit():
+            hits.append((int(tail), p.name))
+    return max(hits)[1] if hits else f"{stem}_1.csv"
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -117,11 +137,11 @@ def gen_reference_page() -> None:
             "reactivity window**.\n\n"
         )
         for name, title, note in [
-            (rs.DEFAULT_MASTER.name, "Master set — novelty axis",
+            (latest_reference("pin1_reference_binders"), "Master set — novelty axis",
              "Rows marked `UNVERIFIED` are excluded from the novelty computation."),
-            (rs.DEFAULT_ANCHORS.name, "Covalent Cys113 anchors — reactivity window",
+            (latest_reference("pin1_covalent_cys113_anchors"), "Covalent Cys113 anchors — reactivity window",
              "`reference_set.py` refuses `UNVERIFIED` rows into the window."),
-            (wl.DEFAULT_LIBRARY.name, "Warhead classes — T_4 enumeration",
+            (latest_reference("warhead_classes"), "Warhead classes — T_4 enumeration",
              "`warhead_library.enumerable()` defaults to `VERIFIED` only."),
             ("pin1_reactivity_kinetics_1.csv", "Measured reactivity kinetics",
              "Digitized from a figure to ~1 significant figure. Bound a window with "
@@ -192,11 +212,42 @@ def gen_status_page() -> None:
             f.write(f"*(warhead library unavailable in this environment: {exc})*\n\n")
 
         f.write(
-            "### Not yet acquired\n\n"
-            "- **CReM fragment DB** — the radius variant must be chosen and pinned "
-            "before T_2 can enumerate; a different radius is a different "
-            "neighbourhood definition, not a tuning knob.\n"
-            "- **Decoy set** — built by the enrichment gate, which has not run.\n\n"
+            "### Where the gates stand\n\n"
+            "The gate verdicts below are read from the live token, so this "
+            "section cannot drift from what the pipeline actually recorded.\n\n"
+        )
+        try:
+            import json as _json
+            tok = _json.loads((Path("/data/lab_vm/append_only/inhibition/"
+                                    "00_shared_substrate/enrichment_gate.token")
+                               ).read_text())
+            f.write("| stratum / metric | verdict | ROC-AUC | 95% CI | actives | "
+                    "chemotypes | EF 1% |\n|---|---|---|---|---|---|---|\n")
+            for stratum, sd in (tok.get("strata") or {}).items():
+                for metric, m in (sd.get("metrics") or {}).items():
+                    ci = m.get("roc_auc_ci") or [None, None]
+                    ci_s = (f"[{ci[0]:.3f}, {ci[1]:.3f}]"
+                            if ci and ci[0] is not None else "—")
+                    f.write(f"| `{stratum}/{metric}` | **{m.get('verdict')}** | "
+                            f"{m.get('roc_auc', float('nan')):.3f} | {ci_s} | "
+                            f"{m.get('n_actives','?')} | "
+                            f"{m.get('n_chemotypes','?')} | "
+                            f"{m.get('ef_1pct', 0):.1f} |\n")
+            f.write("\nThe floor for any verdict above UNDERPOWERED is 3 actives "
+                    "AND 6 independent chemotypes.\n\n")
+        except Exception as exc:  # noqa: BLE001
+            f.write(f"*(gate token unreadable here: {exc})*\n\n")
+
+        f.write(
+            "### Known limits of the rankings\n\n"
+            "- **The scores rank partly on molecular size** (D0043). Spearman "
+            "between heavy-atom count and the ranking metric is +0.745 for T_3, "
+            "−0.617 for T_1, +0.305 for T_4 and −0.230 for T_2 — every sign "
+            "meaning larger molecules score better. Ligand efficiency "
+            "over-corrects (−0.938 for T_1) and is not the fix.\n"
+            "- **Inhibition versus activation is not resolved computationally** "
+            "by any approach here. Catalytic-site occupancy is the proxy.\n"
+            "- **No wet-lab ground truth** exists for any candidate.\n\n"
             "### Not yet verified\n\n"
             "- **Byun 2023 BDHI fragment** — SI-only. The BDHI *class* is verified "
             "(PubChem CID 21983498), which is what the reactivity window needs, so "
