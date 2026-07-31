@@ -40,6 +40,9 @@ DEFAULT_SEED = "atra"
 def main() -> None:
     ap = argparse.ArgumentParser(description="T_2 step 2: annotate.")
     sd.add_seed_argument(ap, APPROACH)
+    ap.add_argument("--experiment", default=None,
+                    help="override the seed's experiment directory; for derived "
+                         "runs such as the degree-2 sample")
     ap.add_argument("--alert-limit", type=int, default=None,
                     help="reject above this many alerts (default: annotate only)")
     args = ap.parse_args()
@@ -50,7 +53,11 @@ def main() -> None:
         rec = sd.resolve(APPROACH, seed_name)
     except sd.SeedError as exc:
         raise SystemExit(str(exc)) from exc
-    experiment = rec["experiment"]
+    # --experiment overrides the seed's own directory. Needed for derived runs
+    # that are not themselves seeds -- the degree-2 sample lives beside its
+    # parent rather than in seeds.yaml, because it is a SAMPLE of a seed's
+    # neighbourhood, not a new starting point.
+    experiment = args.experiment or rec["experiment"]
     log.info("seed %s -> experiment %s", seed_name, experiment)
 
     df, frame_path = dio.latest_frame(experiment, APPROACH)

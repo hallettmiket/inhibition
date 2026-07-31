@@ -47,6 +47,9 @@ DEFAULT_SEED = "atra"
 def main() -> None:
     ap = argparse.ArgumentParser(description="T_2 (CReM neighbourhood) step 3: non-covalent docking.")
     sd.add_seed_argument(ap, APPROACH)
+    ap.add_argument("--experiment", default=None,
+                    help="override the seed's experiment directory; for derived "
+                         "runs such as the degree-2 sample")
     ap.add_argument("--gpu", type=int, required=True,
                     help="GPU device id; must not be one a covalent dock is using")
     ap.add_argument("--limit", type=int, default=None,
@@ -60,10 +63,11 @@ def main() -> None:
         rec = sd.resolve(APPROACH, seed_name)
     except sd.SeedError as exc:
         raise SystemExit(str(exc)) from exc
-    log.info("seed %s -> experiment %s", seed_name, rec["experiment"])
+    experiment = args.experiment or rec["experiment"]
+    log.info("seed %s -> experiment %s", seed_name, experiment)
 
     merged, out, survivors, n_docked, elapsed = runner.run(
-        experiment=rec["experiment"], approach=APPROACH, frame_prefix="D2",
+        experiment=experiment, approach=APPROACH, frame_prefix="D2",
         gpu=args.gpu, limit=args.limit)
 
     print(f"\nT_2 (seed {seed_name}) non-covalent docking -> "
