@@ -1,0 +1,191 @@
+pdb_id,method,resolution_a,title,n_nonpolymer_entities
+1F8A,X-RAY DIFFRACTION,1.84,STRUCTURAL BASIS FOR THE PHOSPHOSERINE-PROLINE RECOGNITION BY GROUP IV WW DOMAINS,0
+1I6C,SOLUTION NMR,,SOLUTION STRUCTURE OF PIN1 WW DOMAIN,0
+1I8G,SOLUTION NMR,,SOLUTION STRUCTURE OF PIN1 WW DOMAIN COMPLEXED WITH CDC25 PHOSPHOTHREONINE PEPTIDE,0
+1I8H,SOLUTION NMR,,SOLUTION STRUCTURE OF PIN1 WW DOMAIN COMPLEXED WITH HUMAN TAU PHOSPHOTHREONINE PEPTIDE,0
+1NMV,SOLUTION NMR,,Solution structure of human Pin1,0
+1PIN,X-RAY DIFFRACTION,1.35,PIN1 PEPTIDYL-PROLYL CIS-TRANS ISOMERASE FROM HOMO SAPIENS,4
+1ZCN,X-RAY DIFFRACTION,1.9,human Pin1 Ng mutant,2
+2F21,X-RAY DIFFRACTION,1.5,human Pin1 Fip mutant,1
+2ITK,X-RAY DIFFRACTION,1.45,human Pin1 bound to D-PEPTIDE,1
+2KBU,SOLUTION NMR,,NMR solution structure of Pin1 WW domain mutant with beta turn mimic at position 12,0
+2KCF,SOLUTION NMR,,The NMR solution structure of the isolated Apo Pin1 WW domain,0
+2LB3,SOLUTION NMR,,Structure of the WW domain of PIN1 in complex with a human phosphorylated Smad3 derived peptide,0
+2M8I,SOLUTION NMR,,Structure of Pin1 WW domain,0
+2M8J,SOLUTION NMR,,Structure of Pin1 WW domain phospho-mimic S16E,0
+2M9E,SOLUTION NMR,,NMR solution structure of Pin1 WW domain mutant 5-1,0
+2M9F,SOLUTION NMR,,NMR solution structure of Pin1 WW domain mutant 5-1g,1
+2M9I,SOLUTION NMR,,NMR solution structure of Pin1 WW domain variant 6-1,0
+2M9J,SOLUTION NMR,,NMR solution structure of Pin1 WW domain mutant 6-1g,1
+2Q5A,X-RAY DIFFRACTION,1.5,human Pin1 bound to L-PEPTIDE,1
+2RUC,SOLUTION NMR,,Solution structure of the peptidyl prolyl cis-trans isomerase domain of human Pin1 with sulfate ion,0
+2RUD,SOLUTION NMR,,Solution structure of the peptidyl prolyl cis-trans isomerase domain of C113D mutant human Pin1 with sulfate ion,0
+2RUQ,SOLUTION NMR,,solution structure of human Pin1 PPIase mutant C113A,0
+2RUR,SOLUTION NMR,,Solution structure of Human Pin1 PPIase C113S mutant,0
+2XP3,X-RAY DIFFRACTION,2.0,DISCOVERY OF CELL-ACTIVE PHENYL-IMIDAZOLE PIN1 INHIBITORS BY STRUCTURE-GUIDED FRAGMENT EVOLUTION,2
+2XP4,X-RAY DIFFRACTION,1.8,DISCOVERY OF CELL-ACTIVE PHENYL-IMIDAZOLE PIN1 INHIBITORS BY STRUCTURE-GUIDED FRAGMENT EVOLUTION,2
+2XP5,X-RAY DIFFRACTION,1.9,DISCOVERY OF CELL-ACTIVE PHENYL-IMIDAZOLE PIN1 INHIBITORS BY STRUCTURE-GUIDED FRAGMENT EVOLUTION,2
+2XP6,X-RAY DIFFRACTION,1.9,DISCOVERY OF CELL-ACTIVE PHENYL-IMIDAZOLE PIN1 INHIBITORS BY STRUCTURE-GUIDED FRAGMENT EVOLUTION,2
+2XP7,X-RAY DIFFRACTION,2.0,DISCOVERY OF CELL-ACTIVE PHENYL-IMIDAZOLE PIN1 INHIBITORS BY STRUCTURE-GUIDED FRAGMENT EVOLUTION,2
+2XP8,X-RAY DIFFRACTION,2.1,DISCOVERY OF CELL-ACTIVE PHENYL-IMIDAZOLE PIN1 INHIBITORS BY STRUCTURE-GUIDED FRAGMENT EVOLUTION,2
+2XP9,X-RAY DIFFRACTION,1.9,DISCOVERY OF CELL-ACTIVE PHENYL-IMIDAZOLE PIN1 INHIBITORS BY STRUCTURE-GUIDED FRAGMENT EVOLUTION,2
+2XPA,X-RAY DIFFRACTION,1.9,DISCOVERY OF CELL-ACTIVE PHENYL-IMIDAZOLE PIN1 INHIBITORS BY STRUCTURE-GUIDED FRAGMENT EVOLUTION,2
+2XPB,X-RAY DIFFRACTION,2.0,DISCOVERY OF CELL-ACTIVE PHENYL-IMIDAZOLE PIN1 INHIBITORS BY STRUCTURE-GUIDED FRAGMENT EVOLUTION,2
+2ZQS,X-RAY DIFFRACTION,1.902,Crystal structure of a mutant PIN1 PEPTIDYL-PROLYL CIS-TRANS ISOMERASE,2
+2ZQT,X-RAY DIFFRACTION,1.462,Crystal structure of a mutant PIN1 PEPTIDYL-PROLYL CIS-TRANS ISOMERASE,2
+2ZQU,X-RAY DIFFRACTION,2.5,Crystal structure of a mutant PIN1 PEPTIDYL-PROLYL CIS-TRANS ISOMERASE,1
+2ZQV,X-RAY DIFFRACTION,2.498,Crystal structure of a mutant PIN1 PEPTIDYL-PROLYL CIS-TRANS ISOMERASE,2
+2ZR4,X-RAY DIFFRACTION,2.0,Crystal structure of a mutant PIN1 peptidyl-prolyl cis-trans isomerase,2
+2ZR5,X-RAY DIFFRACTION,2.6,Crystal structure of a mutant PIN1 peptidyl-prolyl cis-trans isomerase,2
+2N1O,SOLUTION NMR,,PIN1 WW domain in complex with a phosphorylated CPEB1 derived peptide,0
+1NMW,SOLUTION NMR,,Solution structure of the PPIase domain of human Pin1,1
+2ZR6,X-RAY DIFFRACTION,3.2,Crystal structure of a mutant PIN1 peptidyl-prolyl cis-trans isomerase,2
+3I6C,X-RAY DIFFRACTION,1.3,Structure-Based Design of Novel PIN1 Inhibitors (II),1
+3IK8,X-RAY DIFFRACTION,1.85,Structure-Based Design of Novel PIN1 Inhibitors (I),0
+3IKD,X-RAY DIFFRACTION,2.0,Structure-Based Design of Novel PIN1 Inhibitors (I),1
+3IKG,X-RAY DIFFRACTION,1.86,Structure-Based Design of Novel PIN1 Inhibitors (I),1
+3JYJ,X-RAY DIFFRACTION,1.87,Structure-Based Design of Novel PIN1 Inhibitors (II),1
+3KAB,X-RAY DIFFRACTION,2.19,Structure-guided design of alpha-amino acid-derived Pin1 inhibitors,3
+3KAC,X-RAY DIFFRACTION,2.0,Structure-guided design of alpha-amino acid-derived Pin1 inhibitors,1
+3KAD,X-RAY DIFFRACTION,1.95,Structure-guided design of alpha-amino acid-derived Pin1 inhibitors,2
+3KAF,X-RAY DIFFRACTION,2.3,Structure-guided design of alpha-amino acid-derived Pin1 inhibitors,1
+3KAG,X-RAY DIFFRACTION,1.9,Structure-guided design of alpha-amino acid-derived Pin1 inhibitors,2
+3KAH,X-RAY DIFFRACTION,2.3,Structure-guided design of alpha-amino acid-derived Pin1 inhibitors,2
+3KAI,X-RAY DIFFRACTION,1.9,Structure-guided design of alpha-amino acid-derived Pin1 inhibitors,2
+3KCE,X-RAY DIFFRACTION,1.9,Structure-guided design of alpha-amino acid-derived Pin1 inhibitors,2
+3NTP,X-RAY DIFFRACTION,1.762,Human Pin1 complexed with reduced amide inhibitor,2
+3ODK,X-RAY DIFFRACTION,2.3,Discovery of cell-active phenyl-imidazole Pin1 inhibitors by structure-guided fragment evolution,2
+3OOB,X-RAY DIFFRACTION,1.89,Structural and functional insights of directly targeting Pin1 by Epigallocatechin-3-gallate,3
+3TCZ,X-RAY DIFFRACTION,2.1,Human Pin1 bound to cis peptidomimetic inhibitor,2
+3TDB,X-RAY DIFFRACTION,2.267,Human Pin1 bound to trans peptidomimetic inhibitor,2
+3WH0,X-RAY DIFFRACTION,1.6,Structure of Pin1 Complex with 18-crown-6,3
+4GWT,X-RAY DIFFRACTION,2.25,Structure of racemic Pin1 WW domain cocrystallized with DL-malic acid,1
+4GWV,X-RAY DIFFRACTION,3.05,Structure of racemic Pin1 WW domain cocrystallized with tri-ammonium citrate,1
+4QIB,X-RAY DIFFRACTION,1.865,Oxidation-Mediated Inhibition of the Peptidyl-Prolyl Isomerase Pin1,2
+4TNS,X-RAY DIFFRACTION,1.33,Structure of Pin1 PPIase domain bound with all-trans retinoic acid,1
+4TYO,X-RAY DIFFRACTION,1.75,PPIase in complex with a non-phosphate small molecule inhibitor.,2
+4U84,X-RAY DIFFRACTION,1.78,Human Pin1 with S-hydroxyl-cysteine 113,1
+4U85,X-RAY DIFFRACTION,1.7,Human Pin1 with cysteine sulfinic acid 113,1
+4U86,X-RAY DIFFRACTION,1.6,Human Pin1 with cysteine sulfonic acid 113,1
+5B3W,X-RAY DIFFRACTION,2.4,Crystal structure of hPin1 WW domain (5-15) fused with maltose-binding protein in C2221 form,1
+5B3X,X-RAY DIFFRACTION,2.4,Crystal structure of hPin1 WW domain (5-15) fused with maltose-binding protein in P41212 form,0
+5B3Y,X-RAY DIFFRACTION,1.901,Crystal structure of hPin1 WW domain (5-23) fused with maltose-binding protein,0
+5B3Z,X-RAY DIFFRACTION,2.3,Crystal structure of hPin1 WW domain (5-39) fused with maltose-binding protein,0
+5BMY,X-RAY DIFFRACTION,2.001,Crystal structure of hPin1 WW domain (5-21) fused with maltose-binding protein,0
+5GPH,SOLUTION NMR,,Solution structure of the Pin1-PPIase (S138A) mutant,0
+5UY9,X-RAY DIFFRACTION,1.85,Prolyl isomerase Pin1 R14A mutant bound with Brd4 peptide,2
+5VTI,X-RAY DIFFRACTION,1.8,"Structure of Pin1 WW Domain Sequence 3 with [R,R]-ACPC Loop Substitution",1
+5VTJ,X-RAY DIFFRACTION,1.5,"Structure of Pin1 WW Domain Sequence 1 Substituted with [S,S]ACPC",1
+5VTK,X-RAY DIFFRACTION,1.99,Structure of Pin1 WW Domain Variant 1 with beta3-Ser Loop Substitution,1
+6DUN,X-RAY DIFFRACTION,1.59,Crystal Structure Analysis of PIN1,1
+3TC5,X-RAY DIFFRACTION,1.4,Selective targeting of disease-relevant protein binding domains by O-phosphorylated natural product derivatives,2
+6O33,X-RAY DIFFRACTION,1.74,Crystal Structure Analysis of PIN1,1
+6O34,X-RAY DIFFRACTION,1.57,Crystal Structure Analysis of PIN1,3
+6SVC,SOLUTION NMR,,Protein allostery of the WW domain at atomic resolution: apo structure,0
+6SVE,SOLUTION NMR,,Protein allostery of the WW domain at atomic resolution: pCdc25C bound structure,0
+6SVH,SOLUTION NMR,,Protein allostery of the WW domain at atomic resolution: FFpSPR bound structure,0
+6VAJ,X-RAY DIFFRACTION,1.42,Crystal Structure Analysis of human PIN1,3
+7AOG,X-RAY DIFFRACTION,1.5,14-3-3 sigma in complex with Pin1 binding site pS72,2
+7AXN,X-RAY DIFFRACTION,1.4,14-3-3 sigma in complex with Pin1 binding site pS72 and covalently bound TCF521-026,3
+7AYF,X-RAY DIFFRACTION,1.752,14-3-3 sigma with Pin1 binding site pS72 and covalently bound TCF521-110,2
+7AZ1,X-RAY DIFFRACTION,1.15,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1013,3
+7AZ2,X-RAY DIFFRACTION,1.081,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1014,3
+7BDP,X-RAY DIFFRACTION,1.75,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1017,2
+7BDT,X-RAY DIFFRACTION,1.75,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1009,2
+7BDY,X-RAY DIFFRACTION,1.801,14-3-3 sigma with Pin1 binding site pS72 and covalently bound PC2068B,4
+7BFW,X-RAY DIFFRACTION,1.8,14-3-3 sigma with Pin1 binding site pS72 and covalently bound PC2068A,3
+7BG3,X-RAY DIFFRACTION,1.4,14-3-3 sigma with Pin1 binding site pS72 and covalently bound PC2046,3
+7BGQ,X-RAY DIFFRACTION,1.75,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1019,3
+7BGR,X-RAY DIFFRACTION,1.8,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1016,3
+7BGV,X-RAY DIFFRACTION,1.683,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1012,4
+7BGW,X-RAY DIFFRACTION,1.9,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1011,4
+7EFJ,X-RAY DIFFRACTION,1.992,Crystal Structure Analysis of human PIN1,2
+7EFX,X-RAY DIFFRACTION,2.41,Crystal Structure of human PIN1 complexed with covalent inhibitor,1
+7EKV,X-RAY DIFFRACTION,1.95,Crystal Structure of human Pin1 complexed with a covalent inhibitor,2
+7F0M,X-RAY DIFFRACTION,1.9,Crystal Structure of human Pin1 complexed with a potent covalent inhibitor,2
+7NIF,X-RAY DIFFRACTION,1.71,14-3-3 sigma with Pin1 binding site pS72 and covalently bound TCF521-011,3
+7NIG,X-RAY DIFFRACTION,1.9,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1008,3
+7NJ6,X-RAY DIFFRACTION,1.59,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1005,2
+7NJ8,X-RAY DIFFRACTION,1.8,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1007,3
+7NJA,X-RAY DIFFRACTION,1.75,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1006,2
+7NRK,X-RAY DIFFRACTION,1.75,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1002F1,4
+7NRL,X-RAY DIFFRACTION,1.8,14-3-3 sigma with Pin1 binding site pS72 and covalently bound LvD1032,4
+7OQ9,X-RAY DIFFRACTION,1.8,"Ternary complex of 14-3-3 sigma, Pin1pS72 phosphopeptide, and WQ136",2
+7OQA,X-RAY DIFFRACTION,1.8,"Ternary complex of 14-3-3 sigma, Pin1pS72 phosphopeptide, and WQ162",2
+7SA5,SOLUTION NMR,,Two-state solution NMR structure of Apo Pin1,0
+7SUQ,SOLUTION NMR,,Two-state solution NMR structure of Pin1 bound to peptide FFpSPR,0
+7SUR,SOLUTION NMR,,Two-state solution NMR structure of Pin1 bound to peptide pCDC25c,0
+8C2G,X-RAY DIFFRACTION,1.6,14-3-3 sigma with Pin1 binding site pS72 and covalently bound CV1040,2
+8C3C,X-RAY DIFFRACTION,1.6,14-3-3 sigma with Pin1 binding site pS72 and bound Fusicoccin A,2
+8SG2,SOLUTION NMR,,BIVALENT INTERACTIONS OF PIN1 WITH THE C-TERMINAL TAIL OF PKC,0
+8VJD,X-RAY DIFFRACTION,1.57,Human R14A Pin1 covalently bound to inhibitor 158F10 in P21 21 21 space group,2
+8VJE,X-RAY DIFFRACTION,1.7,Human R14A Pin1 covalently bound to inhibitor 158F10,3
+8VJF,X-RAY DIFFRACTION,1.7,Human R14A Pin1 covalently bound to inhibitor 158D9,3
+8VJG,X-RAY DIFFRACTION,1.58,Human R14A Pin1 covalently bound to inhibitor 164A10,4
+8VZ3,X-RAY DIFFRACTION,1.65,Structure of human PIN1 covalently derivatized with SuFEx compound,2
+8VZ5,X-RAY DIFFRACTION,1.95,Structure of human PIN1 covalently derivatized with SuFEx compound,3
+8W11,X-RAY DIFFRACTION,2.2,Structure of human PIN1 covalently derivatized with SuFEx compound,3
+9INN,X-RAY DIFFRACTION,2.08,Human Pin1 (Peptidyl-prolyl cis-trans isomerase) catalytic domain complexed with a covalent inhibitor,1
+9INO,X-RAY DIFFRACTION,2.13,Human Pin1 (Peptidyl-prolyl cis-trans isomerase) catalytic domain in complex with a covalent inhibitor,1
+9INP,X-RAY DIFFRACTION,2.57,Human Pin1 (Peptidyl-prolyl cis-trans isomerase) catalytic domain in complex with a covalent inhibitor,2
+9INQ,X-RAY DIFFRACTION,2.17,Crystal Structure of human Pin1 catalytic domain in complex with a covalent inhibitor,2
+9INR,X-RAY DIFFRACTION,1.93,Crystal structure of PIN1 in complex with inhibitor C3,3
+9IT1,X-RAY DIFFRACTION,2.0,Crystal structure of Pin1 using laue diffraction,1
+9JF6,X-RAY DIFFRACTION,2.96,Crystal Structure of human Pin1 in complex with a covalent inhibitor,2
+9JJS,X-RAY DIFFRACTION,1.52,Crystal Structure of human Pin1 catalytic domain in complex with a covalent inhibitor,1
+9JJZ,X-RAY DIFFRACTION,1.61,Crystal Structure of human Pin1 catalytic domain in complex with a covalent inhibitor,1
+9JYO,X-RAY DIFFRACTION,1.6,Crystal structure of the Pin1 and fragment 2 complex.,4
+9JYP,X-RAY DIFFRACTION,1.6,Crystal structure of the PIN1 and fragment 3 complex,4
+9JYR,X-RAY DIFFRACTION,1.65,Crystal structure of the PIN1 and fragment 4 complex,3
+9JYS,X-RAY DIFFRACTION,1.75,Crystal structure of the PIN1 and fragment 5 complex.,3
+9JYT,X-RAY DIFFRACTION,1.85,Crystal structure of the PIN1 and fragment 1 complex.,4
+9JYV,X-RAY DIFFRACTION,1.8,Crystal structure of the PIN1 and fragment 6 complex.,3
+9JZ2,X-RAY DIFFRACTION,1.55,Crystal structure of the PIN1 and fragment 7 complex.,4
+9JZ3,X-RAY DIFFRACTION,1.98,Crystal structure of the PIN1 and fragment 8 complex.,4
+9JZ4,X-RAY DIFFRACTION,1.82,Crystal structure of the PIN1 and fragment 9 complex.,3
+9JZ6,X-RAY DIFFRACTION,1.65,Crystal structure of the PIN1 and fragment 11 complex.,3
+9JZG,X-RAY DIFFRACTION,1.76,Crystal structure of the PIN1 and fragment 12 complex.,3
+9JZS,X-RAY DIFFRACTION,1.91,Crystal structure of the PIN1 and fragment 13 complex.,3
+9JZU,X-RAY DIFFRACTION,1.68,Crystal structure of the PIN1 and fragment 14 complex.,3
+9JZV,X-RAY DIFFRACTION,1.9,Crystal structure of the PIN1 and fragment 15 complex.,4
+9KE5,X-RAY DIFFRACTION,2.05,Crystal structure of the PIN1 and fragment 16 complex.,3
+9KE7,X-RAY DIFFRACTION,1.68,Crystal structure of the PIN1 and fragment 23 complex.,3
+9KE9,X-RAY DIFFRACTION,2.25,Crystal structure of the PIN1 and fragment 22 complex.,3
+9KEB,X-RAY DIFFRACTION,1.65,Crystal structure of the PIN1 and fragment 24 complex.,3
+9KEC,X-RAY DIFFRACTION,1.68,Crystal structure of the PIN1 and fragment 25 complex.,3
+9KEL,X-RAY DIFFRACTION,1.96,Crystal structure of the PIN1 and fragment 26 complex.,3
+9KEQ,X-RAY DIFFRACTION,1.53,Crystal structure of the PIN1 and fragment 27 complex.,3
+9KES,X-RAY DIFFRACTION,1.62,Crystal structure of the PIN1 and fragment 28 complex.,3
+9KEW,X-RAY DIFFRACTION,1.6,Crystal structure of the PIN1 and fragment 29 complex.,3
+9KEY,X-RAY DIFFRACTION,2.49,Crystal structure of the PIN1 and fragment 30 complex.,3
+9JFH,X-RAY DIFFRACTION,2.56,Crystal Structure of human Pin1 catalytic domain in complex with a covalent inhibitor,2
+9KEZ,X-RAY DIFFRACTION,1.95,Crystal structure of the PIN1 and fragment 31 complex.,3
+9KF0,X-RAY DIFFRACTION,1.82,Crystal structure of the PIN1 and fragment 32 complex.,3
+9KFC,X-RAY DIFFRACTION,1.56,Crystal structure of the PIN1 and fragment 40 complex.,3
+9KFH,X-RAY DIFFRACTION,1.59,Crystal structure of the PIN1 and fragment 52 complex,3
+9KFZ,X-RAY DIFFRACTION,1.43,Crystal structure of the PIN1 and fragment 59 complex,3
+9KG9,X-RAY DIFFRACTION,1.55,Crystal structure of the PIN1 and fragment 18 complex.,3
+9KGO,X-RAY DIFFRACTION,1.62,Crystal structure of the PIN1 and fragment 19 complex.,3
+9KX1,X-RAY DIFFRACTION,1.7,Crystal structure of the PIN1 and fragment 17 complex.,3
+9KX7,X-RAY DIFFRACTION,1.53,Crystal structure of the PIN1 and fragment 34 complex.,3
+9KX9,X-RAY DIFFRACTION,1.62,Crystal structure of the PIN1 and fragment 35 complex.,3
+9KXC,X-RAY DIFFRACTION,1.53,Crystal structure of the PIN1 and fragment 36 complex.,3
+9KXD,X-RAY DIFFRACTION,1.6,Crystal structure of the PIN1 and fragment 37 complex.,4
+9KXF,X-RAY DIFFRACTION,1.71,Crystal structure of the PIN1 and fragment 39 complex.,3
+9KXG,X-RAY DIFFRACTION,1.58,Crystal structure of the PIN1 and fragment 41 complex.,4
+9KXH,X-RAY DIFFRACTION,1.68,Crystal structure of the PIN1 and fragment 42 complex,3
+9KXI,X-RAY DIFFRACTION,1.77,Crystal structure of the PIN1 and fragment 31 complex.,3
+9KXJ,X-RAY DIFFRACTION,1.57,Crystal structure of the PIN1 and fragment 53 complex,3
+9KXK,X-RAY DIFFRACTION,1.96,Crystal structure of the PIN1 and fragment 54 complex,3
+9KXL,X-RAY DIFFRACTION,1.7,Crystal structure of the PIN1 and fragment 56 complex.,3
+9KXM,X-RAY DIFFRACTION,1.64,Crystal structure of the PIN1 and fragment 57 complex.,3
+9KXN,X-RAY DIFFRACTION,1.67,Crystal structure of the PIN1 and fragment 58 complex.,4
+9KXO,X-RAY DIFFRACTION,1.75,Crystal structure of the PIN1 and fragment 21 complex.,3
+9KXP,X-RAY DIFFRACTION,1.81,Crystal structure of the PIN1 and fragment 33 complex.,3
+9KXQ,X-RAY DIFFRACTION,1.69,Crystal structure of the PIN1 and fragment 55 complex.,3
+9V6G,X-RAY DIFFRACTION,2.0,Human Pin1 (Peptidyl-prolyl cis-trans isomerase) catalytic domain in complex with a covalent inhibitor,2
+9V6I,X-RAY DIFFRACTION,2.46,Human Pin1 (Peptidyl-prolyl cis-trans isomerase) catalytic domain in complex with a covalent inhibitor,2
+9V6P,X-RAY DIFFRACTION,1.99,Human Pin1 (Peptidyl-prolyl cis-trans isomerase) catalytic domain in complex with a covalent inhibitor,2
+9V92,X-RAY DIFFRACTION,1.97,Crystal structure of the Pin1 and Frag61 complex,3
+9V6W,X-RAY DIFFRACTION,2.1,Human Pin1 (Peptidyl-prolyl cis-trans isomerase) catalytic domain in complex with a covalent inhibitor,2
+9KXE,X-RAY DIFFRACTION,1.61,Crystal structure of the PIN1 and fragment 38 complex.,3
