@@ -196,7 +196,7 @@ other users are on this box; cut back if it is busy.
 `explicit_rmsd_replicate_sd_x`/`_y` and no canonical column, because
 `merge_gromacs_results.py` drops a hand-maintained column list that omits the
 aggregates it builds. The fix is written out in
-`outputs/session_state_2026-07-31.md`; the script is **untouched**, so the tree
+`docs/session_state_2026-07-31.md`; the script is **untouched**, so the tree
 is consistent.
 
 ---

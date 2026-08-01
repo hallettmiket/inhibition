@@ -80,6 +80,15 @@ Data lives outside git, under the governed roots:
 - `/data/lab_vm/append_only/inhibition/<exp>/` — derived, large,
   integer-versioned: frontiers, poses, trajectories, `Di.parquet`,
   `Di_top10.csv`.
+- `/data/lab_vm/append_only/inhibition/00_outputs/<agent>/<topic>/` — analysis
+  artefacts that belong to no single experiment: benchmark tables, retrosynthesis
+  search trees, rendered poses, reading lists. Resolved by
+  [`shared/outputs.py`](shared/outputs.py), which versions every write and
+  resolves every read to the newest — the append-only tree needs both.
+
+**Nothing derived goes in the repo.** There was an `outputs/` directory holding
+1.1 MB of gzipped search trees and rendered pose HTML; it moved to `00_outputs/`
+and is now `.gitignore`d. `data/` is for very small in-repo files only.
 
 ## Reading the results
 

@@ -4,8 +4,8 @@ Purpose: Symmetry-corrected RMSD between each docked pose and its crystal
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-31
 Input: redock_cases_1.csv + redock_docking_1.csv + the pose PDBQTs
-Output: outputs/blacksmith/redock_pin1/redock_rmsd_1.csv
-        outputs/blacksmith/redock_pin1/redock_summary_1.json
+Output: 00_outputs/blacksmith/redock_pin1/redock_rmsd_<N>.csv
+        00_outputs/blacksmith/redock_pin1/redock_summary_<N>.json
 
 THE RMSD FUNCTION IS `CalcRMS`, NOT `GetBestRMS`, AND THE DIFFERENCE DECIDES
 THE RESULT. Both are symmetry-corrected, but `GetBestRMS` SUPERPOSES the probe
@@ -53,7 +53,11 @@ sys.path.insert(0, str(REPO))
 
 log = logging.getLogger("redock-rmsd")
 
-OUT_DIR = REPO / "outputs" / "blacksmith" / "redock_pin1"
+# Analysis outputs live under the GOVERNED root, not in the repo
+# (rules/data-storage.md). See shared/outputs.py for why, and for the
+# versioned-write / resolve-latest policy the append-only tree needs.
+OUT = sout.Topic("blacksmith", "redock_pin1")
+OUT_DIR = OUT.dir
 OBABEL = "/data/lab_vm/envs/dwi_cheminf/bin/obabel"
 
 # The standard redocking success criterion (Astex/PoseBusters convention).
@@ -235,9 +239,9 @@ def _wilson(k: int, n: int) -> tuple[float, float]:
 def main() -> None:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
-    cases = pd.read_csv(OUT_DIR / "redock_cases_1.csv")
+    cases = pd.read_csv(OUT.latest("redock_cases", ".csv"))
     cases = cases[cases.status == "case"]
-    dock = pd.read_csv(OUT_DIR / "redock_docking_1.csv")
+    dock = pd.read_csv(OUT.latest("redock_docking", ".csv"))
     df = cases.merge(dock, on="case_id", how="left")
 
     rows = []
@@ -272,7 +276,7 @@ def main() -> None:
         rows.append(rec)
 
     out = pd.DataFrame(rows)
-    out.to_csv(OUT_DIR / "redock_rmsd_1.csv", index=False)
+    out.to_csv(OUT.write("redock_rmsd", ".csv"), index=False)
 
     strata = []
     for arm, col in (("self", "self_rmsd_a"), ("cross", "cross_rmsd_a")):
@@ -295,7 +299,7 @@ def main() -> None:
             lo, hi = _wilson(int(r.n_success_2A), int(r.n))
             summary.loc[r.Index, "ci95_low"] = lo
             summary.loc[r.Index, "ci95_high"] = hi
-    summary.to_csv(OUT_DIR / "redock_summary_1.csv", index=False)
+    summary.to_csv(OUT.write("redock_summary", ".csv"), index=False)
 
     payload = {
         "generated": pd.Timestamp.utcnow().isoformat(),
@@ -311,7 +315,10 @@ def main() -> None:
                 "cross_rmsd_error", pd.Series(dtype=object)).notna().sum()),
         },
     }
-    (OUT_DIR / "redock_summary_1.json").write_text(json.dumps(payload, indent=2))
+    # Bound once: the second write below is the SAME artefact with the
+    # cross-check folded in, not a second result.
+    summary_json = OUT.write("redock_summary", ".json")
+    summary_json.write_text(json.dumps(payload, indent=2))
 
     for arm in ("self", "cross"):
         a, b = out.get(f"{arm}_rmsd_a"), out.get(f"{arm}_rmsd_calcrms_check")
@@ -324,7 +331,7 @@ def main() -> None:
                     "max_abs_diff_a": round(dmax, 4)}
                 log.info("[%s] independent CalcRMS cross-check on %d/%d cases: "
                          "max |diff| = %.4f A", arm, int(ok.sum()), len(out), dmax)
-    (OUT_DIR / "redock_summary_1.json").write_text(json.dumps(payload, indent=2))
+    summary_json.write_text(json.dumps(payload, indent=2))
 
     log.info("\n%s", summary.to_string(index=False))
     for col in ("self_rmsd_error", "cross_rmsd_error"):

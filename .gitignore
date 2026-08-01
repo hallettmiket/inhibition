@@ -60,3 +60,11 @@ env/
 
 # --- mkdocs build output (regenerate with `mkdocs build`) ---
 site/
+
+# --- analysis artefacts (rules/data-storage.md) ---
+# Derived outputs belong under the governed append-only root, never in git.
+# shared/outputs.py resolves them to
+# /data/lab_vm/append_only/inhibition/00_outputs/<agent>/<topic>/.
+# Kept as a backstop: this directory held 1.1 MB of gzipped search trees and
+# rendered pose HTML before the move.
+outputs/

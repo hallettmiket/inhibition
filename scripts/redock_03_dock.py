@@ -5,7 +5,7 @@ Purpose: Run both redocking arms for the Pin1 benchmark under the EXACT
          (B) cross-docking -- the same ligands into 6VAJ with box_expanded
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-31
-Input: outputs/blacksmith/redock_pin1/redock_cases_1.csv
+Input: 00_outputs/blacksmith/redock_pin1/redock_cases_<latest>.csv
 Output: append_only/inhibition/05_redock_benchmark/dock_1/{self,cross}/...
 
 PROTOCOL PARITY IS THE ENTIRE POINT. Every setting comes from
@@ -47,11 +47,16 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import compute                              # noqa: E402
+from shared import outputs as sout           # noqa: E402
 from shared import noncovalent_dock_run as ndr          # noqa: E402
 
 log = logging.getLogger("redock-dock")
 
-OUT_DIR = REPO / "outputs" / "blacksmith" / "redock_pin1"
+# Analysis outputs live under the GOVERNED root, not in the repo
+# (rules/data-storage.md). See shared/outputs.py for why, and for the
+# versioned-write / resolve-latest policy the append-only tree needs.
+OUT = sout.Topic("blacksmith", "redock_pin1")
+OUT_DIR = OUT.dir
 WORK = Path("/data/lab_vm/append_only/inhibition/05_redock_benchmark/dock_1")
 
 
@@ -177,7 +182,7 @@ def main() -> None:
     os.nice(compute.NICE)
     gpus = [int(g) for g in args.gpus.split(",")]
 
-    df = pd.read_csv(OUT_DIR / "redock_cases_1.csv")
+    df = pd.read_csv(OUT.latest("redock_cases", ".csv"))
     cases = df[df.status == "case"].copy()
     if args.limit:
         cases = cases.head(args.limit)
@@ -198,9 +203,9 @@ def main() -> None:
     if args.arm in ("self", "both"):
         out = out.merge(self_dock(ready, ligand_dir, gpus), on="case_id", how="left")
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out.to_csv(OUT_DIR / "redock_docking_1.csv", index=False)
-    log.info("wrote %s", OUT_DIR / "redock_docking_1.csv")
+    dest = OUT.write("redock_docking", ".csv")
+    out.to_csv(dest, index=False)
+    log.info("wrote %s", dest)
 
 
 if __name__ == "__main__":

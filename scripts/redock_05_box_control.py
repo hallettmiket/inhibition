@@ -4,8 +4,8 @@ Purpose: Control for the redocking benchmark -- repeat SELF-docking with a
          from "the engine cannot dock this target's chemistry".
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-31
-Input: redock_cases_1.csv
-Output: outputs/blacksmith/redock_pin1/redock_boxcontrol_1.csv
+Input: redock_cases_<latest>.csv
+Output: 00_outputs/blacksmith/redock_pin1/redock_boxcontrol_<N>.csv
 
 WHY THIS CONTROL EXISTS. The benchmark proper runs at the PRODUCTION box --
 `box_expanded.json`, 26 A on a side (D0002) -- because a benchmark under
@@ -47,6 +47,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import compute                              # noqa: E402
+from shared import outputs as sout           # noqa: E402
 from shared import noncovalent_dock_run as ndr          # noqa: E402
 
 sys.path.insert(0, str(REPO / "scripts"))
@@ -62,7 +63,11 @@ import redock_03_dock as d3                             # noqa: E402
 RDLogger.DisableLog("rdApp.*")
 log = logging.getLogger("redock-boxctl")
 
-OUT_DIR = REPO / "outputs" / "blacksmith" / "redock_pin1"
+# Analysis outputs live under the GOVERNED root, not in the repo
+# (rules/data-storage.md). See shared/outputs.py for why, and for the
+# versioned-write / resolve-latest policy the append-only tree needs.
+OUT = sout.Topic("blacksmith", "redock_pin1")
+OUT_DIR = OUT.dir
 WORK = Path("/data/lab_vm/append_only/inhibition/05_redock_benchmark/boxctl_1")
 
 PAD_A = 5.0          # padding beyond the ligand's own extent, per side
@@ -117,7 +122,7 @@ def main() -> None:
     os.nice(compute.NICE)
     gpus = [int(g) for g in args.gpus.split(",")]
 
-    cases = pd.read_csv(OUT_DIR / "redock_cases_1.csv")
+    cases = pd.read_csv(OUT.latest("redock_cases", ".csv"))
     cases = cases[cases.status == "case"].copy()
     ligand_dir = Path("/data/lab_vm/append_only/inhibition/05_redock_benchmark/"
                       f"dock_1/ligands_{ndr.LIGAND_PREP_TAG}")
@@ -172,7 +177,7 @@ def main() -> None:
             rec["tight_error"] = str(exc)[:160]
         rows.append(rec)
     out = pd.DataFrame(rows)
-    out.to_csv(OUT_DIR / "redock_boxcontrol_1.csv", index=False)
+    out.to_csv(OUT.write("redock_boxcontrol", ".csv"), index=False)
 
     for tier in ("all", "drug_like", "fragment"):
         a = out if tier == "all" else out[out.tier == tier]

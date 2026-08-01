@@ -4,9 +4,9 @@ Purpose: Consolidate the Pin1 redocking benchmark into one table + one JSON:
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-31
 Input: redock_cases_1.csv, redock_rmsd_1.csv, redock_boxcontrol_1.csv, poses
-Output: outputs/blacksmith/redock_pin1/redock_benchmark_final_1.csv
-        outputs/blacksmith/redock_pin1/redock_benchmark_final_1.json
-        outputs/blacksmith/redock_pin1/redock_per_case_1.csv
+Output: 00_outputs/blacksmith/redock_pin1/redock_benchmark_final_<N>.csv
+        00_outputs/blacksmith/redock_pin1/redock_benchmark_final_<N>.json
+        00_outputs/blacksmith/redock_pin1/redock_per_case_<N>.csv
 
 TOP-1 IS THE PROTOCOL'S ANSWER; BEST-OF-9 IS WHAT IT COULD HAVE SAID. Vina
 returns nine ranked modes and the pipeline consumes mode 1. Reporting both
@@ -46,7 +46,11 @@ _spec.loader.exec_module(r4)
 
 RDLogger.DisableLog("rdApp.*")
 log = logging.getLogger("redock-summary")
-OUT_DIR = REPO / "outputs" / "blacksmith" / "redock_pin1"
+# Analysis outputs live under the GOVERNED root, not in the repo
+# (rules/data-storage.md). See shared/outputs.py for why, and for the
+# versioned-write / resolve-latest policy the append-only tree needs.
+OUT = sout.Topic("blacksmith", "redock_pin1")
+OUT_DIR = OUT.dir
 SUCCESS_A = 2.0
 
 
@@ -83,11 +87,11 @@ def wilson(k: int, n: int) -> tuple[float, float]:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    cases = pd.read_csv(OUT_DIR / "redock_cases_1.csv")
+    cases = pd.read_csv(OUT.latest("redock_cases", ".csv"))
     live = cases[cases.status == "case"].copy()
-    dock = pd.read_csv(OUT_DIR / "redock_docking_1.csv")
-    rmsd = pd.read_csv(OUT_DIR / "redock_rmsd_1.csv")
-    boxc = pd.read_csv(OUT_DIR / "redock_boxcontrol_1.csv")
+    dock = pd.read_csv(OUT.latest("redock_docking", ".csv"))
+    rmsd = pd.read_csv(OUT.latest("redock_rmsd", ".csv"))
+    boxc = pd.read_csv(OUT.latest("redock_boxcontrol", ".csv"))
 
     df = (live.merge(dock[["case_id", "self_pose_dir", "cross_pose_dir"]],
                      on="case_id", how="left")
@@ -114,7 +118,7 @@ def main() -> None:
                 rec[f"{arm}_bestofn_rmsd_a"] = None
         rows.append(rec)
     df = df.merge(pd.DataFrame(rows), on="case_id", how="left")
-    df.to_csv(OUT_DIR / "redock_per_case_1.csv", index=False)
+    df.to_csv(OUT.write("redock_per_case", ".csv"), index=False)
 
     arms = [
         ("A_self_dock_production_box", "self_rmsd_a", "self_bestofn_rmsd_a",
@@ -144,7 +148,7 @@ def main() -> None:
                 "bestof9_median_rmsd_a": round(float(b.median()), 2),
             })
     summary = pd.DataFrame(out)
-    summary.to_csv(OUT_DIR / "redock_benchmark_final_1.csv", index=False)
+    summary.to_csv(OUT.write("redock_benchmark_final", ".csv"), index=False)
 
     drops = cases[cases.status != "case"]
     payload = {
@@ -172,7 +176,7 @@ def main() -> None:
         },
         "results": summary.to_dict(orient="records"),
     }
-    (OUT_DIR / "redock_benchmark_final_1.json").write_text(json.dumps(payload, indent=2))
+    (OUT.write("redock_benchmark_final", ".json")).write_text(json.dumps(payload, indent=2))
 
     pd.set_option("display.width", 250)
     log.info("\n%s", summary[["arm", "tier", "n", "top1_success_2A",

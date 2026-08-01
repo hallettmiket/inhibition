@@ -3,7 +3,8 @@ Purpose: re-measure how much each arm's ranking is a molecular-size sort (D0043)
 Author: Mike Hallett (with Claude Code)
 Date: 2026-08-01
 Input: the latest D1-D4 frames, plus each T_2 seed neighbourhood
-Output: outputs/blacksmith/size_correlation/size_correlation_1.csv + a printed table
+Output: append_only/inhibition/00_outputs/blacksmith/size_correlation/
+        size_correlation_<N>.csv + a printed table
 
 WHY RE-MEASURE. D0043 established that our rankings are partly a size sort
 (Spearman rho = -0.617 for T_1, -0.479 for T_3 against heavy-atom count) and
@@ -42,10 +43,14 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import rank_shortlist as rs                      # noqa: E402
+from shared import outputs as sout           # noqa: E402
 
 DATA_ROOT = Path("/data/lab_vm/append_only/inhibition")
-OUT_DIR = REPO / "outputs" / "blacksmith" / "size_correlation"
-
+# Analysis outputs live under the GOVERNED root, not in the repo
+# (rules/data-storage.md). See shared/outputs.py for why, and for the
+# versioned-write / resolve-latest policy the append-only tree needs.
+OUT = sout.Topic("blacksmith", "size_correlation")
+OUT_DIR = OUT.dir
 SIZE_COL = "HAC"
 
 # (label, experiment, frame prefix, rank metric). The T_2 seed neighbourhoods
@@ -134,8 +139,7 @@ def main() -> None:
                      "mean_HAC": float(d[SIZE_COL].mean())})
 
     out = pd.DataFrame(rows)
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    dest = OUT_DIR / "size_correlation_1.csv"
+    dest = OUT.write("size_correlation", ".csv")
     out.to_csv(dest, index=False)
 
     print("\nSpearman rho against heavy-atom count (HAC)")

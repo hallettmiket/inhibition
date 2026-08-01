@@ -5,8 +5,8 @@ Purpose: Survey every Pin1 (UniProt Q13526) PDB entry and build the redocking
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-31
 Input: RCSB search API (exact_match on the UniProt accession) + RCSB GraphQL
-Output: outputs/blacksmith/redock_pin1/pdb_ligand_survey_1.csv
-        outputs/blacksmith/redock_pin1/pdb_entry_survey_1.csv
+Output: 00_outputs/blacksmith/redock_pin1/pdb_ligand_survey_<N>.csv
+        00_outputs/blacksmith/redock_pin1/pdb_entry_survey_<N>.csv
 
 WHY THE FILTER IS BY NAME *AND* MASS, NOT FREQUENCY. The naive "most common
 HET code" list for this target is dominated by PEG fragments, glycerol and
@@ -33,7 +33,11 @@ RDLogger.DisableLog("rdApp.*")
 
 log = logging.getLogger(__name__)
 
-OUT_DIR = Path(__file__).resolve().parent.parent / "outputs" / "blacksmith" / "redock_pin1"
+# Analysis outputs live under the GOVERNED root, not in the repo
+# (rules/data-storage.md). See shared/outputs.py for why, and for the
+# versioned-write / resolve-latest policy the append-only tree needs.
+OUT = sout.Topic("blacksmith", "redock_pin1")
+OUT_DIR = OUT.dir
 SEARCH_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
 GRAPHQL_URL = "https://data.rcsb.org/graphql"
 UNIPROT = "Q13526"
@@ -282,8 +286,8 @@ def main() -> None:
                         format="%(asctime)s %(levelname)s %(message)s")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     entry_df, lig_df = survey()
-    entry_df.to_csv(OUT_DIR / "pdb_entry_survey_1.csv", index=False)
-    lig_df.to_csv(OUT_DIR / "pdb_ligand_survey_1.csv", index=False)
+    entry_df.to_csv(OUT.write("pdb_entry_survey", ".csv"), index=False)
+    lig_df.to_csv(OUT.write("pdb_ligand_survey", ".csv"), index=False)
 
     log.info("entries: %d (%s)", len(entry_df),
              entry_df["method"].value_counts().to_dict())

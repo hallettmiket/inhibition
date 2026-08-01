@@ -4,9 +4,9 @@ Purpose: Turn the Pin1 PDB survey into redocking CASES -- per (entry, ligand)
          box, and the same reference transformed into 6VAJ's frame.
 Author: Mike Hallett (with Claude Code)
 Date: 2026-07-31
-Input: outputs/blacksmith/redock_pin1/pdb_ligand_survey_1.csv
+Input: 00_outputs/blacksmith/redock_pin1/pdb_ligand_survey_<latest>.csv
 Output: append_only/inhibition/05_redock_benchmark/cases_1/...
-        outputs/blacksmith/redock_pin1/redock_cases_1.csv (incl. every DROP)
+        00_outputs/blacksmith/redock_pin1/redock_cases_<N>.csv (incl. every DROP)
 
 RECEPTOR PREPARATION IS 6VAJ's, NOT A NEW ONE. Each case's receptor goes
 through `shared.receptor_prep`'s exact path -- strip solvent, `reduce -BUILD`,
@@ -58,10 +58,15 @@ CHEMINF_BIN = "/data/lab_vm/envs/dwi_cheminf/bin"
 os.environ["PATH"] = CHEMINF_BIN + os.pathsep + os.environ.get("PATH", "")
 
 from shared import receptor_prep as rp              # noqa: E402
+from shared import outputs as sout           # noqa: E402
 
 log = logging.getLogger("redock-cases")
 
-OUT_DIR = REPO / "outputs" / "blacksmith" / "redock_pin1"
+# Analysis outputs live under the GOVERNED root, not in the repo
+# (rules/data-storage.md). See shared/outputs.py for why, and for the
+# versioned-write / resolve-latest policy the append-only tree needs.
+OUT = sout.Topic("blacksmith", "redock_pin1")
+OUT_DIR = OUT.dir
 WORK = Path("/data/lab_vm/append_only/inhibition/05_redock_benchmark/cases_1")
 REF_6VAJ = Path("/data/lab_vm/immutable/inhibition/receptor/6VAJ_prepared.pdb")
 BOX_EXPANDED = Path("/data/lab_vm/immutable/inhibition/receptor/box_expanded.json")
@@ -408,7 +413,7 @@ def main() -> None:
     WORK.mkdir(parents=True, exist_ok=True)
     box_size = json.loads(BOX_EXPANDED.read_text())
 
-    survey = pd.read_csv(OUT_DIR / "pdb_ligand_survey_1.csv")
+    survey = pd.read_csv(OUT.latest("pdb_ligand_survey", ".csv"))
     ligands = survey[survey.classification == "ligand"].copy()
     # Every drug-like component in an entry is stripped from that entry's
     # receptor, not just the one being redocked.
@@ -602,7 +607,7 @@ def main() -> None:
         log.info("%s: %d component(s) processed", pdb_id, len(grp))
 
     df = pd.DataFrame(rows)
-    df.to_csv(OUT_DIR / "redock_cases_1.csv", index=False)
+    df.to_csv(OUT.write("redock_cases", ".csv"), index=False)
     log.info("=" * 60)
     log.info("status: %s", df["status"].value_counts().to_dict())
     if "drop_reason" in df:
