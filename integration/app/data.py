@@ -39,20 +39,74 @@ from shared import io as dio                     # noqa: E402
 
 DATA_ROOT = Path("/data/lab_vm/append_only/inhibition")
 
+# T₂ IS FIVE SEED NEIGHBOURHOODS, NOT ONE EXPERIMENT.
+#
+# The reseeding (issue #5) turned T₂ from "ATRA analogues" into "the CReM
+# neighbourhood of a known binder", run once per seed into its own experiment
+# directory. This dict was a single hardcoded `02_t2_atra_crem`, so du_xu and
+# guo_pfizer finished, ranked, and remained invisible to the GUI — not because
+# they were still computing, but because nothing here could reach them.
+#
+# RESOLVED FROM `shared.seeds`, NOT RESTATED HERE. `config/seeds.yaml` is the
+# single source of the seed -> experiment mapping, and `shared/seeds.py` says
+# in its own docstring that four copies of that lookup is four. A hardcoded
+# dict here would be the fifth, and it would go stale the moment a seed is
+# added or an experiment renamed -- the same pin-that-cannot-announce-itself
+# failure as `warhead_classes_3.csv`.
+#
+# The degree-2 sample is appended separately: it is a DERIVED run of the ATRA
+# seed into its own directory (`--experiment`), not a seed in seeds.yaml, and
+# it answers a different question (does a second edit help?).
+#: Short display labels. `seeds.yaml` names the seeds by their chemistry
+#: ("Du-Xu-naphthalenecarboxamide"), which is right for a config and far too
+#: long for a column header. The EXPERIMENT still comes from seeds.yaml — only
+#: the presentation is owned here, so a renamed directory cannot go stale.
+_T2_SHORT_LABEL = {
+    "potter_astex": "Potter-Astex",
+    "du_xu": "Du-Xu",
+    "guo_pfizer": "Guo-Pfizer",
+}
+
+
+def _t2_seeds() -> dict:
+    from shared import seeds as sd                  # noqa: PLC0415
+    out = {}
+    for key in sd.declared_for("t2"):
+        try:
+            rec = sd.resolve("t2", key, require_radius=False)
+        except Exception:  # noqa: BLE001 - a malformed seed must not kill the GUI
+            continue
+        out[key] = {"experiment": rec["experiment"],
+                    "label": _T2_SHORT_LABEL.get(key) or rec.get("name") or key}
+    out["atra_degree2"] = {"experiment": "02_t2_atra_crem_degree2",
+                           "label": "ATRA degree-2"}
+    return out
+
+
+T2_SEEDS = _t2_seeds()
+
 # Each approach, its experiment directory, its own rank metric, and the stratum
 # whose enrichment gate governs it. The metrics are NOT comparable with each
 # other — that is the whole reason integration presents rather than ranks.
+#
+# `variants` names the seed dict for an approach that runs more than one
+# neighbourhood; absent for approaches with a single experiment.
 APPROACHES = {
-    "t1": {"experiment": "01_t1_de_novo", "name": "T_1 · de novo (DiffSBDD)",
+    "t1": {"experiment": "01_t1_de_novo", "name": "T₁ · de novo (DiffSBDD)",
            "metric": "vina_affinity", "stratum": "non_covalent",
            "mechanism": "reversible", "seed": "none (seed-free)"},
-    "t2": {"experiment": "02_t2_atra_crem", "name": "T_2 · ATRA analogues (CReM)",
+    "t2": {"experiment": "02_t2_atra_crem", "name": "T₂ · CReM neighbourhood",
            "metric": "vina_affinity", "stratum": "non_covalent",
-           "mechanism": "reversible", "seed": "ATRA"},
-    "t3": {"experiment": "03_t3_reinvent", "name": "T_3 · decoration (LibInvent)",
+           # No static seed: T₂'s seed is whichever variant is active, and a
+           # literal "ATRA" here is a wrong answer waiting to be displayed --
+           # it was, under a Guo-Pfizer header. Fails to an obviously-not-a-seed
+           # string rather than to a plausible one.
+           "mechanism": "reversible", "seed": "(per variant)",
+           "variants": T2_SEEDS, "default_variant": "atra"},
+    "t3": {"experiment": "03_t3_reinvent", "name": "T₃ · decoration (LibInvent)",
            "metric": "affinity_kcal", "stratum": "covalent",
            "mechanism": "covalent Cys113", "seed": "sulfopin"},
-    "t4": {"experiment": "04_t4_combinatorial", "name": "T_4 · combinatorial",
+    "t4": {"experiment": "04_t4_combinatorial", "name": "T₄ · combinatorial",
            "metric": "affinity_kcal", "stratum": "covalent",
            "mechanism": "covalent Cys113", "seed": "sulfopin"},
 }
@@ -60,11 +114,93 @@ APPROACHES = {
 SHARED_AXES = ["MW", "cLogP", "TPSA", "QED", "SAscore", "novelty_external", "HAC"]
 
 
+# WHICH VARIANT EACH APPROACH IS CURRENTLY SHOWING.
+#
+# Module state rather than a threaded argument, deliberately. Streamlit re-runs
+# this script top to bottom on every interaction, so the sidebar sets this once
+# per run and every panel reads the same value -- threading a `seed=` parameter
+# through load_frame, shortlist, manifests, the convergence index and each
+# panel would touch far more code for the same result. The cost is that the
+# selection is global to a rerun, which is exactly the semantics wanted: the
+# app shows ONE T₂ neighbourhood at a time and says which.
+_ACTIVE_VARIANT: dict[str, str] = {}
+
+
+def variants(approach: str) -> dict:
+    """The approach's seed neighbourhoods, or {} if it has a single experiment."""
+    return APPROACHES[approach].get("variants") or {}
+
+
+def active_variant(approach: str) -> str | None:
+    """The selected seed key, or None for a single-experiment approach."""
+    v = variants(approach)
+    if not v:
+        return None
+    key = _ACTIVE_VARIANT.get(approach) or APPROACHES[approach].get("default_variant")
+    return key if key in v else next(iter(v))
+
+
+def set_variant(approach: str, key: str) -> None:
+    """Choose which seed neighbourhood the app shows for this approach."""
+    if key in variants(approach):
+        _ACTIVE_VARIANT[approach] = key
+        # The convergence index is built across whatever variants were active
+        # when it was computed, so a seed switch must invalidate it. Leaving it
+        # cached would report ATRA's neighbours under Du-Xu's name.
+        _convergence_index.cache_clear()
+
+
+def experiment_for(approach: str) -> str:
+    """The append-only directory this approach is currently reading."""
+    key = active_variant(approach)
+    if key is None:
+        return APPROACHES[approach]["experiment"]
+    return variants(approach)[key]["experiment"]
+
+
+def variant_label(approach: str) -> str | None:
+    key = active_variant(approach)
+    return variants(approach)[key]["label"] if key else None
+
+
+def display_name(approach: str) -> str:
+    """The approach's name with its active seed, for headers and selectors."""
+    label = variant_label(approach)
+    name = APPROACHES[approach]["name"]
+    return f"{name} · seed {label}" if label else name
+
+
+def variant_status(approach: str) -> list[dict]:
+    """Every variant with whether it has a docked, ranked frame yet.
+
+    A seed that is still docking must be visibly ABSENT rather than missing: a
+    selector that silently omits it reads as "this seed does not exist", which
+    is a different statement from "this seed has not finished".
+    """
+    metric = APPROACHES[approach]["metric"]
+    out = []
+    for key, v in variants(approach).items():
+        try:
+            df, path = dio.latest_frame(v["experiment"], approach)
+        except Exception:  # noqa: BLE001
+            out.append({"key": key, "label": v["label"], "ready": False,
+                        "n": 0, "frame": None, "why": "no frame written yet"})
+            continue
+        docked = int(df[metric].notna().sum()) if metric in df.columns else 0
+        ranked = "rank" in df.columns and df["rank"].notna().any()
+        out.append({"key": key, "label": v["label"],
+                    "ready": bool(docked and ranked), "n": docked,
+                    "frame": path.name, "rows": len(df),
+                    "why": "" if (docked and ranked)
+                           else ("docked, not yet ranked" if docked
+                                 else "still docking")})
+    return out
+
+
 def load_frame(approach: str) -> tuple[pd.DataFrame | None, str]:
-    """The approach's latest frame, or None with a reason."""
-    cfg = APPROACHES[approach]
+    """The approach's latest frame for its ACTIVE variant, or None with a reason."""
     try:
-        df, path = dio.latest_frame(cfg["experiment"], approach)
+        df, path = dio.latest_frame(experiment_for(approach), approach)
         return df, path.name
     except Exception as exc:  # noqa: BLE001 - a missing stage is a normal state
         return None, f"no frame: {exc}"
@@ -104,6 +240,45 @@ def shortlist(approach: str, prefer_synth: bool = True) -> pd.DataFrame:
     list this is without re-deriving it.
     """
     df, _ = load_frame(approach)
+    return _shape_shortlist(df, approach, prefer_synth)
+
+
+def load_variant_frame(approach: str, key: str) -> tuple[pd.DataFrame | None, str]:
+    """One named variant's frame, WITHOUT changing what the app is showing.
+
+    The seed comparison needs several neighbourhoods at once, which the active
+    variant deliberately cannot express. Reading them explicitly is correct;
+    flipping the global selection in a loop would leave whichever seed happened
+    to be last as the app's state.
+    """
+    v = variants(approach).get(key)
+    if v is None:
+        return None, f"no variant {key!r} for {approach}"
+    try:
+        df, path = dio.latest_frame(v["experiment"], approach)
+        return df, path.name
+    except Exception as exc:  # noqa: BLE001
+        return None, f"no frame: {exc}"
+
+
+def shortlist_variant(approach: str, key: str,
+                      prefer_synth: bool = True) -> pd.DataFrame:
+    """One named variant's shortlist, shaped exactly like `shortlist()`."""
+    df, _ = load_variant_frame(approach, key)
+    s = _shape_shortlist(df, approach, prefer_synth)
+    if len(s):
+        s["variant"] = key
+        s["variant_label"] = variants(approach)[key]["label"]
+    return s
+
+
+def _shape_shortlist(df, approach: str, prefer_synth: bool) -> pd.DataFrame:
+    """Shared shaping so the active-variant and explicit-variant paths agree.
+
+    Two code paths producing "the shortlist" is how they drift, and a drift
+    here would show one column set in the seed comparison and another in the
+    shortlist panel for the same molecules.
+    """
     if df is None:
         return pd.DataFrame()
     col = shortlist_column(df, prefer_synth)
@@ -116,7 +291,12 @@ def shortlist(approach: str, prefer_synth: bool = True) -> pd.DataFrame:
     # `rank` is kept alongside as provenance, never overwritten.
     rank_col = "rank_synth" if (col == SYNTH_COLUMN
                                 and "rank_synth" in s.columns) else "rank"
-    s["display_rank"] = s[rank_col] if rank_col in s.columns else pd.NA
+    # Cast here as well as at the source: a rank is an ordinal, and frames
+    # written before `rank_shortlist` started emitting Int64 still carry
+    # float64, which renders as `12.0`. Nullable so an unranked row stays <NA>
+    # rather than becoming 0.
+    s["display_rank"] = (pd.to_numeric(s[rank_col], errors="coerce").astype("Int64")
+                         if rank_col in s.columns else pd.NA)
     s["metric_name"] = APPROACHES[approach]["metric"]
     s["metric_value"] = s.get(APPROACHES[approach]["metric"])
     return s
@@ -171,7 +351,7 @@ def manifests(approach: str, limit: int = 40) -> list[dict]:
     commit does not fully describe the code that ran, and the outputs are
     provisional. That must not be discoverable only by reading JSON.
     """
-    d = DATA_ROOT / APPROACHES[approach]["experiment"]
+    d = DATA_ROOT / experiment_for(approach)
     out = []
     for p in sorted(d.glob("*manifest*.json"), reverse=True)[:limit]:
         try:
@@ -229,8 +409,11 @@ def open_questions() -> list[dict]:
                                   "status": "pending", "approach": "shared"})
         except Exception:  # noqa: BLE001
             pass
-    for csv, col in ((REPO / "data" / "reference" / "warhead_classes_7.csv",
-                      "structure_status"),):
+    # Resolved, not pinned: this named `warhead_classes_7.csv` while the
+    # pipeline enumerated from `_10`, so the GUI listed outstanding warhead
+    # structures from a library three versions behind the one in use.
+    from shared import warhead_library as wl          # noqa: PLC0415
+    for csv, col in ((wl.DEFAULT_LIBRARY, "structure_status"),):
         if csv.is_file():
             try:
                 t = pd.read_csv(csv)
@@ -341,7 +524,7 @@ def cross_approach_ranks(smiles: str, home: str) -> list[dict]:
         hit = entry.get("exact", {}).get(key)
         if hit is not None:
             cid, rank = hit
-            out.append({"approach": approach, "name": cfg["name"], "exact": True,
+            out.append({"approach": approach, "name": display_name(approach), "exact": True,
                         "candidate_id": cid, "rank": rank,
                         "n_ranked": entry.get("n_ranked", 0),
                         "similarity": 1.0})
@@ -351,7 +534,7 @@ def cross_approach_ranks(smiles: str, home: str) -> list[dict]:
             sim = DataStructs.TanimotoSimilarity(fp, other)
             if sim > best_sim:
                 best_sim, best = sim, (cid, rank)
-        out.append({"approach": approach, "name": cfg["name"], "exact": False,
+        out.append({"approach": approach, "name": display_name(approach), "exact": False,
                     "candidate_id": best[0] if best else None,
                     "rank": best[1] if best else None,
                     "n_ranked": entry.get("n_ranked", 0),

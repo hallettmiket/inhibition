@@ -31,6 +31,64 @@ from shared import reference_set as rs
 
 STEMS = ["pin1_reference_binders", "pin1_covalent_cys113_anchors"]
 
+# WHERE TO SCAN. The first version of the stale-pin guard looked only at
+# `shared/*.py` and `scripts/*.py`, and matched only the stem
+# `pin1_reference_binders`. Both limits were invisible until #9 found three
+# stale `warhead_classes` pins by hand -- in `config/`, `approaches/` and
+# `integration/`, none of which the guard could see, naming a stem it did not
+# check. A guard that cannot reach the code it is guarding is the "scoped out"
+# disguise in `docs/how_this_project_breaks.md`, and it is why this now
+# discovers its stems from the directory and walks the whole tree.
+SCAN_DIRS = ("shared", "scripts", "approaches", "integration", "tests", "config")
+
+# A builder necessarily names its own output. Keyed on filename so that moving
+# the file does not silently carry the exemption somewhere it is not warranted.
+EXEMPT_FILES = {"build_reference_binders_4.py"}
+
+
+def _newest_reference_versions() -> dict[str, int]:
+    """Every versioned stem under data/reference/, mapped to its highest N.
+
+    Discovered from the directory rather than listed here, for the same reason
+    `latest_reference()` globs: a hand-maintained list of stems goes stale in
+    exactly the way this module exists to catch.
+    """
+    newest: dict[str, int] = {}
+    for p in rs._REF_DIR.glob("*_*.csv"):
+        stem, _, tail = p.stem.rpartition("_")
+        if stem and tail.isdigit():
+            newest[stem] = max(newest.get(stem, 0), int(tail))
+    return newest
+
+
+def _executable_strings(path):
+    """(lineno, text) for literals code can actually evaluate.
+
+    Python is walked by AST so docstrings are exempt -- prose legitimately
+    cites old versions, and this module's own docstring cites `_1` and `_7`.
+    YAML has no docstrings, so comments are stripped instead.
+    """
+    import ast
+
+    if path.suffix == ".py":
+        tree = ast.parse(path.read_text())
+        docstrings = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.FunctionDef,
+                                 ast.AsyncFunctionDef, ast.ClassDef)):
+                body = getattr(node, "body", None)
+                if (body and isinstance(body[0], ast.Expr)
+                        and isinstance(body[0].value, ast.Constant)
+                        and isinstance(body[0].value.value, str)):
+                    docstrings.add(id(body[0].value))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and id(node) not in docstrings):
+                yield node.lineno, node.value
+    else:
+        for i, line in enumerate(path.read_text().splitlines(), 1):
+            yield i, line.split("#", 1)[0]
+
 
 @pytest.mark.parametrize("stem", STEMS)
 def test_resolver_picks_the_highest_version(stem):
@@ -53,51 +111,42 @@ def test_defaults_are_the_resolved_latest():
         "pin1_covalent_cys113_anchors")
 
 
-def test_no_module_hardcodes_an_older_reference_version():
-    """No EXECUTABLE literal `pin1_reference_binders_<N>.csv` pin may be stale.
+def test_no_source_file_hardcodes_an_older_reference_version():
+    """No evaluated literal may name a superseded `data/reference/` file.
 
-    Scanned by AST rather than by grep, so docstrings and comments are exempt.
-    Prose legitimately names old versions -- this module's own docstring cites
-    `_1` and `_7` as examples of the failure -- and a line-based scan flags all
-    of it. What matters is a string CONSTANT that code evaluates, because only
-    that can actually be opened.
+    Covers EVERY versioned stem in `data/reference/` -- not just
+    `pin1_reference_binders` -- across Python and YAML in all of SCAN_DIRS.
+    Python docstrings and YAML comments are exempt: prose legitimately names
+    old versions, and only a literal code evaluates can actually be opened.
 
-    A literal naming the newest version is still a latent bug (it goes stale
-    the moment the next version lands), but it is not wrong today, so this
-    fails only on genuinely outdated ones.
+    A literal naming the newest version is still latent (it goes stale the
+    moment the next version lands), but it is not wrong today, so this fails
+    only on genuinely outdated ones.
     """
-    import ast
     import re
     from pathlib import Path
 
     repo = Path(rs._REPO_ROOT)
-    newest = rs.latest_reference("pin1_reference_binders").name
-    pat = re.compile(r"pin1_reference_binders_(\d+)\.csv")
+    newest = _newest_reference_versions()
+    assert newest, "no versioned reference files found; the guard would be vacuous"
+    pat = re.compile(r"([a-z0-9_]+?)_(\d+)\.csv")
+
     offenders = []
-    for path in list(repo.glob("shared/*.py")) + list(repo.glob("scripts/*.py")):
-        if path.name == "build_reference_binders_4.py":
-            continue  # the builder necessarily names its own output
-        tree = ast.parse(path.read_text())
-        docstrings = set()
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Module, ast.FunctionDef,
-                                 ast.AsyncFunctionDef, ast.ClassDef)):
-                body = getattr(node, "body", None)
-                if (body and isinstance(body[0], ast.Expr)
-                        and isinstance(body[0].value, ast.Constant)
-                        and isinstance(body[0].value.value, str)):
-                    docstrings.add(id(body[0].value))
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Constant)
-                    and isinstance(node.value, str)
-                    and id(node) not in docstrings):
-                m = pat.search(node.value)
-                if m and m.group(0) != newest:
-                    offenders.append(
-                        f"{path.relative_to(repo)}:{node.lineno} -> {m.group(0)}")
+    for d in SCAN_DIRS:
+        for path in sorted((repo / d).rglob("*")):
+            if (path.suffix not in {".py", ".yaml", ".yml"}
+                    or path.name in EXEMPT_FILES):
+                continue
+            for lineno, text in _executable_strings(path):
+                for stem, ver in pat.findall(text):
+                    if stem in newest and int(ver) < newest[stem]:
+                        offenders.append(
+                            f"{path.relative_to(repo)}:{lineno} -> "
+                            f"{stem}_{ver}.csv (newest is _{newest[stem]})")
     assert not offenders, (
-        "executable hard-coded reference version(s) older than "
-        f"{newest}: {offenders}. Use reference_set.latest_reference().")
+        "hard-coded reference version(s) superseded on disk:\n  "
+        + "\n  ".join(offenders)
+        + "\nUse reference_set.latest_reference() / warhead_library's default.")
 
 
 def test_the_master_set_carries_the_structured_potency_columns():

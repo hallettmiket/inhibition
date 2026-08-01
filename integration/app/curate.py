@@ -231,6 +231,14 @@ PANEL_SCOPE: tuple[Scope, ...] = (
     Scope("Shortlists", True,
           "The candidate lists themselves. This is where the constraints are "
           "typed and the only place they used to be honoured."),
+    Scope("T₂ seed comparison", False,
+          "This panel asks whether the SEED determines what the arm produces, "
+          "which is a property of the generated population. A curation filter "
+          "says which molecules the chemist would consider, and applying it "
+          "here would quietly turn the question into 'which seed best suits my "
+          "current constraint' — a different and much weaker claim. The "
+          "per-seed medians and pool sizes must describe what CReM actually "
+          "generated, for the same reason a rank denominator must."),
     Scope("Candidate dossier", True,
           "A view of one shortlisted candidate. A molecule the chemist has "
           "ruled out should not be offered for inspection as though it were "

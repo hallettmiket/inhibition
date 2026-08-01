@@ -29,17 +29,26 @@ target:
 
 # ---------------------------------------------------------------------------
 # Frozen reference set (adversary controls B4 + B5).
-# Hash-pinned: pipelines fail loudly on drift rather than silently using a
-# different set than the one a result was produced under.
+#
+# STEMS, NOT VERSIONS. These keys name the reference STEM; the actual file is
+# resolved at load time by `reference_set.latest_reference()` (and, for the
+# warhead library, `warhead_library.DEFAULT_LIBRARY`), which globs for the
+# highest version on disk. Nothing reads the values below as paths.
+#
+# They used to be pinned filenames -- `pin1_reference_binders_2.csv` and
+# `warhead_classes_2.csv` -- while the code loaded `_4` and `_10`. Because no
+# code read them, nothing ever complained, and anyone consulting this file to
+# learn which reference set was in force got an answer two and eight versions
+# out of date. Naming the stem is what makes this block unable to go stale.
 # ---------------------------------------------------------------------------
 reference_set:
-  master: data/reference/pin1_reference_binders_2.csv
-  covalent_anchors: data/reference/pin1_covalent_cys113_anchors_2.csv
-  warhead_classes: data/reference/warhead_classes_2.csv
+  master: data/reference/pin1_reference_binders_<latest>.csv
+  covalent_anchors: data/reference/pin1_covalent_cys113_anchors_<latest>.csv
+  warhead_classes: data/reference/warhead_classes_<latest>.csv
   # Measured second-order rate constants for the covalent anchors. Preferred
   # over computed LUMO for bounding the reactivity window where available —
   # these are wet-lab numbers, not predictions.
-  reactivity_kinetics: data/reference/pin1_reactivity_kinetics_1.csv
+  reactivity_kinetics: data/reference/pin1_reactivity_kinetics_<latest>.csv
   provenance: data/reference/.provenance.md
   retired_versions: data/ready_to_delete.md
   # Set by scripts/freeze_reference.sh once the introducing commit is tagged.

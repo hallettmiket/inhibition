@@ -278,7 +278,11 @@ def main() -> None:
         params={"allow_statuses": list(allow), "library_size": len(df),
                 "n_warhead_classes": int(df["warhead_class"].nunique()),
                 "n_rgroups": int(df["rgroup_id"].nunique())},
-        inputs={"warhead_library": REPO / "data/reference/warhead_classes_3.csv",
+        # The manifest must name the library this run ACTUALLY enumerated from.
+        # This hardcoded `warhead_classes_3.csv` while the enumeration ran off
+        # `wl.DEFAULT_LIBRARY` (`_10`), so every T_4 manifest carried a
+        # provenance claim seven versions out of date.
+        inputs={"warhead_library": wl.DEFAULT_LIBRARY,
                 "rgroup_library": RGROUPS})
 
     print(f"\nT_4 enumeration -> {out}")

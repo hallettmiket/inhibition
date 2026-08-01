@@ -143,8 +143,137 @@ def test_single_group_ranking():
     assert set(r["rank_group"].unique()) == {"all"}
     docked = r.dropna(subset=["rank"])
     assert docked["rank"].min() == 1
-    assert docked.loc[docked["rank"] == 1, "affinity_kcal"].iloc[0] == \
-        docked.affinity_kcal.min()
+    # Rank 1 is the best value of whatever was RANKED ON, which since #9 is the
+    # size-decorrelated residual rather than the raw metric. Asserting against
+    # `affinity_kcal` here would re-pin the old contract.
+    used = docked["rank_metric_used"].iloc[0]
+    assert docked.loc[docked["rank"] == 1, used].iloc[0] == docked[used].min()
+
+
+def test_ranking_is_size_decorrelated_by_default():
+    r = rs.rank(_frame(), metric="affinity_kcal", group_col=None, min_docked=20)
+    assert bool(r["rank_size_decorrelated"].iloc[0])
+    assert r["rank_metric_used"].iloc[0] == "size_decorrelated_score"
+    assert r["size_decorrelated_score"].notna().sum() == \
+        r["affinity_kcal"].notna().sum()
+
+
+def test_the_raw_ordering_is_still_available_and_still_recorded():
+    """Turning decorrelation off must restore the pre-#9 ordering exactly."""
+    raw = rs.rank(_frame(), metric="affinity_kcal", group_col=None,
+                  min_docked=20, decorrelate_size=False)
+    d = raw.dropna(subset=["rank"])
+    assert not bool(raw["rank_size_decorrelated"].iloc[0])
+    assert d.loc[d["rank"] == 1, "affinity_kcal"].iloc[0] == d.affinity_kcal.min()
+
+    # And the decorrelated run still carries that ordering for audit, so a
+    # shortlist change can be attributed rather than guessed at.
+    dec = rs.rank(_frame(), metric="affinity_kcal", group_col=None, min_docked=20)
+    both = dec.dropna(subset=["rank"])
+    assert both["rank_raw_metric"].notna().all()
+    assert (both.sort_values("rank_raw_metric")["affinity_kcal"].values
+            == sorted(both["affinity_kcal"].values)).all()
+
+
+def test_decorrelation_actually_removes_the_size_dependence():
+    """The guard that can fail: a decorrelation that does not decorrelate.
+
+    NON-LINEAR by construction -- the shape that left T_4 at Spearman -0.247
+    when the residual was taken as a straight-line fit in kcal/mol, and at
+    -0.26 when refitted in rank space. Both earlier implementations failed this
+    test; the binned local-median version passes it and takes T_4 to +0.007 on
+    the real frame.
+
+    Noise is scaled so the raw correlation lands in the range the real arms
+    actually show (|rho| 0.1-0.7), because that is the regime the decorrelation
+    has to work in. A near-deterministic size-score relationship is a different
+    problem: there the residual is within-stratum trend, and no local centring
+    removes it -- which is worth knowing but is not our data.
+    """
+    import numpy as np
+    from scipy import stats
+
+    rng = np.random.default_rng(0)
+    hac = np.repeat(np.arange(20, 70), 20)
+    metric = -np.sqrt(hac) * 2.0 + rng.normal(0, 2.0, size=hac.size)
+    df = pd.DataFrame({"HAC": hac, "affinity_kcal": metric,
+                       "candidate_id": [f"m{i}" for i in range(hac.size)],
+                       "warhead_class": "A"})
+
+    before = abs(stats.spearmanr(df.HAC, df.affinity_kcal).statistic)
+    resid = rs.size_decorrelated_score(df["affinity_kcal"], df["HAC"])
+    after = abs(stats.spearmanr(df.HAC, resid.astype(float)).statistic)
+
+    assert 0.3 < before < 0.9, (
+        f"fixture no longer sits in the regime the real arms show (rho={before:.3f})")
+    assert after < 0.05, f"residual is still size-dependent (rho={after:.3f})"
+    assert after < before / 5
+
+
+def test_a_rerank_drops_columns_derived_from_the_previous_ranking():
+    """A stale filtered list is worse than an absent one — only one is visible.
+
+    `shortlist_synth` / `rank_synth` are built by
+    `scripts/reshortlist_synthesizable.py` from whatever ranking was in force.
+    Re-ranking used to leave them in place, so after D0049 landed, D1_27
+    carried a `shortlist_synth` whose members reached rank 90 under the new
+    ranking and overlapped the new top-25 by 12 of 25 — and the GUI prefers
+    that column, so it displayed a synthesizable list built from a ranking that
+    no longer existed.
+    """
+    df = _frame()
+    df["shortlist_synth"] = True
+    df["rank_synth"] = 1
+    df["synth_fail"] = False          # a property of the MOLECULE — must survive
+
+    out = rs.rank(df, metric="affinity_kcal", group_col=None, min_docked=20)
+
+    assert "shortlist_synth" not in out.columns
+    assert "rank_synth" not in out.columns
+    assert "synth_fail" in out.columns, (
+        "synth_fail describes the molecule, not the ranking, and must survive "
+        "a re-rank")
+
+
+def test_a_frame_too_small_to_fit_falls_back_rather_than_guessing():
+    """Below MIN_DECORRELATION_N there is no trustworthy fit, and no pretending."""
+    small = _frame().head(10)
+    r = rs.rank(small, metric="affinity_kcal", group_col=None, min_docked=2)
+    assert not bool(r["rank_size_decorrelated"].iloc[0])
+    assert r["rank_metric_used"].iloc[0] == "affinity_kcal"
+    d = r.dropna(subset=["rank"])
+    assert d.loc[d["rank"] == 1, "affinity_kcal"].iloc[0] == d.affinity_kcal.min()
+
+
+@pytest.mark.parametrize("verdict,expected", [
+    ("STRONG", True),
+    ("WEAK", False),            # "within noise of not enriching" is not validation
+    ("UNDERPOWERED", False),
+    ("FAIL", False),
+    ("UNGATED", False),
+    ("PROBABLY_FINE", False),   # a verdict nobody anticipated must fail CLOSED
+])
+def test_only_a_strong_gate_validates_a_ranking(tmp_path, monkeypatch, verdict,
+                                                expected):
+    """The allowlist, as an executable assertion.
+
+    This was a denylist -- `verdict not in (UNDERPOWERED, UNGATED, FAIL)` --
+    so WEAK validated by default, and T_1/T_2 shipped frames claiming a
+    validated ranking against a gate that says the enrichment is within noise
+    of nothing. The last case is the one that matters: a verdict string the
+    code has never seen must not be able to validate anything.
+    """
+    import json
+
+    tok = tmp_path / "gate.token"
+    tok.write_text(json.dumps({"strata": {"non_covalent": {"metrics": {
+        "vina_affinity": {"verdict": verdict, "roc_auc": 0.599,
+                          "roc_auc_ci": [0.311, 0.874], "ef_1pct": 0.0}}}}}))
+    monkeypatch.setattr(rs, "GATE_TOKEN", tok)
+
+    out = rs.attach_gate(_frame(), "non_covalent", "vina_affinity")
+    assert bool(out["rank_validated"].iloc[0]) is expected
+    assert out["gate_verdict"].iloc[0] == verdict
 
 
 def test_an_underpowered_gate_never_marks_a_ranking_validated(tmp_path):

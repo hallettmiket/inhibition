@@ -398,9 +398,9 @@ def honest_limits() -> None:
         "enrich for known Pin1 binders. The covalent gate remains UNDERPOWERED.\n\n"
         "**The rankings are partly size rankings** (D0043). Spearman between "
         "heavy-atom count and each approach's OWN rank metric (all "
-        "lower-is-better): −0.617 T_1, −0.479 T_3, −0.230 T_2 — larger "
-        "molecules score better in all three. T_4 runs the other way at "
-        "+0.181. T_3's shortlist has a median 39 heavy atoms against 25 "
+        "lower-is-better): −0.617 T₁, −0.479 T₃, −0.230 T₂ — larger "
+        "molecules score better in all three. T₄ runs the other way at "
+        "+0.181. T₃'s shortlist has a median 39 heavy atoms against 25 "
         "generated. Read every rank with that in mind.\n\n"
         "Inhibition versus activation is unresolved, and there is no wet-lab "
         "ground truth for any candidate.")
@@ -526,7 +526,7 @@ def render_pose_viewer(approach: str, approach_name: str,
         "sub-pockets coloured and labelled; **Cys113 is in yellow sticks**; the "
         "first shown pose is cyan and thicker than the rest. A dashed yellow "
         "bond appears only when a pose is actually within bonding distance of "
-        "the Cys113 SG — T_1/T_2 are non-covalent and correctly get none.")
+        "the Cys113 SG — T₁/T₂ are non-covalent and correctly get none.")
 
     with st.expander("the three sub-pockets — what each one is", expanded=False):
         st.markdown(p3d.subpocket_legend())
@@ -624,6 +624,28 @@ def panel_candidates() -> None:
     _deltas = {k: D.shortlist_delta(k) for k in D.APPROACHES}
     _dropped = sum(d["dropped"] for d in _deltas.values())
     _promoted = sum(d["promoted"] for d in _deltas.values())
+
+    # AN APPROACH WHOSE FRAME HAS NO REBUILD IS NOT A FILTERED APPROACH.
+    # `shortlist_delta` reports `available: False` when the frame carries no
+    # `shortlist_synth` column, and that flag used to be computed and then
+    # ignored — so a T₂ seed that had never been through
+    # `reshortlist_synthesizable.py` contributed `dropped: 0` and sat under a
+    # green "non-synthesizable compounds have been filtered out" banner while
+    # showing the RAW list. Computed-and-unused is the same defect as T_1's
+    # `alert_gate_pass`, and it reads as a filter to anyone looking.
+    _unfiltered = [k for k, d in _deltas.items() if not d.get("available")]
+    if prefer_synth and _unfiltered:
+        st.error(
+            "### ⚠️ The synthesizability rebuild has NOT been run for "
+            + ", ".join(D.display_name(k).split("·")[0].strip()
+                        + (f" (seed {D.variant_label(k)})" if D.variant_label(k)
+                           else "")
+                        for k in _unfiltered)
+            + "\nThose columns show the **raw metric top-25 and may contain "
+              "compounds that fail a structural synthesizability rule.** Every "
+              "other column is filtered, so the lists below are not directly "
+              "comparable. Run `scripts/reshortlist_synthesizable.py` to fix.")
+
     if prefer_synth and _dropped:
         st.success(
             f"### ✅ Non-synthesizable compounds have been filtered out\n"
@@ -650,13 +672,13 @@ def panel_candidates() -> None:
     cols = st.columns(len(D.APPROACHES))
     for col, (key, cfg) in zip(cols, D.APPROACHES.items()):
         with col:
-            st.subheader(cfg["name"])
+            st.subheader(D.display_name(key))
             s = D.shortlist(key, prefer_synth=prefer_synth)
             if s.empty:
                 st.info("no shortlist yet")
                 continue
             s, _applied = curated(s, "Shortlists",
-                                  label=cfg["name"].split("·")[0].strip())
+                                  label=D.display_name(key).split("·")[0].strip())
             if s.empty:
                 st.warning("every candidate in this approach was filtered out "
                            "by the curation constraints")
@@ -665,7 +687,10 @@ def panel_candidates() -> None:
             st.markdown(
                 f"{gate_badge(verdict)} **{verdict}** · metric "
                 f"`{cfg['metric']}` (lower better) · {cfg['mechanism']} · "
-                f"seed: {cfg['seed']}")
+                # The ACTIVE seed, not the config's static one. `cfg["seed"]`
+                # is "ATRA" for every T₂ variant, so the caption read "seed:
+                # ATRA" under a Guo-Pfizer header.
+                f"seed: {D.variant_label(key) or cfg['seed']}")
             # SYNTHESIZABILITY IS SHOWN, NEVER RANKED ON (issue #1). The Lu lab
             # would not make a compound that fails these, so a failure has to be
             # VISIBLE in the list a chemist reads — but the rules are structural
@@ -711,7 +736,7 @@ def panel_candidates() -> None:
                     "`SAscore` sits beside it for comparison (lower = the "
                     "heuristic thinks it is easier to make). The two agree only "
                     "partly — SAscore separates rule-failures from rule-passes "
-                    "at AUC 0.74 (T_1), 0.83 (T_2), 0.75 (T_3), where 0.5 would "
+                    "at AUC 0.74 (T₁), 0.83 (T₂), 0.75 (T₃), where 0.5 would "
                     "be no information. So neither replaces the other: SAscore "
                     "misses specific impossibilities, and the rules say nothing "
                     "about how hard a route is.")
@@ -834,7 +859,7 @@ def panel_candidates() -> None:
             top = s.sort_values("rank").head(9)
             if st.button("view docked poses ⤢", key=f"posebtn_{key}",
                          use_container_width=True):
-                show_pose_dialog(key, cfg["name"], top)
+                show_pose_dialog(key, D.display_name(key), top)
 
     unfiltered_facts_note()
 
@@ -852,7 +877,7 @@ def panel_dossier() -> None:
 
     c1, c2 = st.columns([1, 2])
     approach = c1.selectbox("approach", list(D.APPROACHES),
-                            format_func=lambda k: D.APPROACHES[k]["name"])
+                            format_func=D.display_name)
     s_all = D.shortlist(approach)
     if s_all.empty:
         st.info("no shortlist for this approach yet")
@@ -871,7 +896,7 @@ def panel_dossier() -> None:
                  "picker so an inspected molecule is never mistaken for one "
                  "still in contention.")
     s, _applied = curated(s_all, "Candidate dossier",
-                          label=D.APPROACHES[approach]["name"].split("·")[0].strip())
+                          label=D.display_name(approach).split("·")[0].strip())
     excluded_ids = set(s_all["candidate_id"]) - set(s["candidate_id"])
     if s.empty and not show_excluded:
         st.warning("Every candidate in this approach was excluded by the "
@@ -1113,7 +1138,7 @@ def panel_dossier() -> None:
     # is full width here, which is the width the viewer actually needs.
     st.divider()
     st.markdown("#### Docked pose in the Pin1 pocket")
-    render_pose_viewer(approach, cfg["name"], s, row,
+    render_pose_viewer(approach, D.display_name(approach), s, row,
                        key=f"dossier_{approach}_{cid}", height=600)
 
     # Structural convergence: did any OTHER approach reach this molecule?
@@ -1150,7 +1175,7 @@ def panel_dossier() -> None:
                     "No other approach reached this molecule. That is the norm "
                     "here, not a gap: exact overlap between every pair of "
                     "approaches is zero, and the closest cross-approach "
-                    "shortlist pair in the whole build is T_3~T_4 at Tanimoto "
+                    "shortlist pair in the whole build is T₃~T₄ at Tanimoto "
                     "0.455. The four searches are effectively disjoint, so "
                     "convergence currently provides no cross-validation.")
 
@@ -1175,7 +1200,7 @@ def panel_convergence() -> None:
     st.caption(
         "Read it with care: all four approaches dock into the same receptor "
         "under related protocols, so their errors are correlated and agreement "
-        "may report a shared bias rather than a real signal. T_1 is seed-free, "
+        "may report a shared bias rather than a real signal. T₁ is seed-free, "
         "so its agreement with a seeded approach at least is not ancestral.")
     curation_header("Convergence")
 
@@ -1286,7 +1311,7 @@ def panel_within_stratum() -> None:
     t3, t4 = fps.get("t3", set()), fps.get("t4", set())
     if t3 and t4 and t3 != t4:
         st.error(
-            f"**Within-covalent comparison DISABLED.** T_3 and T_4 recorded "
+            f"**Within-covalent comparison DISABLED.** T₃ and T₄ recorded "
             f"different protocol fingerprints ({sorted(t3)} vs {sorted(t4)}). "
             "They did not dock under identical rules, so their affinities are "
             "not comparable. Re-dock the lagging approach before comparing — "
@@ -1296,8 +1321,8 @@ def panel_within_stratum() -> None:
         st.success(f"Covalent protocol fingerprints agree: {sorted(t3 or t4)}")
 
     for label, keys, stratum, metric in (
-            ("Non-covalent (T_1 + T_2)", ("t1", "t2"), "non_covalent", "vina_affinity"),
-            ("Covalent (T_3 + T_4)", ("t3", "t4"), "covalent", "affinity_kcal")):
+            ("Non-covalent (T₁ + T₂)", ("t1", "t2"), "non_covalent", "vina_affinity"),
+            ("Covalent (T₃ + T₄)", ("t3", "t4"), "covalent", "affinity_kcal")):
         st.subheader(label)
         # The gate is measured on known actives against property-matched
         # decoys. No candidate of ours is in that calculation, so curation has
@@ -1388,7 +1413,7 @@ def panel_provenance() -> None:
     st.header("Run provenance")
     curation_header("Provenance")
     approach = st.selectbox("approach", list(D.APPROACHES),
-                            format_func=lambda k: D.APPROACHES[k]["name"])
+                            format_func=D.display_name)
     ms = D.manifests(approach)
     if not ms:
         st.info("no manifests recorded for this approach")
@@ -1419,8 +1444,121 @@ def panel_open_questions() -> None:
 
 # --------------------------------------------------------------------------
 
+def panel_seed_comparison() -> None:
+    """Each T₂ seed's own top-25, side by side — presented, never pooled.
+
+    THIS IS THE QUESTION THE RESEEDING WAS RUN TO ANSWER: does the starting
+    point determine what comes out? Five CReM neighbourhoods, everything else
+    held fixed.
+
+    WHY THE SHORTLISTS ARE SHOWN SIDE BY SIDE RATHER THAN MERGED. Each seed's
+    top-25 is ranked WITHIN its own pool, and the pools run 1,882-16,806
+    molecules. A merged top-25 over unmatched N would mostly report which seed
+    generated most, and a merged sort on `vina_affinity` would compare four
+    charge states and four chemotypes on a scoring function measured at chance
+    for this pocket (D0041) and at 5% pose recovery (D0046). That is exactly
+    the cross-approach merge the choreography refuses at the top level, one
+    scale down — so the same answer applies: present, do not merge.
+
+    WHAT IS COMPARABLE, and is shown below the shortlists: the score-free axes
+    (size, lipophilicity, novelty against the external reference set) and
+    whether different seeds ever reach the SAME molecule. Those need no shared
+    metric and no matched N.
+    """
+    st.header("T₂ seed comparison")
+    curation_header("T₂ seed comparison")
+    status = D.variant_status("t2")
+    ready = [v for v in status if v["ready"]]
+    pending = [v for v in status if not v["ready"]]
+
+    if not ready:
+        st.info("No T₂ seed has a ranked frame yet.")
+        return
+    st.caption(
+        "Each column is that seed's own top-25, ranked within its own pool. "
+        "**The scores are not comparable across columns** — different pool "
+        "sizes, different chemotypes, and a rank metric the enrichment gate "
+        "has not validated (D0041). Read the columns, not a winner.")
+    if pending:
+        st.warning("Still docking, so absent below: "
+                   + ", ".join(f"**{v['label']}**" for v in pending))
+
+    lists = {v["key"]: D.shortlist_variant("t2", v["key"]) for v in ready}
+    cols = st.columns(len(ready))
+    for col, v in zip(cols, ready):
+        s = lists[v["key"]]
+        with col:
+            st.subheader(v["label"])
+            st.caption(f"{v['n']:,} docked · top {len(s)}")
+            show = [c for c in ("display_rank", "candidate_id", "metric_value",
+                                "HAC", "SAscore")
+                    if c in s.columns]
+            st.dataframe(s.sort_values("display_rank")[show], hide_index=True,
+                         use_container_width=True)
+
+    st.divider()
+    st.subheader("Score-free axes — these ARE comparable")
+    st.caption(
+        "Medians over each seed's top-25. No shared metric is involved, so "
+        "unmatched pool sizes do not distort them. This is where a real "
+        "seed effect would show: a seed whose neighbourhood is systematically "
+        "larger, greasier or less novel than another's.")
+    rows = []
+    for v in ready:
+        s = lists[v["key"]]
+        row = {"seed": v["label"], "n docked": v["n"], "shortlist": len(s)}
+        for ax in D.SHARED_AXES:
+            if ax in s.columns:
+                row[ax] = round(float(pd.to_numeric(s[ax], errors="coerce")
+                                      .median()), 3)
+        rows.append(row)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+    st.divider()
+    st.subheader("Do two seeds ever reach the same molecule?")
+    st.caption(
+        "Exact identity on InChIKey across the shortlists. CReM edits a seed, "
+        "so overlap would mean two different starting points converged on one "
+        "structure — a genuine cross-validation that needs no scoring "
+        "function. Absence is a result too, and is reported as one.")
+    keys = {}
+    for v in ready:
+        s = lists[v["key"]]
+        if "canonical_smiles" not in s.columns:
+            continue
+        for _, r in s.iterrows():
+            k = _inchikey(str(r["canonical_smiles"]))
+            if k:
+                keys.setdefault(k, []).append((v["label"], r.get("candidate_id")))
+    shared = {k: hits for k, hits in keys.items()
+              if len({h[0] for h in hits}) > 1}
+    if shared:
+        st.dataframe(pd.DataFrame(
+            [{"InChIKey": k, "seeds": ", ".join(sorted({h[0] for h in hits})),
+              "ids": ", ".join(str(h[1]) for h in hits)}
+             for k, hits in shared.items()]),
+            hide_index=True, use_container_width=True)
+    else:
+        st.info(
+            f"**No molecule appears in more than one seed's top-25** "
+            f"({len(keys)} distinct structures across {len(ready)} seeds). "
+            "The neighbourhoods are disjoint at the shortlist level, which is "
+            "what degree-bounded editing of chemically distinct seeds should "
+            "produce — it means the seed choice, not the search, determines "
+            "what you get.")
+
+
+@st.cache_data(show_spinner=False)
+def _inchikey(smiles: str) -> str | None:
+    from rdkit import Chem, RDLogger
+    RDLogger.DisableLog("rdApp.*")
+    m = Chem.MolFromSmiles(smiles)
+    return Chem.MolToInchiKey(m) if m is not None else None
+
+
 PANELS = {
     "Shortlists": panel_candidates,
+    "T₂ seed comparison": panel_seed_comparison,
     "Candidate dossier": panel_dossier,
     "Convergence": panel_convergence,
     "Shared axes": panel_axes,
@@ -1436,6 +1574,55 @@ st.sidebar.caption("Integration is a presentation and human-decision layer. "
                    "It surfaces and organises evidence; it does not output a "
                    "winner.")
 choice = st.sidebar.radio("panel", list(PANELS))
+
+
+def seed_sidebar() -> None:
+    """Choose which seed neighbourhood a multi-variant approach shows.
+
+    T₂ is five CReM neighbourhoods plus a degree-2 sample, each in its own
+    experiment directory. Until this existed the app read a hardcoded ATRA
+    path, so seeds that had finished and been ranked were simply unreachable.
+
+    SEEDS THAT ARE NOT READY ARE NAMED, NOT OMITTED. A selector that silently
+    lists three of six reads as "T₂ has three seeds", which is a different and
+    false statement. They are listed below the control with the reason.
+
+    The control sets ONE seed for the whole app rather than pooling them.
+    Pooling is not a display choice here: the pools run 1,882-16,806 molecules,
+    and a top-N over unmatched N would be dominated by whichever seed generated
+    most. That comparison needs a decision (#6), not a widget.
+    """
+    for approach in D.APPROACHES:
+        status = D.variant_status(approach)
+        if not status:
+            continue
+        ready = [v for v in status if v["ready"]]
+        pending = [v for v in status if not v["ready"]]
+        name = D.APPROACHES[approach]["name"].split("·")[0].strip()
+        st.sidebar.divider()
+        st.sidebar.subheader(f"🌱 {name} seed")
+        if not ready:
+            st.sidebar.warning(f"No {name} seed has a ranked frame yet.")
+            continue
+        keys = [v["key"] for v in ready]
+        labels = {v["key"]: f"{v['label']} — {v['n']:,} docked" for v in ready}
+        current = D.active_variant(approach)
+        chosen = st.sidebar.selectbox(
+            "seed neighbourhood", keys,
+            index=keys.index(current) if current in keys else 0,
+            format_func=lambda k: labels[k], key=f"seed_{approach}")
+        D.set_variant(approach, chosen)
+        if pending:
+            st.sidebar.caption(
+                "Not yet available — " + "; ".join(
+                    f"**{v['label']}** ({v['why']})" for v in pending))
+        st.sidebar.caption(
+            "Scores are NOT comparable across seeds: the pools differ ~9× in "
+            "size and each inherits its seed's chemotype. Compare property, "
+            "novelty and chemotype distributions instead.")
+
+
+seed_sidebar()
 
 # EVERY PANEL NAME MUST HAVE A DECLARED CURATION SCOPE. Checked here at start-up
 # rather than when someone clicks the tab: a panel added without a scope should

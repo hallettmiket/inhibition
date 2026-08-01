@@ -187,7 +187,7 @@ SUBPOCKETS: tuple[Subpocket, ...] = (
         # drawn in, so the region and the residue read as the same thing.
         colour="yellow",
         why=("The catalytic tetrad Cys113/His59/His157/Ser154. This is where "
-             "T_3 and T_4 form their covalent bond and where sulfopin's "
+             "T₃ and T₄ form their covalent bond and where sulfopin's "
              "chloroacetamide alkylates the SG (1.78 A in 6VAJ). NOTE: Cys113 "
              "is alkylated by covalent INHIBITORS, but in native catalysis the "
              "current reading is that it stabilises the cis conformer "
@@ -835,7 +835,7 @@ def _bundle_readme(pose_file: Path, *, covalent: bool) -> str:
         + ("gnina returns modes sorted by CNNscore. The candidate frame's\n"
            "`affinity_kcal` is taken from the FIRST record, so a later record\n"
            "in this file can have a better minimizedAffinity — on the current\n"
-           "build that happens for 11 of 25 T_3 shortlist entries, by up to\n"
+           "build that happens for 11 of 25 T₃ shortlist entries, by up to\n"
            "2.86 kcal/mol. Check every mode before quoting one.\n\n"
            if pose_file.suffix.lower() == ".sdf" else
            "AutoDock Vina returns modes sorted by affinity, so model 1 is the\n"

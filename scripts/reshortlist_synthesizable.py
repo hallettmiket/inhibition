@@ -65,6 +65,39 @@ APPROACHES = {
 }
 
 
+def _targets() -> list[tuple[str, str, str, str | None, str | None, int]]:
+    """(label, experiment, metric, group_col, identity_col, quota) per run.
+
+    T_2 IS ONE ROW ABOVE AND FIVE RUNS IN PRACTICE. The reseeding gave each
+    seed its own experiment directory, and this table named only ATRA's — so
+    du_xu and guo_pfizer were ranked and shortlisted but never rebuilt, and the
+    GUI showed their RAW top-25 under a banner claiming the synthesizability
+    filter was in force. The seed -> experiment lookup comes from
+    `shared.seeds`, which is the single source of it; restating it here is the
+    duplication that module's own docstring warns about.
+    """
+    from shared import seeds as sd
+
+    out = []
+    for a, (experiment, metric, group_col, identity_col, quota) in APPROACHES.items():
+        if a != "t2":
+            out.append((a, experiment, metric, group_col, identity_col, quota))
+            continue
+        for key in sd.declared_for("t2"):
+            try:
+                rec = sd.resolve("t2", key, require_radius=False)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("t2 seed %s does not resolve (%s); skipping", key, exc)
+                continue
+            out.append((f"t2:{key}", rec["experiment"], metric, group_col,
+                        identity_col, quota))
+        # The degree-2 sample is a derived run of the ATRA seed into its own
+        # directory, not a seed in seeds.yaml, and it needs the rebuild too.
+        out.append(("t2:atra_degree2", "02_t2_atra_crem_degree2", metric,
+                    group_col, identity_col, quota))
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true")
@@ -75,10 +108,17 @@ def main() -> None:
 
     from shared import rank_shortlist as rs
 
-    for a, (experiment, metric, group_col, identity_col, quota) in APPROACHES.items():
-        df, path = dio.latest_frame(experiment, a)
+    for label, experiment, metric, group_col, identity_col, quota in _targets():
+        a = label.split(":")[0]          # the approach a frame belongs to
+        try:
+            df, path = dio.latest_frame(experiment, a)
+        except Exception as exc:  # noqa: BLE001 - a seed may not have run yet
+            log.warning("%s: no frame under %s (%s); skipping",
+                        label, experiment, exc)
+            continue
         if metric not in df.columns:
-            log.warning("%s: no %s column; skipping", a, metric)
+            log.warning("%s: no %s column; skipping (still docking?)",
+                        label, metric)
             continue
 
         df = df.copy()
@@ -105,10 +145,10 @@ def main() -> None:
         old = df[df.get("shortlist", pd.Series(False, index=df.index)).fillna(False)]
         old_ids, new_ids = set(old["candidate_id"]), set(keep)
         log.info("%s: %d of %d candidates fail a rule; old shortlist had %d",
-                 a, int(df["synth_fail"].sum()), len(df),
+                 label, int(df["synth_fail"].sum()), len(df),
                  int(old["synth_fail"].sum()) if len(old) else 0)
         log.info("%s:   new shortlist %d — %d carried over, %d promoted, %d dropped",
-                 a, len(new_ids), len(old_ids & new_ids),
+                 label, len(new_ids), len(old_ids & new_ids),
                  len(new_ids - old_ids), len(old_ids - new_ids))
 
         if args.dry_run:
@@ -123,7 +163,7 @@ def main() -> None:
                     "rule_module": "shared/synthesizability.py",
                     "note": "original shortlist/rank columns untouched"},
             inputs={"previous_frame": path})
-        log.info("%s: wrote %s", a, out.name)
+        log.info("%s: wrote %s", label, out.name)
 
 
 if __name__ == "__main__":

@@ -75,6 +75,38 @@ def implicit_residence() -> pd.DataFrame:
     return df[keep].drop_duplicates("candidate_id") if not df.empty else df
 
 
+def replace_merge(left: pd.DataFrame, right: pd.DataFrame,
+                  also_drop: tuple[str, ...] = ()) -> pd.DataFrame:
+    """Merge `right` onto `left` on candidate_id, replacing what it supplies.
+
+    DERIVE THE DROP LIST FROM THE MERGE, NOT FROM A CONSTANT. This used to
+    drop a hardcoded `(*COLS, *IMPLICIT_COLS)`, which omits every aggregate
+    column built a few lines above it -- `explicit_rmsd_replicate_sd`, `_min`,
+    `_max`, `_ratio`, `n_replicates`, `explicit_rmsd_suspect_any`. On a
+    re-merge those already existed on the frame, survived the drop, and pandas
+    suffixed both copies, so D1_21/D1_22 and D2_21/D2_22 carry `_x`/`_y` and
+    NOTHING under the canonical name. Same defect as `affinity_kcal_x/_y` in
+    `covalent_dock_run.py`: a list that must stay in sync with code five lines
+    away will not stay in sync.
+
+    `also_drop` is the columns this merge is RESPONSIBLE for but may not
+    supply on a given run -- e.g. `explicit_ligand_rmsd_nm_final` is in COLS
+    but is not aggregated. Those must still go, or a stale value from the
+    previous frame survives beside a freshly recomputed aggregate.
+
+    Dropping the canonical names alone is not enough to recover: D1_22 and
+    D2_22 already hold `explicit_rmsd_replicate_sd_x` AND `_y` and no plain
+    column, so a merge that only drops plain names leaves both suffixed copies
+    in place and the frame never heals. The suffixed forms of everything this
+    merge supplies go too.
+    """
+    incoming = [c for c in right.columns if c != "candidate_id"]
+    stale = {*incoming, *also_drop}
+    stale |= {f"{c}{s}" for c in tuple(stale) for s in ("_x", "_y")}
+    return (left.drop(columns=[c for c in stale if c in left.columns])
+                .merge(right, on="candidate_id", how="left"))
+
+
 def analyse_one(job: dict) -> dict:
     os.nice(19)
     sys.path.insert(0, str(REPO))
@@ -190,14 +222,20 @@ def main() -> None:
                 agg[c] = g[c].mean().values
         if "explicit_rmsd_suspect" in reps.columns:
             agg["explicit_rmsd_suspect_any"] = g["explicit_rmsd_suspect"].any().values
-        df = df.drop(columns=[c for c in (*COLS, *IMPLICIT_COLS)
-                              if c in df.columns])
-        merged = df.merge(agg, on="candidate_id", how="left")
+        merged = replace_merge(df, agg, also_drop=COLS)
         imp = implicit_residence()
-        if not imp.empty:
-            merged = merged.merge(imp, on="candidate_id", how="left")
+        merged = (replace_merge(merged, imp, also_drop=IMPLICIT_COLS)
+                  if not imp.empty
+                  else merged.drop(columns=[c for c in IMPLICIT_COLS
+                                            if c in merged.columns]))
         if len(merged) != len(df):
             raise SystemExit(f"{a}: merge changed row count")
+        # Fail loudly rather than shipping. A suffixed column means some
+        # incoming name was not dropped, which is the bug above returning.
+        suffixed = [c for c in merged.columns if c.endswith(("_x", "_y"))]
+        if suffixed:
+            raise SystemExit(f"{a}: merge produced suffixed columns, so no "
+                             f"column carries the canonical name: {suffixed}")
         n = int(merged["explicit_ligand_rmsd_nm_mean"].notna().sum())
         log.info("%s: %s -> %d rows carry explicit-solvent results",
                  a, path.name, n)

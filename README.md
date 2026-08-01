@@ -18,8 +18,11 @@ machinery for *describing* choreographies belongs in the murmurent repo.
 >    every substantive bug found here has been the same bug. Read it before
 >    trusting a number or writing code.
 >
-> Then `decisions/` (45 records — they record what was wrong and why it looked
-> right), and GitHub **#4** (the plan) and **#6** (open decisions).
+> Then `decisions/` (47 records — they record what was wrong and why it looked
+> right), and the open issues: **#4** (the master plan), **#6** (open decisions
+> and known defects), **#8** (questions put to the Lu lab — the chemistry
+> judgement we cannot supply computationally), **#9** and **#10** (where the
+> direction is currently being set, from a med-chemist review).
 
 - **Spec:** [issue #108](https://github.com/hallettmiket/murmurent/issues/108),
   Rev 3 (comment `5083543621`) + implementation plan (comment `5083611947`).
@@ -32,7 +35,7 @@ machinery for *describing* choreographies belongs in the murmurent repo.
 | | Approach | Seed | Search | Covalent? | Inhibition proxy |
 |---|---|---|---|---|---|
 | **T_1** | de novo, structure-based generation | none — the pocket | DiffSBDD (pocket-conditioned diffusion) | non-covalent | weak (reversible occupancy) |
-| **T_2** | derivative neighborhood of ATRA | ATRA | CReM, degree-bounded | non-covalent | weak (reversible occupancy) |
+| **T_2** | derivative neighborhood of a known binder | 5 seeds (ATRA, Liu-2024-C3, Potter-Astex, Du-Xu, Guo-Pfizer) | CReM, degree-bounded | non-covalent | weak (reversible occupancy) |
 | **T_3** | single-warhead R-group decoration | sulfopin (core + warhead fixed) | REINVENT 4 `libinvent` | covalent | strong (covalent Cys113) |
 | **T_4** | warhead × R-group combinatorial | sulfopin (core fixed) | combinatorial, 16 × 444 = 7,104 | covalent | strong (covalent Cys113) |
 
@@ -110,7 +113,11 @@ gates, not conventions. Each blocks a failure that is invisible as a crash:
 1. **Docking-enrichment gate (B2).** Docking is not trusted to *rank* anything
    until it enriches known actives over property-matched decoys **on 6VAJ**. On
    failure `dock_score` is demoted to a displayed label — the choreography does
-   not stall.
+   not stall. **This gate has fired.** Non-covalent enrichment is at chance
+   (D0041: ROC-AUC 0.599, CI [0.311, 0.874], EF1% 0.0) and covalent enrichment
+   goes to chance under class-matched decoys (D0031), so every shortlist is
+   stamped `rank_validated = False`. Read a shortlist as an ordering the
+   pipeline produced, **not** as evidence the molecules at the top bind.
 2. **Frozen external reference set (B4/B5).** Novelty is `1 − max Tanimoto
    (ECFP4)` against the published binder set, **never against the seed** —
    seed-relative novelty is circular. The same set anchors T_4's reactivity
@@ -142,4 +149,21 @@ restarts.
 
 ## Status
 
-See the milestone table in the implementation plan. Current: **M0 in progress.**
+**All four arms have generated and been scored.** **13,863** candidates across
+T_1–T_4 (T_1 4,803 · T_2 1,882 · T_3 5,396 · T_4 1,782), plus **42,588** from
+the four new T_2 seeds and **15,653** from a degree-2 ATRA sample — about
+**72,000 molecules generated**. Docking has completed on ~32,000 of them; the
+Liu-2024-C3 and Potter-Astex pools and the degree-2 sample are still running or
+queued.
+
+The binding constraint is not generation. It is that **no scorer we have tested
+discriminates on this target** — docking enrichment (D0041), docking *pose
+recovery* (D0046: 5% in production against a 60–80% norm), ensemble MM-GBSA
+(D0036) and MD residence (D0038, D0044) have each been measured and each
+failed. That is the project's central finding so far, and it is why the current
+plan (#4) spends its next phase on **measured inactives** rather than on more
+generators.
+
+For anything more specific than this paragraph, read
+[`docs/state_of_the_project.md`](docs/state_of_the_project.md) — it is kept
+current and this section deliberately is not.

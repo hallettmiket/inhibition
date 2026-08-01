@@ -115,6 +115,38 @@ MAX_PREP_WORKERS = compute.MAX_CPU_WORKERS
 
 _RESULT_RE = re.compile(r"REMARK VINA RESULT:\s*(-?\d+\.\d+)")
 
+# ALL NINE MODES, NOT JUST THE FIRST (issue #10, @tt8804).
+#
+# Vina writes every mode it reports into the output PDBQT, each with its own
+# affinity and its RMSD back to the best mode. `collect_scores` regex-searched
+# for the FIRST `REMARK VINA RESULT` line and returned one float per ligand, so
+# 8 of every 9 poses we computed were written to disk and never read -- across
+# all ~56,000 candidates.
+#
+# That matters because mode 1 is not meaningfully better than mode 2. Measured
+# over 400 completed du_xu ligands: the median affinity gap between mode 2 and
+# mode 1 is 0.10 kcal/mol, and 99% of ligands have mode 2 within 0.5 kcal/mol.
+# Vina's own reported RMSE is ~2-3 kcal/mol, so selecting mode 1 over mode 2
+# happens on a margin twenty to thirty times smaller than the error bar of the
+# function producing it.
+#
+# WHAT THESE COLUMNS ARE NOT. `mode_rmsd_nn` is the smallest RMSD from any
+# other mode back to the best one, and it is NOT a convergence statistic. Vina
+# diversifies its reported modes with a minimum-RMSD floor before writing them,
+# so a cluster population computed over these nine would measure the output
+# filter rather than agreement. The honest version is replicate runs with
+# independent seeds. These columns are DESCRIPTIVE LABELS; nothing downstream
+# should rank on them until a rule is scored against D0046's 80 redock cases.
+_MODE_RE = re.compile(
+    r"REMARK VINA RESULT:\s*(-?\d+\.\d+)\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)")
+
+# Columns this module owns on the frame. Listed so the merge can drop exactly
+# what it is about to supply -- see the drop-list defect in
+# `docs/how_this_project_breaks.md` (catalogue #5), where a hand-maintained
+# list that had to stay in sync with code five lines away did not.
+MODE_COLS = ("vina_affinity", "vina_n_modes", "vina_mode2_gap",
+             "vina_mode_rmsd_nn", "vina_affinity_spread")
+
 
 def _prepare_one(job: dict) -> dict:
     """Embed one ligand and convert it to PDBQT. Runs in a worker process."""
@@ -206,14 +238,54 @@ def run_vina_gpu(ligand_dir: Path, out_dir: Path, gpu: int) -> float:
 
 
 def collect_scores(out_dir: Path) -> dict[str, float]:
-    """Best score per ligand from Vina-GPU's output PDBQTs."""
-    scores: dict[str, float] = {}
+    """Best score per ligand from Vina-GPU's output PDBQTs.
+
+    Kept as the single-value accessor; `collect_modes` is the full parse.
+    """
+    return {r["candidate_id"]: r["vina_affinity"]
+            for r in collect_modes(out_dir).to_dict("records")}
+
+
+def parse_modes(text: str) -> list[tuple[float, float, float]]:
+    """(affinity, rmsd_lb, rmsd_ub) for every mode in one output PDBQT.
+
+    Vina reports the RMSDs relative to the BEST mode, so mode 1's are 0.0 by
+    construction and carry no information.
+    """
+    return [(float(a), float(lb), float(ub))
+            for a, lb, ub in _MODE_RE.findall(text)]
+
+
+def collect_modes(out_dir: Path) -> pd.DataFrame:
+    """Every mode of every ligand, summarised one row per candidate.
+
+    See MODE_COLS for why the other eight poses are worth reading and what
+    these numbers may NOT be used for.
+    """
+    rows = []
     for f in out_dir.glob("*.pdbqt"):
-        m = _RESULT_RE.search(f.read_text(errors="replace"))
-        if m:
-            scores[f.stem.replace("_out", "")] = float(m.group(1))
-    log.info("parsed %d Vina-GPU scores", len(scores))
-    return scores
+        modes = parse_modes(f.read_text(errors="replace"))
+        if not modes:
+            continue
+        aff = [m[0] for m in modes]
+        # Nearest neighbour back to the best mode: the smallest lower-bound
+        # RMSD among the OTHER modes. NaN when Vina reported a single mode --
+        # absent, not zero, because zero would read as "perfectly converged".
+        nn = min((m[1] for m in modes[1:]), default=float("nan"))
+        rows.append({
+            "candidate_id": f.stem.replace("_out", ""),
+            "vina_affinity": aff[0],
+            "vina_n_modes": len(modes),
+            "vina_mode2_gap": (aff[1] - aff[0]) if len(aff) > 1 else float("nan"),
+            "vina_mode_rmsd_nn": nn,
+            "vina_affinity_spread": max(aff) - min(aff),
+        })
+    df = pd.DataFrame(rows, columns=list(("candidate_id", *MODE_COLS)))
+    if not df.empty:
+        log.info("parsed %d ligands; %.2f modes each on average, median "
+                 "mode-2 gap %.3f kcal/mol", len(df),
+                 df["vina_n_modes"].mean(), df["vina_mode2_gap"].median())
+    return df
 
 
 def run(*, experiment: str, approach: str, frame_prefix: str, gpu: int,
@@ -244,16 +316,27 @@ def run(*, experiment: str, approach: str, frame_prefix: str, gpu: int,
         raise SystemExit("no ligand survived preparation")
 
     elapsed = run_vina_gpu(ligand_dir, out_dir, gpu)
-    scores = collect_scores(out_dir)
+    scored = collect_modes(out_dir)
 
-    # Drop a stale score column BEFORE merging, so a re-run does not produce
-    # vina_affinity_x / _y and silently lose the column downstream.
-    if "vina_affinity" in df.columns:
-        log.info("dropping stale vina_affinity before merge")
-        df = df.drop(columns=["vina_affinity"])
-    scored = pd.DataFrame({"candidate_id": list(scores),
-                           "vina_affinity": list(scores.values())})
+    # Drop stale columns BEFORE merging, so a re-run does not produce
+    # vina_affinity_x / _y and silently lose the column downstream. The list is
+    # DERIVED FROM THE MERGE rather than written out, because a hand-maintained
+    # drop list is exactly how the same defect reached D1_21/D2_21 via
+    # `merge_gromacs_results.py` -- it omitted columns added five lines above
+    # it. Suffixed survivors go too, so an already-damaged frame heals.
+    incoming = [c for c in scored.columns if c != "candidate_id"]
+    stale = {*incoming, *(f"{c}{s}" for c in incoming for s in ("_x", "_y"))}
+    drop = [c for c in stale if c in df.columns]
+    if drop:
+        log.info("dropping %d stale column(s) before merge: %s",
+                 len(drop), ", ".join(sorted(drop)))
+        df = df.drop(columns=drop)
     merged = df.merge(scored, on="candidate_id", how="left")
+    suffixed = [c for c in merged.columns if c.endswith(("_x", "_y"))]
+    if suffixed:
+        raise RuntimeError(
+            f"merge produced suffixed columns {suffixed}; the drop list did "
+            "not cover what the merge supplied")
     if len(merged) != len(df):
         raise RuntimeError(
             f"merge changed row count {len(df)} -> {len(merged)}; duplicate "
@@ -280,6 +363,9 @@ def run(*, experiment: str, approach: str, frame_prefix: str, gpu: int,
                 "ligand_ph": LIGAND_PH,
                 "ligand_prep_tag": LIGAND_PREP_TAG,
                 "rank_metric": "vina_affinity (kcal/mol, lower better)",
+                # Descriptive only. `vina_mode_rmsd_nn` reflects Vina's mode
+                # diversification floor, not pose convergence -- see MODE_COLS.
+                "mode_columns": list(MODE_COLS),
                 "enrichment_caveat":
                     "D0016: non-covalent enrichment on this pocket is ROC-AUC "
                     "0.535 (CI 0.215-0.855, EF1% 0.0). These rankings are "

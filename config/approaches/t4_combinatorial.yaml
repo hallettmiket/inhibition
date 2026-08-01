@@ -12,7 +12,10 @@ approach:
   inhibition_proxy_strength: strong
 
 warheads:
-  library: data/reference/warhead_classes_3.csv
+  # STEM, NOT A VERSION. Resolved at load time by
+  # `warhead_library.DEFAULT_LIBRARY`, which globs for the highest version on
+  # disk. This pinned `_3` while enumeration ran off `_10`.
+  library: data/reference/warhead_classes_<latest>.csv
 
   # OPT-IN BEYOND VERIFIED (PI decision, 2026-07-27).
   #
