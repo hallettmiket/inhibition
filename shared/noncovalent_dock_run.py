@@ -206,6 +206,31 @@ def prepare_ligands(survivors: pd.DataFrame, ligand_dir: Path,
     return results
 
 
+# THE TIMEOUT SCALES WITH THE POOL, BECAUSE A FLAT ONE DESTROYED A DAY OF WORK.
+#
+# `run_vina_gpu` passed `timeout=86400` — a flat 24 h, correct when a pool was
+# ATRA's 1,882 molecules and silently wrong once it was liu_2024_c3's 16,806.
+# On 2026-08-01 that seed ran for exactly 24 h, raised `TimeoutExpired`, and
+# lost EVERYTHING: Vina-GPU writes its poses only at the end of a
+# virtual-screening run, so the output directory held 0 of 16,806 files and no
+# frame was written. The projection for that pool was ~38 h, so it could never
+# have finished under the cap — and nothing said so before the day was spent.
+#
+# Measured rate on this box: du_xu docked 9,736 ligands in 9 h 56 m and
+# guo_pfizer 8,670 in 9 h 04 m, i.e. ~3.7 s/ligand. The safety factor is large
+# because the rate is NOT uniform: cost climbs steeply with rotatable bonds,
+# and liu's pool averages 10.65 against du_xu's 4.81.
+SECONDS_PER_LIGAND = 3.7        # measured, du_xu + guo_pfizer
+TIMEOUT_SAFETY_FACTOR = 4       # covers the flexibility spread, not just count
+MIN_TIMEOUT_S = 3600
+
+
+def vina_timeout_s(n_ligands: int) -> int:
+    """A deadline proportional to the work, floored for tiny smoke runs."""
+    return max(MIN_TIMEOUT_S,
+               int(n_ligands * SECONDS_PER_LIGAND * TIMEOUT_SAFETY_FACTOR))
+
+
 def run_vina_gpu(ligand_dir: Path, out_dir: Path, gpu: int) -> float:
     """Vina-GPU in virtual-screening mode on ONE explicitly chosen GPU."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -222,10 +247,25 @@ def run_vina_gpu(ligand_dir: Path, out_dir: Path, gpu: int) -> float:
     env = dict(os.environ)
     env["CUDA_VISIBLE_DEVICES"] = str(gpu)
     env["GPU_DEVICE_ORDINAL"] = str(gpu)      # OpenCL honours this, not CUDA_*
-    log.info("Vina-GPU on GPU %d, depth %d, %d ligands",
-             gpu, SEARCH_DEPTH, len(list(ligand_dir.glob("*.pdbqt"))))
+    n_ligands = len(list(ligand_dir.glob("*.pdbqt")))
+    timeout_s = vina_timeout_s(n_ligands)
+    # STATED UP FRONT, NOT DISCOVERED AT THE END. The run that was killed by
+    # the old flat cap gave no indication it was on a deadline it could not
+    # meet until 24 h had already been spent.
+    log.info("Vina-GPU on GPU %d, depth %d, %d ligands; deadline %.1f h "
+             "(all-or-nothing: poses are written only on completion)",
+             gpu, SEARCH_DEPTH, n_ligands, timeout_s / 3600)
     t0 = time.time()
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=86400, env=env)
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True,
+                           timeout=timeout_s, env=env)
+    except subprocess.TimeoutExpired:
+        log.error("Vina-GPU exceeded its %.1f h deadline on %d ligands and was "
+                  "killed; NOTHING was written, because poses land only at the "
+                  "end of a virtual-screening run. Split the pool or raise "
+                  "TIMEOUT_SAFETY_FACTOR before retrying.",
+                  timeout_s / 3600, n_ligands)
+        raise
     dt = time.time() - t0
     (out_dir / "vina_gpu_stdout.log").write_text(
         p.stdout + "\n--- stderr ---\n" + p.stderr)
@@ -316,6 +356,38 @@ def run(*, experiment: str, approach: str, frame_prefix: str, gpu: int,
         raise SystemExit("no ligand survived preparation")
 
     elapsed = run_vina_gpu(ligand_dir, out_dir, gpu)
+    return merge_poses_onto_frame(
+        experiment=experiment, approach=approach, frame_prefix=frame_prefix,
+        out_dir=out_dir, elapsed=elapsed, gpu=gpu, limit=limit,
+        df=df, survivors=survivors)
+
+
+def merge_poses_onto_frame(*, experiment: str, approach: str,
+                           frame_prefix: str, out_dir: Path, elapsed: float,
+                           gpu, limit: int | None = None,
+                           df: pd.DataFrame | None = None,
+                           survivors: pd.DataFrame | None = None):
+    """Parse a pose directory, merge onto the frame, write it.
+
+    SPLIT OUT SO A CHUNKED RUN USES THE SAME CODE. A pool too large for one
+    GPU is docked as N chunks writing into ONE pose directory, and the frame is
+    written once afterwards. That collection step must be the identical merge
+    -- with the same derived drop list and the same `_x`/`_y` assertion -- and
+    not a second implementation in a driver script, because two code paths that
+    both "merge the docking results" is precisely how the covalent and GROMACS
+    frames ended up with suffixed columns nobody noticed.
+
+    `df`/`survivors` are passed when the caller already loaded them; a chunked
+    run has not, and reads the latest frame itself.
+    """
+    if df is None:
+        frame_path = dio.latest(DATA_ROOT / experiment, frame_prefix, ".parquet")
+        if frame_path is None:
+            raise SystemExit(f"no {frame_prefix} frame for {experiment}")
+        df = dio.read_frame(frame_path)
+    if survivors is None:
+        survivors = df[df["rejected_at"].isna()] if "rejected_at" in df else df
+
     scored = collect_modes(out_dir)
 
     # Drop stale columns BEFORE merging, so a re-run does not produce
