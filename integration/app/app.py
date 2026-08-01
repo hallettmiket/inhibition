@@ -1484,17 +1484,31 @@ def panel_seed_comparison() -> None:
                    + ", ".join(f"**{v['label']}**" for v in pending))
 
     lists = {v["key"]: D.shortlist_variant("t2", v["key"]) for v in ready}
-    cols = st.columns(len(ready))
-    for col, v in zip(cols, ready):
-        s = lists[v["key"]]
-        with col:
-            st.subheader(v["label"])
-            st.caption(f"{v['n']:,} docked · top {len(s)}")
-            show = [c for c in ("display_rank", "candidate_id", "metric_value",
-                                "HAC", "SAscore")
-                    if c in s.columns]
-            st.dataframe(s.sort_values("display_rank")[show], hide_index=True,
-                         use_container_width=True)
+
+    # WRAPPED AT THREE. With all five seeds plus the degree-2 sample there are
+    # six columns, and st.columns(6) makes each too narrow to read a SMILES or
+    # a candidate id in. Three per row keeps them legible.
+    PER_ROW = 3
+    for start in range(0, len(ready), PER_ROW):
+        row = ready[start:start + PER_ROW]
+        cols = st.columns(PER_ROW)          # fixed width, so a short last row
+        for col, v in zip(cols, row):       # does not stretch its columns
+            s = lists[v["key"]]
+            with col:
+                st.subheader(v["label"])
+                # THE DEGREE-2 SAMPLE IS NOT A FIFTH SEED. It is a second CReM
+                # edit from ATRA, so it answers "does another edit help?" and
+                # not "does the starting point matter?". Read next to ATRA it is
+                # a comparison; read next to Du-Xu it is a category error.
+                if v["key"] == "atra_degree2":
+                    st.caption("⚠️ derived from ATRA — compare with the ATRA "
+                               "column, not with the other seeds")
+                st.caption(f"{v['n']:,} docked · top {len(s)}")
+                show = [c for c in ("display_rank", "candidate_id",
+                                    "metric_value", "HAC", "SAscore")
+                        if c in s.columns]
+                st.dataframe(s.sort_values("display_rank")[show],
+                             hide_index=True, use_container_width=True)
 
     st.divider()
     st.subheader("Score-free axes — these ARE comparable")

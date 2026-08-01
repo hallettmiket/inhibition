@@ -47,6 +47,15 @@ STRATUM = "non_covalent"
 def main() -> None:
     ap = argparse.ArgumentParser(description="T_2 (CReM neighbourhood): rank and shortlist.")
     sd.add_seed_argument(ap, APPROACH)
+    # MIRRORS 03_dock.py. The docking stage gained `--experiment` for derived
+    # runs (the degree-2 sample writes to its own directory under the ATRA
+    # seed) and this stage did not, so a derived run could be docked and then
+    # not ranked -- and worse, ranking it by seed name would silently rank the
+    # PARENT experiment instead, reporting one pool's shortlist under the
+    # other's name.
+    ap.add_argument("--experiment", default=None,
+                    help="override the seed's experiment directory; for derived "
+                         "runs such as the degree-2 sample")
     ap.add_argument("--quota", type=int, default=25,
                     help="how many candidates the shortlist carries forward")
     ap.add_argument("--min-docked", type=int, default=20,
@@ -60,7 +69,7 @@ def main() -> None:
         rec = sd.resolve(APPROACH, seed_name)
     except sd.SeedError as exc:
         raise SystemExit(str(exc)) from exc
-    experiment = rec["experiment"]
+    experiment = args.experiment or rec["experiment"]
     log.info("seed %s -> experiment %s", seed_name, experiment)
 
     df, frame_path = dio.latest_frame(experiment, "t2")
