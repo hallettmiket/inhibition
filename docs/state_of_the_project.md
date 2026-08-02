@@ -10,10 +10,11 @@ Read alongside:
 
 * [`how_this_project_breaks.md`](how_this_project_breaks.md) — the one pattern
   behind every bug found here. **Read it second, before writing any code.**
-* `decisions/` — 45 records. They document what was decided *and what was wrong
+* `decisions/` — 51 records. They document what was decided *and what was wrong
   and why it looked right*. They are the most valuable thing in the repo.
-* GitHub **#4** (the plan) and **#6** (open decisions). Only two issues are open,
-  deliberately.
+* GitHub **#4** (the plan), **#6** (open decisions), **#8** (questions out to
+  the Lu lab, unanswered), **#9**/**#10** (the med-chemist review that is
+  currently setting direction), **#11** (keeping these two docs current).
 
 ---
 
@@ -39,14 +40,15 @@ as a blocking question and withdrawn.)
 | **T_3** | R-group decoration | sulfopin' | REINVENT LibInvent | covalent Cys113 |
 | **T_4** | warhead × R-group | sulfopin core | combinatorial | covalent Cys113 |
 
-**13,863 candidates** across the four arms, plus **42,588** more from the T_2
-reseeding now docking, plus a ~30,000-molecule degree-2 sample generating.
+**13,863 candidates** across the four arms, plus **42,588** from the five-seed
+T_2 reseeding and **15,653** from a degree-2 ATRA sample — **~72,000
+molecules, all docked and ranked** as of 2026-08-02.
 
 ---
 
 ## 2. The one thing to understand
 
-> **We have ~56,000 candidates and no validated way to rank any of them.**
+> **We have ~72,000 candidates and no validated way to rank any of them.**
 
 That is not pessimism; it is the measured position, and it is the project's
 central finding so far. Four levels of theory have been tested and none
@@ -81,9 +83,17 @@ Things I would defend in review.
 
 * **Docking does not work on this pocket** — enrichment (D0041) *and* pose
   recovery (D0046), by independent measurements.
-* **Ranking is partly a size sort.** ρ = −0.617 (T_1), −0.479 (T_3) between
-  rank metric and heavy-atom count. Published elsewhere too, so not a local
-  bug. Ligand efficiency over-corrects (ρ = −0.938) and is not the fix. D0043.
+* **Ranking is partly a size sort — and the DIRECTION depends on the pool.**
+  ρ = −0.617 (T_1), −0.695 (T_3) between rank metric and heavy-atom count, but
+  **positive** in the heavier T_2 pools: +0.205 (liu, mean 45 heavy atoms),
+  +0.119 (du_xu), +0.092 (potter). Consistent with Vina's size preference
+  saturating and reversing once molecules outgrow the pocket. Ligand efficiency
+  is NOT the fix — re-measured 2026-08-01 it is worse than the raw score in
+  five of six pools (T_1 −0.938 vs −0.617). D0043, D0049.
+* **Ranking is now size-decorrelated** (D0049): the metric's residual against
+  heavy-atom count, taken as a local median within equal-population strata.
+  Every arm lands at |ρ| ≤ 0.034. This makes the ordering *less wrong in one
+  identified way*; it does not make it valid.
 * **The covalent stratum is UNDERPOWERED and stays that way.** Counting
   chemotypes by warhead class gives **4** against a floor of 6. Structural
   clustering would have given exactly 6 — the decision was fixed *before* the
@@ -136,13 +146,18 @@ From the literature sweeps and the measurements. Full reasoning in #4.
 
 In order. Detail in **#4**.
 
-1. **Phase 0.3a — curate the covalent PDB ligands.** The single highest-value
-   task. Verify the covalent partner via `struct_conn` (RCSB says "covalent"
-   but not to *what* — could be Cys57), map warheads via
-   `warhead_library.canonical_class()`. The survey holds ≥4 chemistries the
-   reference set lacks — **aryl aldehyde (11 structures), maleate ester (4),
-   SuFEx (2), Mannich (1)** — taking the chemotype count 4 → 8 and unblocking
-   the covalent gate legitimately. 1–2 days, no compute.
+1. ~~**Phase 0.3a — curate the covalent PDB ligands.**~~ **DONE 2026-08-01,
+   and it does NOT unblock the covalent gate.** Verified against `struct_conn`:
+   31 ligand–cysteine covalent links across 18 entries and 17 distinct ligands,
+   **all 31 at Cys113** (the Cys57 worry does not bite). Counted by warhead
+   class: chloroacetamide 10, naphthoquinone 4, SNAr chloroazine 2, plus one
+   unclassified Mannich aminoketone. **3 chemotypes against a floor of 6 —
+   lower than D0045's 4, not higher.** The hoped-for chemistries do not
+   survive: the SuFEx entry (8VZ3) is bonded to **TYR23**, not a cysteine, and
+   aryl aldehyde and maleate ester have no covalently-linked instance at all
+   (9KE5 has no `_struct_conn` section — it is non-covalent). Those counts came
+   from entry titles, not modelled linkages. `scripts/curate_covalent_pdb.py`;
+   full result in #4.
 2. **Phase 1 — ingest the two measured-inactive datasets.** Dubiella's
    993-fragment screen (111 hits / 882 measured non-hits) and PubChem AID
    504891 (34 actives / **361,392 measured inactives**, verified). These give
@@ -163,41 +178,61 @@ In order. Detail in **#4**.
 
 ## 6. Open decisions — #6
 
-Eight items, each with question, evidence and a recommendation. Two are
-**defects with a decision attached**, not preferences:
+*Updated 2026-08-02. Four of the original eight are closed.*
 
-* **`affinity_kcal` is the CNN-best pose's affinity**, not the best affinity.
-  89% of covalent candidates affected; **>50% of each covalent shortlist would
-  change**. No re-docking needed.
-* **T_1's structural alerts are computed and never acted on** —
-  `alert_gate_pass` is `True` for all 4,803 rows.
+**Closed since this was written:**
 
-The rest: adopt two new synthesizability rules (`acyl_phosphate`,
-`stereogenic_phosphorus` — both kill 0 known binders); the N-hydroxylamine
-rule; T_2 phosphate protect-vs-label; receptor ensemble-vs-fixed;
-charge-stratified ranking; and whether there is synthesis/assay capacity for a
-real covalent fragment screen.
+* `affinity_kcal` was the CNN-best pose's affinity — **fixed**, D0047. Worse
+  than first reported: 25% of T_4 candidates were ranked on *positive*
+  (clashing) affinities, up to +159.7.
+* T_1's structural alerts computed and never acted on — **fixed**.
+  `alert_gate_pass` is now NA when no gate ran, with `alert_gate_applied`
+  beside it. Report-not-gate, per PI decision.
+* Two synthesizability rules — **adopted**, D0048. Both reject zero known
+  binders; 236/4,803 fire in T_1, zero elsewhere.
+* Size-decorrelated ranking — **decided and implemented**, D0049. Ligand
+  efficiency was measured and rejected: worse than the raw score in five of
+  six pools.
+
+**Still open:** the N-hydroxylamine rule and synthesis/assay capacity (both
+moved to **#8**, out to the Lu lab, unanswered since 2026-07-31);
+charge-stratified ranking; T_2 phosphate protect-vs-label (decided *label*,
+not yet implemented); receptor ensemble (decided, **not** implemented — see
+D0052 for the pre-registered combination rule and the structural changes it
+needs).
 
 ---
 
 ## 7. Running compute, and what it needs
 
+**Nothing is running as of 2026-08-02 07:30.** The T_2 campaign is complete.
+
 | | state |
 |---|---|
-| T_2 five-seed docking, GPUs 4 & 7 | liu + du_xu running; potter, guo, atra queued. **Chain ends ~06:00** |
-| Degree-2 ATRA sample | ~900/1,882 parents, ~30,000 molecules; then needs docking |
-| Explicit MD | **done** — 243/245 replicates, merged into D1_21/D2_21 |
+| T_2, all five seeds | **done** — atra 1,882 · du_xu 9,736 · guo 8,670 · potter 7,376 · liu 16,806 |
+| T_2 degree-2 ATRA sample | **done** — 15,653 |
+| Explicit MD | **done** — 243/245 replicates, merged and clean from `D1_24`/`D2_24` |
 | Redocking benchmark | **done** — D0046 |
+| Covalent PDB curation | **done** — #4 Phase 0.3a; see §5 |
 
-All detached (`PPID 1`), survive SSH disconnects. **GPUs are shared** — three
-other users are on this box; cut back if it is busy.
+All six T_2 variants are ranked (size-decorrelated, D0049) and carry rebuilt
+synthesizable shortlists. **59,323 molecules across the six.**
 
-**One known defect in the merged MD frames:** `D1_21`/`D2_21` carry
-`explicit_rmsd_replicate_sd_x`/`_y` and no canonical column, because
-`merge_gromacs_results.py` drops a hand-maintained column list that omits the
-aggregates it builds. The fix is written out in
-`docs/session_state_2026-07-31.md`; the script is **untouched**, so the tree
-is consistent.
+**GPUs are shared** — `ysun2443` and `wzhan564` are also on this box. Check
+`nvidia-smi` for other people's processes before taking a card.
+
+**Two operational lessons, both paid for in GPU time:**
+
+*Vina-GPU is all-or-nothing.* It writes every pose at the END of a
+virtual-screening run. The liu pool ran 24 h on one card, hit a flat
+`timeout=86400`, and was killed with **0 of 16,806 poses written**. The
+timeout now scales with the pool (`vina_timeout_s`) and is logged before the
+run starts.
+
+*Split large pools.* `scripts/dock_chunked.py` runs one pool as N chunks
+across N GPUs into one pose directory. The same liu pool then finished in
+**7.4 h across five cards, 0 chunks failed** — and a failure now costs one
+chunk rather than everything.
 
 ---
 

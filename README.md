@@ -18,7 +18,7 @@ machinery for *describing* choreographies belongs in the murmurent repo.
 >    every substantive bug found here has been the same bug. Read it before
 >    trusting a number or writing code.
 >
-> Then `decisions/` (47 records — they record what was wrong and why it looked
+> Then `decisions/` (51 records — they record what was wrong and why it looked
 > right), and the open issues: **#4** (the master plan), **#6** (open decisions
 > and known defects), **#8** (questions put to the Lu lab — the chemistry
 > judgement we cannot supply computationally), **#9** and **#10** (where the

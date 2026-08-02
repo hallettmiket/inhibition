@@ -143,11 +143,12 @@ def active_variant(approach: str) -> str | None:
 def set_variant(approach: str, key: str) -> None:
     """Choose which seed neighbourhood the app shows for this approach."""
     if key in variants(approach):
+        # The convergence index no longer needs clearing here: it is keyed on
+        # `_frame_signature()`, which includes the active variant, so a seed
+        # switch changes the key and a new index is built automatically. The
+        # explicit clear was also incomplete -- it caught a seed switch but not
+        # a new frame arriving from a finished docking run.
         _ACTIVE_VARIANT[approach] = key
-        # The convergence index is built across whatever variants were active
-        # when it was computed, so a seed switch must invalidate it. Leaving it
-        # cached would report ATRA's neighbours under Du-Xu's name.
-        _convergence_index.cache_clear()
 
 
 def experiment_for(approach: str) -> str:
@@ -458,7 +459,19 @@ def _rdkit():
     return Chem, DataStructs, rdFingerprintGenerator
 
 
-@lru_cache(maxsize=1)
+def _frame_signature() -> tuple:
+    """(approach, variant, newest frame name) for every approach.
+
+    THE CACHE KEY THE INDEX ACTUALLY DEPENDS ON. Resolved with `dio.latest`
+    rather than `load_frame` so it costs a directory glob, not a parquet read.
+    """
+    sig = []
+    for a in APPROACHES:
+        p = dio.latest(DATA_ROOT / experiment_for(a), f"D{a[-1]}", ".parquet")
+        sig.append((a, active_variant(a), p.name if p is not None else None))
+    return tuple(sig)
+
+
 def _convergence_index() -> dict:
     """Per approach: every RANKED molecule by InChIKey, plus shortlist prints.
 
@@ -467,7 +480,26 @@ def _convergence_index() -> dict:
     other approaches' SHORTLISTS -- comparing against ~11k ranked molecules
     would cost seconds per candidate view for a number nobody would trust
     beyond the shortlist anyway.
+
+    KEYED ON THE FRAMES IT WAS BUILT FROM. This was `@lru_cache(maxsize=1)` on
+    a zero-argument function -- a cache keyed on NOTHING, in a process that
+    outlives the data it caches. Rank an approach or finish a docking run and
+    the index still holds the previous frames, with no indication: the
+    Convergence panel and the dossier's cross-approach ranks would quietly
+    describe a build that no longer exists. Streamlit keeps the process alive
+    for days, so "restart it" is not a defence.
+
+    That is catalogue entries #8 and #9 in `docs/how_this_project_breaks.md` --
+    the class pool keyed on `class_id` without the query, the ligand prep keyed
+    on `candidate_id` without the protonation. A cache keyed on less than its
+    inputs is a cache that lies; this one was keyed on less than nothing.
     """
+    return _convergence_index_for(_frame_signature())
+
+
+@lru_cache(maxsize=4)
+def _convergence_index_for(signature: tuple) -> dict:
+    """The real build. `signature` is unused in the body -- it IS the key."""
     Chem, _, rdfp = _rdkit()
     gen = rdfp.GetMorganGenerator(radius=_FP_RADIUS, fpSize=_FP_BITS)
     idx: dict[str, dict] = {}

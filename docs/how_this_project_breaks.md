@@ -38,6 +38,14 @@ test, because the code was doing exactly what it was written to do.**
 | 11 | The default H-DAB-style assumption that alerts were gated | `alert_gate_pass` is `True` for all 4,803 T_1 rows | A blacksmith checked a molecule's alerts and found them computed but unused |
 | 12 | `resi 101..125`, a **sequence window** | The measured 8 Å pocket shell | Excluded the entire Arg loop from a figure nobody had checked |
 | 13 | The stale-module detector placed at the **bottom** of `app.py` | Before any helper attribute is read | It ran 30 lines after the crash it exists to explain |
+| 14 | `rank_validated = verdict not in (UNDERPOWERED, UNGATED, FAIL)` | An allowlist: only `STRONG` validates | The gate moved to `WEAK` and T_1/T_2 silently began claiming a **validated** ranking. Noticed in a log line during an unrelated re-rank |
+| 15 | `shortlist_synth` left in place by a re-rank | Dropped — it is derived from the ranking | Its members reached rank 90 under the new order, and the GUI prefers that column. The PI saw unsynthesizable compounds in one seed |
+| 16 | `reshortlist_synthesizable.py` naming ONE T_2 experiment | All five seeds | du_xu and guo were never rebuilt, under a banner saying the filter was on |
+| 17 | `shortlist_delta`'s `available` flag, computed and never read | Used to warn | Same defect as #11, one year of code later |
+| 18 | `@lru_cache(maxsize=1)` on a **zero-argument** function | Keyed on the frames it is built from | A cache keyed on *less than nothing*, in a Streamlit process that outlives its data |
+| 19 | `timeout=86400`, sized when a pool was 1,882 molecules | Scaled to the pool | 16,806 ligands ran 24 h, were killed, and wrote **0 poses**. A day of GPU time |
+| 20 | mmCIF parsed as `loop_` only | Also the single-record `_tag value` form | Reported **zero** covalent entries across all 190 — which reads as a finding |
+| 21 | Covalent ligands matched against the **adduct** pattern | The warhead-as-drawn: PDB component SMILES is the FREE ligand | Reported **11 novel chemistries**. Sulfopin itself came back "unclassified" |
 
 ---
 
@@ -127,10 +135,22 @@ Worth being honest, because it should change how you spend your attention.
 
 | route | count |
 |---|---|
-| Someone looked at output and it didn't match expectation | 5 |
-| Found while building something else entirely | 4 |
-| An existing guard fired | 2 |
-| Deliberate audit for this class of defect | 2 |
+| Someone looked at output and it didn't match expectation | 9 |
+| Found while building something else entirely | 6 |
+| An existing guard fired | 3 |
+| Deliberate audit for this class of defect | 3 |
+
+*Updated 2026-08-02 with entries 14-21. The ratio did not improve: still only
+3 of 21 caught by a guard. Two of the new ones (#20, #21) were caught by
+checking against **6VAJ, whose covalent linkage D0001 already records at
+1.78 Å** — ground truth the project already had, in a decision record, costing
+one query to check. Both had produced output that read as a discovery: "zero
+covalent entries in the PDB" and "11 novel chemistries". Neither would have
+been caught by the number looking wrong.*
+
+**If you take one operational habit from this document, take that one:** before
+trusting a new pipeline, run it on something whose answer is already written
+down in `decisions/`.
 
 **The two that a guard caught are the two where a guard existed.** The direction
 registry caught #4; the append-only manifest caught a provenance error. Every

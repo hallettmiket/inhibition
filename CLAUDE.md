@@ -42,7 +42,7 @@ right*, and add a guard that can actually fail.
 
 ## Where the rest of the context lives
 
-- [`decisions/`](decisions/) — 47 records, the most valuable thing in the repo.
+- [`decisions/`](decisions/) — 51 records, the most valuable thing in the repo.
   Format and rules in [`decisions/README.md`](decisions/README.md).
 - Open issues: **#4** (master plan), **#6** (open decisions + known defects),
   **#8** (questions out to the Lu lab), **#9** / **#10** (current direction,
