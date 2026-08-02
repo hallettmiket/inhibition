@@ -1,6 +1,7 @@
 # How this project breaks
 
-*Written 2026-07-31, at handover. Read this before the README.*
+*Written 2026-07-31, at handover. Last updated 2026-08-02 (catalogue now 21
+entries). Read this before the README.*
 
 Every substantive bug found in this project has been the same bug.
 
@@ -55,10 +56,12 @@ test, because the code was doing exactly what it was written to do.**
 
 Two columns exist. Both are populated. Both are plausible. The code names one.
 
-Instances **1, 4, 10**. The tell: a column name that *describes* what you want
-rather than being derived from the thing that defines it. `shortlist` sounds
-like the shortlist. `cnn_affinity` sounds like an affinity. `warhead_class`
-sounds like a class.
+Instances **1, 4, 10, 21**. The tell: a column name that *describes* what you
+want rather than being derived from the thing that defines it. `shortlist`
+sounds like the shortlist. `cnn_affinity` sounds like an affinity.
+`warhead_class` sounds like a class. `adduct_attachment_smarts` sounds like the
+right pattern for a molecule crystallised as an adduct — and is wrong, because
+the PDB deposits the FREE ligand and the bond lives in `_struct_conn`.
 
 **Defence:** derive the name from the thing that owns it. `rank_shortlist`
 refuses any metric not declared in `LOWER_IS_BETTER` *with its direction* —
@@ -80,20 +83,42 @@ you have this bug.
 A constant naming a version. It was right when written. The file it names still
 exists and still parses, so nothing ever complains.
 
-Instances **6, 7**, and the pattern behind **8, 9** (a cache key is a pin on
-its inputs). This has now happened **three times** with reference files.
+Instances **6, 7, 15, 18, 19**, and the pattern behind **8, 9** (a cache key
+is a pin on its inputs). Reference files alone have done this **five** times:
+generalising the version guard on 2026-08-01 found five stale pins at once, two
+of them in `choreography.yaml` naming a binder set and a warhead library two
+and eight versions behind what the code loaded — and read by nothing, so
+nothing ever complained.
+
+The family is wider than version literals. **#19** is a `timeout=86400` sized
+when a pool was 1,882 molecules; at 16,806 it killed a 24-hour run that had
+written nothing. **#18** is a cache keyed on *nothing at all*. **#15** is a
+derived column that outlived the ranking it was derived from. All the same
+shape: a value that was right when written, cannot announce that it is not any
+more, and costs you before it raises anything.
 
 **Defence:** `shared/reference_set.latest_reference()` resolves by glob;
-`tests/test_reference_version.py` walks the AST and fails on any stale
-executable literal. A pin cannot announce that it is out of date — only a
-comparison against the directory can.
+`tests/test_reference_version.py` walks the AST across `shared/`, `scripts/`,
+`approaches/`, `integration/`, `tests/` and `config/*.yaml`, over every stem in
+`data/reference/`. A pin cannot announce that it is out of date — only a
+comparison against the directory can. For non-version constants: scale them to
+their input and **log the derived value before the work starts**, so a run that
+cannot finish says so at launch rather than at the deadline.
 
 ### 4. A guard that is scoped out, mis-ordered, or vacuous
 
 The check exists. It runs. It just doesn't cover the case, or it runs too late,
 or it cannot fail.
 
-Instances **11, 12, 13** — plus two of my own tests during this session:
+Instances **11, 12, 13, 14, 16, 17, 20** — the largest group, and growing
+fastest. **#14** is the sharpest: `rank_validated` was computed as `verdict not
+in (UNDERPOWERED, UNGATED, FAIL)`, a DENYLIST, so when the gate produced a
+verdict nobody had anticipated (`WEAK`) the ranking validated itself by
+default. **#17** is #11 again in new clothing — a flag computed and never read.
+**#20** is a parser that handled one of mmCIF's two serialisations and reported
+zero covalent entries across all 190.
+
+Plus two of my own tests during this session:
 
 * `test_stale_guard`'s first version counted only dotted `curate.X` reads.
   Making the crashing line defensive with `getattr` left it **zero accesses to
@@ -104,7 +129,8 @@ Instances **11, 12, 13** — plus two of my own tests during this session:
 
 **Defence:** for every guard, ask *what would make this pass when it should
 fail?* If the answer is "the thing it inspects being absent," assert the thing
-is present.
+is present. **Name what passes, never what fails** — an allowlist refuses a
+value nobody anticipated; a denylist admits it.
 
 ---
 
@@ -177,18 +203,39 @@ That ratio is the argument for writing guards — not for auditing harder.
 
 ## Where I would look next
 
-Untested hypotheses. Offered as leads, not findings.
+*Updated 2026-08-02. **Four of the five leads below paid off within two days**,
+which is the strongest argument this document makes: the shapes are
+predictable, and looking for them deliberately works better than waiting.*
 
-* **Every other cache.** #8 and #9 were both keys that omitted an input. Grep
-  for `if .*\.is_file\(\).*: return` and ask what the path omits.
-* **Every `[0]`, `.iloc[0]`, `.head(1)` on a scored frame.** #3 was one of
-  these. What guarantees that order?
-* **`n_docked` and other denominators.** If any is computed after a filter that
-  a reader doesn't know about, every percentage derived from it is wrong.
-* **The remaining hand-maintained lists.** #5 was one. Any literal list of
-  column names that must stay in sync with code more than a few lines away.
-* **T_1's alerts (#11) are computed and unused.** That was found; whether
-  anything *else* is computed-and-unused has not been checked.
+Resolved since first written:
+
+* ~~Every other cache~~ → **#18**, `@lru_cache(maxsize=1)` on a zero-argument
+  function. Now keyed on the frames it is built from.
+* ~~The remaining hand-maintained lists~~ → **#5** fixed by deriving the drop
+  list from the merge; the same pattern applied to the docking merge before it
+  could bite there.
+* ~~Anything else computed-and-unused~~ → **#17**, `shortlist_delta`'s
+  `available` flag. Found by asking the question this lead poses.
+* ~~Every `[0]` on a scored frame~~ → D0047: `affinity_kcal` was the CNN-best
+  pose's affinity. 89% of covalent candidates affected.
+
+Still untested:
+
+* **`n_docked` and other denominators.** If any is computed after a filter a
+  reader doesn't know about, every percentage derived from it is wrong. This is
+  the one lead from the original list nobody has checked.
+* **Every remaining denylist.** #14 was `verdict not in (...)`. Grep for
+  `not in (` and `!=` in any predicate that decides whether something is
+  valid, trusted, or safe, and ask what an unanticipated value does.
+* **Every constant with a unit.** #19 was a timeout. Any literal seconds,
+  bytes, counts or thresholds sized against a workload that has since grown —
+  and which will fail by killing work rather than by raising.
+* **Every parser that assumes one input shape.** #20 handled one of mmCIF's
+  two serialisations. Anything reading an external format: what is the *other*
+  valid way a producer could write this?
+* **Every column pair where one name is the reacted/derived form of the
+  other.** #21 was adduct-vs-warhead. `*_rows0` vs the fixed column, `rank` vs
+  `rank_synth`, `shortlist` vs `shortlist_synth` — all live pairs today.
 
 ---
 

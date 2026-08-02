@@ -1,6 +1,10 @@
 # State of the project
 
-*Written 2026-07-31 at handover. Start here.*
+*Written 2026-07-31 at handover. Last updated 2026-08-02. Start here.*
+
+> Kept current by hand today; see **#11** for automating it. If you change
+> what this describes, change this — it drifted badly within 24 h of being
+> written and a new maintainer read it as fact.
 
 This is the orientation document, not the README. The README says how to run
 things. This says **what we are trying to find out, what we have established,
@@ -94,10 +98,15 @@ Things I would defend in review.
   heavy-atom count, taken as a local median within equal-population strata.
   Every arm lands at |ρ| ≤ 0.034. This makes the ordering *less wrong in one
   identified way*; it does not make it valid.
-* **The covalent stratum is UNDERPOWERED and stays that way.** Counting
-  chemotypes by warhead class gives **4** against a floor of 6. Structural
-  clustering would have given exactly 6 — the decision was fixed *before* the
-  counts were taken, precisely so the answer could not be chosen. D0045.
+* **The covalent stratum is UNDERPOWERED and stays that way — now measured
+  twice, independently.** Counting chemotypes by warhead class over the
+  reference set's lead-tier actives gives **4** against a floor of 6; structural
+  clustering would have given exactly 6, and the definition was fixed *before*
+  the counts were taken precisely so the answer could not be chosen (D0045).
+  The Pin1 PDB, curated against `struct_conn` on 2026-08-01, independently
+  gives **3** — chloroacetamide, naphthoquinone, SNAr chloroazine, over 17
+  ligands verified covalent at Cys113. Two different sources, both short of the
+  floor, neither rescued by the other.
 * **Explicit solvent stabilises poses relative to implicit** — T_1 −0.290 nm,
   T_2 −0.469 nm mean ligand-RMSD change, every T_2 candidate improving. The
   implicit-solvent dissociations were substantially a solvent-model artefact.
@@ -136,9 +145,15 @@ From the literature sweeps and the measurements. Full reasoning in #4.
 * **Genetic algorithms / REINVENT RL against the current objective.** They
   optimise the oracle harder, and the oracle is broken. They would amplify
   D0043 fast and it would look like progress.
-* **More literature searching for a 6th covalent chemotype.** The field
-  converged on chloroacetamide. The missing chemotypes are in *screening data*
-  and *structures*, not papers.
+* **More literature searching for a 6th covalent chemotype** — and, as of
+  2026-08-01, **the structural route too.** The field converged on
+  chloroacetamide, and the PDB has now been curated against `struct_conn`: 17
+  ligands verified covalent at Cys113, yielding 3 chemotypes. The four
+  chemistries the survey appeared to offer do not survive — the SuFEx entry is
+  bonded to TYR23, and aryl aldehyde and maleate ester have no covalently
+  linked instance at all. **The missing chemotypes are in *screening data*
+  only** (Dubiella's 993-fragment set, #4 Phase 1.1), or must be commissioned
+  (#8 C3).
 
 ---
 
@@ -241,9 +256,28 @@ chunk rather than everything.
 * **Environments live outside the repo** — `/data/lab_vm/envs/dwi_{cheminf,gui,
   amber_md,gromacs_cuda,vinagpu,gnina,reinvent4,diffsbdd,admet,retro}`. Clone
   and run will not work without them.
-* **`immutable/` is read-only, `append_only/` is append-only**, enforced by
-  hooks, not convention. Frames are integer-versioned; retire superseded ones
-  in `data/ready_to_delete.md`.
+* **`immutable/` and `append_only/` are a DISCIPLINE, not enforcement.** This
+  said "enforced by hooks, not convention", which is misleading in a way worth
+  being exact about. Verified 2026-08-02: both trees are **writable at the
+  filesystem level** — `test -w` succeeds, and @tt8804 created and removed a
+  directory inside `immutable/`. The guarantee comes from
+  `~/.claude/hooks/block-rm.sh`, a **per-user Claude Code hook**: it does
+  nothing in a plain shell, nothing for a script run outside a CC session, and
+  nothing for a different user until they install their own. Treat read-only as
+  a property you maintain, not one the system maintains for you. Frames are
+  integer-versioned; retire superseded ones in `data/ready_to_delete.md`.
+* **`modifiable/` is the scratch tree** — logs, launch drivers, chunk
+  directories. Nothing there may be cited by a manifest, decision record or
+  frame, and it is the only place under `/data/lab_vm` where deletion is
+  allowed. See its own README.
+* **Analysis artefacts go to `append_only/inhibition/00_outputs/<agent>/`**,
+  resolved by `shared/outputs.py`, which versions every write and resolves
+  every read to the newest. Nothing derived belongs in the repo.
+* **Permissions are governed by an Isilon ACL the client cannot see.** The
+  POSIX mode `ls` shows is an approximation; `/data` is NFSv3, so
+  `nfs4_getfacl` returns "not supported" and `chmod` may not change what is
+  actually enforced. If a directory is unreadable despite a mode that plainly
+  permits it, that is the ACL and it needs a storage admin.
 * **Streamlit does not re-import helper modules.** Editing `curate.py` and
   clicking Rerun gives you the old module. There is a guard that stops the page
   and says so; restart the process.
