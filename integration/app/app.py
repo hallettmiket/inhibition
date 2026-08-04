@@ -1570,10 +1570,93 @@ def _inchikey(smiles: str) -> str | None:
     return Chem.MolToInchiKey(m) if m is not None else None
 
 
+
+def panel_pose_clusters() -> None:
+    """Clustered poses and their REAL representative (issue #14)."""
+    st.subheader("Pose clusters — the modes grouped, and a real representative")
+    curation_header("Pose clusters")
+    st.caption(
+        "Each candidate's docked modes grouped by **pocket-contact profile**: "
+        "for every residue lining the site, the minimum distance from any "
+        "ligand heavy atom. The representative is the **medoid** — an actual "
+        "generated mode, never a blended structure. Averaging conformations "
+        "would place a warhead between two binding modes, somewhere neither "
+        "pose ever was, and its score would look completely normal.")
+
+    tbl = D.pose_clusters()
+    if tbl is None or tbl.empty:
+        st.info("No pose-cluster table yet. Run "
+                "`python3 scripts/cluster_poses.py`.")
+        return
+
+    st.warning(
+        "**No confidence scores yet, and none have been invented.** BPMD needs "
+        "PLUMED, which is not installed on this machine — GROMACS 2026.3 has "
+        "the `-plumed` flag but there is no `libplumed` to load. Cluster "
+        "population within one Vina run is **not** a substitute: Vina spreads "
+        "its reported modes with a minimum-RMSD floor, and our own median "
+        "nearest-neighbour RMSD of 1.176 Å sits on it, so counting agreement "
+        "among the nine measures the output formatter. The honest sources are "
+        "BPMD or replicate runs with independent seeds (#10, #14).")
+
+    c1, c2 = st.columns([1, 3])
+    approach = c1.selectbox("approach", sorted(tbl["approach"].unique()),
+                            key="pc_appr")
+    sub = tbl[tbl["approach"] == approach]
+
+    agree = float(sub["top_mode_is_medoid"].mean())
+    st.metric("Vina's top mode IS the geometric medoid",
+              f"{agree:.0%} of {len(sub)} candidates",
+              help="Where this is low, the pose the pipeline carries forward "
+                   "is not the one the rest of the modes agree on. Read it "
+                   "beside D0046: top-1 recovers the crystal pose 22.5% of the "
+                   "time, best-of-9 reaches 55%.")
+
+    labels = {r.candidate_id: (f"{r.candidate_id} · {int(r.n_clusters)} clusters "
+                               f"of {int(r.n_modes)} · medoid = mode "
+                               f"{int(r.medoid_mode)}"
+                               + ("" if r.top_mode_is_medoid else "  ⚠ not mode 1"))
+              for r in sub.itertuples()}
+    cid = c2.selectbox("candidate", list(labels),
+                       format_func=lambda k: labels[k], key="pc_cand")
+    row = sub[sub["candidate_id"] == cid].iloc[0]
+
+    a, b, c, d = st.columns(4)
+    a.metric("modes", int(row["n_modes"]))
+    b.metric("clusters", int(row["n_clusters"]))
+    c.metric("medoid mode", int(row["medoid_mode"]))
+    d.metric("BPMD confidence", "—",
+             help="pending: PLUMED not installed")
+
+    st.caption(
+        f"Largest cluster: **{int(row['largest_cluster_size'])}** mode(s) "
+        f"(`{row['largest_cluster_modes']}`). The medoid "
+        + ("**is**" if row["medoid_in_largest_cluster"] else "**is not**")
+        + " inside it. Cluster count is threshold-dependent — "
+        + ", ".join(f"{t} Å → {int(row[f'n_clusters_at_{t}'])}"
+                    for t in ("1", "2", "3") if f"n_clusters_at_{t}" in row.index)
+        + " — so the grouping is a lens, not a fact about the molecule.")
+
+    frame, _ = D.load_frame(approach)
+    r = frame[frame["candidate_id"] == cid]
+    if r.empty:
+        st.info("Candidate not in the current frame.")
+        return
+
+    st.markdown(
+        f"**Medoid = mode {int(row['medoid_mode'])}.** Use *pick* to select it, "
+        "or *overlay all* to see the spread the clustering is describing. "
+        "Mode 1 is Vina's best-scoring; the medoid is the geometric consensus, "
+        "and they are usually not the same pose.")
+    render_pose_viewer(approach, D.display_name(approach), frame, r.iloc[0],
+                       key=f"pc_{cid}")
+
+
 PANELS = {
     "Shortlists": panel_candidates,
     "T₂ seed comparison": panel_seed_comparison,
     "Candidate dossier": panel_dossier,
+    "Pose clusters": panel_pose_clusters,
     "Convergence": panel_convergence,
     "Shared axes": panel_axes,
     "Within-stratum": panel_within_stratum,

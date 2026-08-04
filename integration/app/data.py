@@ -675,3 +675,23 @@ def approach_parameters(approach: str) -> list[dict]:
             val = ", ".join(str(v) for v in val)
         rows.append({"parameter": label, "value": val})
     return rows
+
+def pose_clusters() -> pd.DataFrame | None:
+    """The newest pose-cluster table, or None if the stage has not run.
+
+    Resolved by glob through `shared.outputs`, never by a pinned version --
+    re-pinning a version literal is the defect this project has now written
+    five times, and a test walks the AST for it.
+    """
+    try:
+        from shared import outputs as sout
+        p = sout.latest_path("blacksmith", "pose_clusters", "pose_clusters",
+                             ".csv")
+    except Exception:  # noqa: BLE001 - a stage that has not run is normal
+        return None
+    try:
+        return pd.read_csv(p)
+    except Exception as exc:  # noqa: BLE001
+        log = __import__("logging").getLogger(__name__)
+        log.warning("pose-cluster table %s could not be read: %s", p, exc)
+        return None

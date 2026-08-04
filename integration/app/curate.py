@@ -244,6 +244,18 @@ PANEL_SCOPE: tuple[Scope, ...] = (
           "ruled out should not be offered for inspection as though it were "
           "still in contention — though it stays reachable behind an explicit "
           "toggle, because 'why did you drop this one' is a fair question."),
+    Scope("Pose clusters", False,
+          "This panel describes the GEOMETRY of the modes a docking run "
+          "produced for a candidate — how many distinct binding modes there "
+          "are, and which real mode is their medoid. A curation filter says "
+          "which molecules a chemist would consider; it says nothing about how "
+          "many ways a molecule was posed. Filtering here would change "
+          "'7 clusters of 9 modes' into a statement about a subset of modes "
+          "that were never separately docked, which is not a curated version "
+          "of the fact but a false one — the same reason a rank denominator is "
+          "left alone. The CANDIDATE SELECTOR is a different question and may "
+          "be scoped later if the shortlist filter should drive it; that would "
+          "be a decision, not a default."),
     Scope("Convergence", True,
           "Cross-approach pairs are drawn FROM the shortlists, so a pair whose "
           "members are both excluded is not evidence about anything the "

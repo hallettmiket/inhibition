@@ -89,6 +89,14 @@ def receptor_readable() -> bool:
     return os.access(RECEPTOR, os.R_OK)
 
 
+# The protonation tag the docking run writes under. Imported from the module
+# that OWNS it rather than restated, so the read path cannot drift from the
+# write path -- restating it as a literal here is how they came apart before.
+try:
+    from shared.noncovalent_dock_run import LIGAND_PREP_TAG as _LIGAND_PREP_TAG
+except Exception:  # noqa: BLE001 - the GUI must still start without the stack
+    _LIGAND_PREP_TAG = "ph7.4"
+
 DOCKING_DIRS = {
     "t1": DATA / "01_t1_de_novo" / "docking",
     "t2": DATA / "02_t2_atra_crem" / "docking",
@@ -380,11 +388,31 @@ def find_pose(approach: str, candidate_id: str,
         return None
 
     # Non-covalent: Vina writes PDBQT into a poses/ subdirectory.
-    poses = d / "poses"
-    if poses.is_dir():
+    #
+    # THE PREP-TAGGED DIRECTORY FIRST, AND IT IS NOT COSMETIC. Ligands are
+    # docked protonated for pH 7.4 and land in `poses_ph7.4/`; the untagged
+    # `poses/` holds the SUPERSEDED neutral-form run from before 2026-07-31.
+    # Both are populated, both parse, and both contain a file with exactly the
+    # right name -- so preferring `poses/` returned a pose that was NOT the one
+    # the frame's `vina_affinity` was computed from, and the viewer drew it
+    # beside that score as though they matched. Measured 2026-08-04: every T_2
+    # candidate had both, and the stale one was being shown.
+    #
+    # This is the same defect `LIGAND_PREP_TAG` was introduced to prevent, one
+    # layer up: the write path was correctly tagged, the READ path was not.
+    for sub in (f"poses_{_LIGAND_PREP_TAG}", "poses"):
+        poses = d / sub
+        if not poses.is_dir():
+            continue
         for name in (f"{candidate_id}_out.pdbqt", f"{candidate_id}.pdbqt"):
             p = poses / name
             if p.is_file() and p.stat().st_size > 0:
+                if sub == "poses" and (d / f"poses_{_LIGAND_PREP_TAG}").is_dir():
+                    logging.getLogger(__name__).warning(
+                        "%s: falling back to the untagged pose set for %s while "
+                        "poses_%s exists — the pose shown may not be the one "
+                        "the score came from", approach, candidate_id,
+                        _LIGAND_PREP_TAG)
                 return p
 
     # Covalent: gnina writes SDF named by dock_id.
