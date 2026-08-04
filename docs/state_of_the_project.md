@@ -1,10 +1,13 @@
 # State of the project
 
-*Written 2026-07-31 at handover. Last updated 2026-08-02. Start here.*
+*Written 2026-07-31 at handover. Last updated 2026-08-04. Start here.*
 
-> Kept current by hand today; see **#11** for automating it. If you change
-> what this describes, change this — it drifted badly within 24 h of being
-> written and a new maintainer read it as fact.
+> **The measured numbers in §7 are generated now** — `scripts/refresh_orientation.py`,
+> and `tests/test_orientation_current.py` fails the suite if they drift (D0055,
+> closing #11). It caught 800 molecules of drift on its first run.
+> **The prose is still yours to keep true.** If you change what this describes,
+> change this: it drifted badly within 24 h of being written and a new
+> maintainer read it as fact.
 
 This is the orientation document, not the README. The README says how to run
 things. This says **what we are trying to find out, what we have established,
@@ -14,11 +17,14 @@ Read alongside:
 
 * [`how_this_project_breaks.md`](how_this_project_breaks.md) — the one pattern
   behind every bug found here. **Read it second, before writing any code.**
-* `decisions/` — 51 records. They document what was decided *and what was wrong
-  and why it looked right*. They are the most valuable thing in the repo.
-* GitHub **#4** (the plan), **#6** (open decisions), **#8** (questions out to
-  the Lu lab, unanswered), **#9**/**#10** (the med-chemist review that is
-  currently setting direction), **#11** (keeping these two docs current).
+* `decisions/` — they document what was decided *and what was wrong and why it
+  looked right*. They are the most valuable thing in the repo. (Count in §7,
+  generated.)
+* GitHub, consolidated 2026-08-04 — **#12** (the chemistry judgement we cannot
+  supply computationally, out to the Lu lab) and **#13** (every open technical
+  problem, audited against the code rather than against the threads). **#4**
+  remains the plan and reasoning of record. #2, #6 and #8 are closed into those
+  two; read them for history, not for status.
 
 ---
 
@@ -191,9 +197,10 @@ In order. Detail in **#4**.
 
 ---
 
-## 6. Open decisions — #6
+## 6. Open decisions — now #13
 
-*Updated 2026-08-02. Four of the original eight are closed.*
+*Updated 2026-08-04. #6 is closed; every item below is tracked in **#13**,
+audited against the code. Chemistry judgement moved to **#12**.*
 
 **Closed since this was written:**
 
@@ -209,12 +216,20 @@ In order. Detail in **#4**.
   efficiency was measured and rejected: worse than the raw score in five of
   six pools.
 
-**Still open:** the N-hydroxylamine rule and synthesis/assay capacity (both
-moved to **#8**, out to the Lu lab, unanswered since 2026-07-31);
-charge-stratified ranking; T_2 phosphate protect-vs-label (decided *label*,
-not yet implemented); receptor ensemble (decided, **not** implemented — see
-D0052 for the pre-registered combination rule and the structural changes it
-needs).
+Also closed since: `rank_validated` validated on a denylist (**D0051** — only
+`STRONG` validates, unknown verdicts fail closed as `UNGATED`); the stale-pin
+guard generalised to every versioned stem across `config/` too, with the three
+stale warhead pins fixed.
+
+**Still open:** the N-hydroxylamine rule and synthesis/assay capacity (both in
+**#12**, out to the Lu lab, unanswered since 2026-07-31); charge-stratified
+ranking; T_2 phosphate protect-vs-label (decided *label*, not yet implemented);
+receptor ensemble — **partially built as of 2026-08-04**: the receptor registry,
+per-receptor boxes, receptor-tagged pose directories and the median combination
+rule have landed with tests (D0052, D0053); 3IKG/3IKD/9INR still need preparing
+and the gate still has to be run on the ensemble metric before it ranks
+anything. **Scope decided: shortlists first** (~125 molecules/seed, minutes)
+rather than the ~265 GPU-hour full re-dock.
 
 ---
 
@@ -224,14 +239,43 @@ needs).
 
 | | state |
 |---|---|
-| T_2, all five seeds | **done** — atra 1,882 · du_xu 9,736 · guo 8,670 · potter 7,376 · liu 16,806 |
-| T_2 degree-2 ATRA sample | **done** — 15,653 |
 | Explicit MD | **done** — 243/245 replicates, merged and clean from `D1_24`/`D2_24` |
 | Redocking benchmark | **done** — D0046 |
 | Covalent PDB curation | **done** — #4 Phase 0.3a; see §5 |
 
+### Measured state of every frame
+
+*Generated — do not hand-edit. `python3 scripts/refresh_orientation.py`.
+`tests/test_orientation_current.py` fails the suite if this drifts, which is
+issue #11 and the reason the hand-maintained version of this table was wrong
+within 24 h of being written.*
+
+<!-- AUTO:arms:BEGIN -->
+| arm | frame | rows | docked | ranked | shortlist |
+|---|---|---:|---:|---:|---:|
+| T_1 de novo (DiffSBDD) | `D1_30.parquet` | 4,803 | 3,233 | 3,233 | 25 (`shortlist_synth`) |
+| T_3 R-group (LibInvent) | `D3_26.parquet` | 5,396 | 4,080 | 4,080 | 25 (`shortlist_synth`) |
+| T_4 warhead x R-group | `D4_38.parquet` | 1,782 | 1,683 | 1,683 | 27 (`shortlist_synth`) |
+<!-- AUTO:arms:END -->
+
+<!-- AUTO:t2:BEGIN -->
+| T_2 seed | frame | docked | ranked | shortlist |
+|---|---|---:|---:|---:|
+| ATRA | `D2_32.parquet` | 1,882 | 1,882 | 25 |
+| Liu-2024-C3 | `D2_5.parquet` | 16,806 | 16,806 | 25 |
+| Potter-Astex | `D2_5.parquet` | 7,376 | 7,376 | 25 |
+| Du-Xu | `D2_10.parquet` | 9,736 | 9,736 | 25 |
+| Guo-Pfizer | `D2_10.parquet` | 8,670 | 8,670 | 25 |
+| ATRA degree-2 | `D2_6.parquet` | 15,653 | 15,653 | 25 |
+| **all six** | | **60,123** | | |
+<!-- AUTO:t2:END -->
+
+<!-- AUTO:decisions:BEGIN -->
+**54** decision records.
+<!-- AUTO:decisions:END -->
+
 All six T_2 variants are ranked (size-decorrelated, D0049) and carry rebuilt
-synthesizable shortlists. **59,323 molecules across the six.**
+synthesizable shortlists.
 
 **GPUs are shared** — `ysun2443` and `wzhan564` are also on this box. Check
 `nvidia-smi` for other people's processes before taking a card.

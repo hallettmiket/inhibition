@@ -37,9 +37,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "integration" / "app"))
 import pose3d as p3d  # noqa: E402
 
-RECEPTOR_PRESENT = p3d.RECEPTOR.is_file()
+# READABLE, NOT PRESENT. `is_file()` is True for a file this process cannot
+# open -- the data root's ACL is invisible to the client and denies per user.
+# With a presence check these skips did not fire, and thirteen tests reported
+# assertion failures about Arg-loop residues and pocket size when the real
+# cause was that the receptor could not be read at all.
+RECEPTOR_READABLE = p3d.receptor_readable()
 needs_receptor = pytest.mark.skipif(
-    not RECEPTOR_PRESENT, reason="prepared receptor not on this machine")
+    not RECEPTOR_READABLE,
+    reason="prepared receptor is not readable by this user (absent, or denied "
+           "by the data root's ACL)")
 
 
 def test_the_three_sub_pockets_issue_3_asked_for_are_all_present():

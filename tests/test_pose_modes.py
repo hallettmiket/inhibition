@@ -23,6 +23,7 @@ failure that looks completely normal on screen.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -133,8 +134,10 @@ def test_hidden_better_pose_is_none_when_pose_one_already_wins(tmp_path):
 
 def test_a_non_covalent_pose_gets_no_bond_drawn(tmp_path):
     """Drawing a link into T_1/T_2 would assert a mechanism they do not have."""
-    if not p3d.RECEPTOR.is_file():
-        pytest.skip("prepared receptor not on this machine")
+    # Readable, not present -- see `pose3d.receptor_readable`.
+    if not p3d.receptor_readable():
+        pytest.skip("prepared receptor is not readable by this user "
+                    "(absent, or denied by the data root's ACL)")
     f = tmp_path / "t1_far_out.pdbqt"
     f.write_text(
         "MODEL 1\nREMARK VINA RESULT:      -8.0      0.000      0.000\n"
@@ -146,10 +149,19 @@ def test_a_non_covalent_pose_gets_no_bond_drawn(tmp_path):
 # --- the real files --------------------------------------------------------
 
 def _first_pose_file(approach: str, pattern: str) -> Path | None:
+    """The first pose file this process can actually OPEN, or None.
+
+    Readability, not existence -- the same distinction as
+    `pose3d.receptor_readable`. Returning a matched-but-unreadable path made
+    the caller's `pytest.skip("no docked poses on disk")` miss, and the test
+    then failed with a bare `PermissionError` raised from inside the parser,
+    which reads as a broken parser rather than as an access problem.
+    """
     d = p3d.DOCKING_DIRS.get(approach)
     if d is None or not d.is_dir():
         return None
-    return next(iter(sorted(d.glob(pattern))), None)
+    return next((p for p in sorted(d.glob(pattern)) if os.access(p, os.R_OK)),
+                None)
 
 
 @pytest.mark.parametrize("approach", ["t3", "t4"])
@@ -160,8 +172,10 @@ def test_real_covalent_poses_are_bonded_to_cys113(approach):
     hold, which is a pipeline failure the viewer would otherwise render as a
     perfectly ordinary picture.
     """
-    if not p3d.RECEPTOR.is_file():
-        pytest.skip("prepared receptor not on this machine")
+    # Readable, not present -- see `pose3d.receptor_readable`.
+    if not p3d.receptor_readable():
+        pytest.skip("prepared receptor is not readable by this user "
+                    "(absent, or denied by the data root's ACL)")
     f = _first_pose_file(approach, "d_*_docked.sdf")
     if f is None:
         pytest.skip(f"{approach}: no docked poses on disk")
@@ -194,8 +208,10 @@ def test_the_export_bundle_carries_everything_needed_to_reopen_the_view():
     import io
     import zipfile
 
-    if not p3d.RECEPTOR.is_file():
-        pytest.skip("prepared receptor not on this machine")
+    # Readable, not present -- see `pose3d.receptor_readable`.
+    if not p3d.receptor_readable():
+        pytest.skip("prepared receptor is not readable by this user "
+                    "(absent, or denied by the data root's ACL)")
     f = _first_pose_file("t3", "d_*_docked.sdf")
     if f is None:
         pytest.skip("no covalent poses on disk")
@@ -212,8 +228,10 @@ def test_the_export_bundle_carries_everything_needed_to_reopen_the_view():
 def test_pose_html_renders_the_surface_labels_and_every_requested_mode(tmp_path):
     """A Streamlit change that only compiles is not done."""
     pytest.importorskip("py3Dmol")
-    if not p3d.RECEPTOR.is_file():
-        pytest.skip("prepared receptor not on this machine")
+    # Readable, not present -- see `pose3d.receptor_readable`.
+    if not p3d.receptor_readable():
+        pytest.skip("prepared receptor is not readable by this user "
+                    "(absent, or denied by the data root's ACL)")
     f = _first_pose_file("t3", "d_*_docked.sdf")
     if f is None:
         pytest.skip("no covalent poses on disk")

@@ -43,6 +43,7 @@ import re
 import subprocess
 import time
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
@@ -61,6 +62,65 @@ RECEPTOR_PDBQT = RECEPTOR_ROOT / "6VAJ_prepared.pdbqt"
 BOX_EXPANDED = RECEPTOR_ROOT / "box_expanded.json"
 VINA_GPU = Path("/data/lab_vm/envs/dwi_vinagpu/bin/vina-gpu")
 OBABEL = "/data/lab_vm/envs/dwi_cheminf/bin/obabel"
+
+
+@dataclass(frozen=True)
+class Receptor:
+    """One prepared receptor and the box derived from its OWN reference ligand.
+
+    The box travels with the receptor rather than being a module constant,
+    because a box is a set of coordinates in that structure's frame. Pairing
+    6VAJ's box with 3IKG's receptor would dock into empty space next to the
+    site and return perfectly ordinary-looking affinities -- populated,
+    plausible, and computed from the wrong thing.
+    """
+
+    pdb_id: str
+    pdbqt: Path
+    box: Path
+    reference_ligand: str      # the ligand the box was derived from
+
+    @property
+    def tag(self) -> str:
+        return self.pdb_id.upper()
+
+
+# THE ENSEMBLE (#6 item 6, D0052). 6VAJ is the receptor T_1 and T_2 have always
+# used and stays the default, so a single-receptor run is unchanged apart from
+# where its poses land. The other three are the cognate structures for the T_2
+# seeds -- each seed gets its own crystal form INSIDE the ensemble, which keeps
+# scores comparable across seeds in a way a per-seed cognate receptor would not.
+SIX_VAJ = Receptor("6VAJ", RECEPTOR_PDBQT, BOX_EXPANDED, "QT7")
+ENSEMBLE: tuple[Receptor, ...] = (
+    SIX_VAJ,
+    Receptor("3IKG", RECEPTOR_ROOT / "3IKG_prepared.pdbqt",
+             RECEPTOR_ROOT / "box_3IKG.json", "J8Z"),
+    Receptor("3IKD", RECEPTOR_ROOT / "3IKD_prepared.pdbqt",
+             RECEPTOR_ROOT / "box_3IKD.json", "J9Z"),
+    Receptor("9INR", RECEPTOR_ROOT / "9INR_prepared.pdbqt",
+             RECEPTOR_ROOT / "box_9INR.json", "A1D9K"),
+)
+DEFAULT_RECEPTOR = SIX_VAJ
+
+
+def pose_dir(work: Path, receptor: Receptor = DEFAULT_RECEPTOR) -> Path:
+    """Where one receptor's poses land. KEYED ON EVERY INPUT THAT SHAPES THEM.
+
+    The path was `poses_{LIGAND_PREP_TAG}` -- carrying the protonation but not
+    the receptor. Four receptors docking a shortlist would have written into
+    that one directory, overwritten each other, and `collect_modes` would have
+    parsed whichever finished last while every manifest recorded a successful
+    run. Same defect the ligand-prep cache carries a tag to prevent.
+
+    THE DEFAULT RECEPTOR IS TAGGED TOO. Exempting 6VAJ would leave the common
+    path keyed on less than its inputs, which is the anti-pattern itself with a
+    special case bolted on. The legacy untagged `poses_ph7.4/` is NOT migrated:
+    when the protonation tag was introduced the stale neutral sets were left to
+    coexist ("the tree is append-only and nothing is deleted"), and the same
+    applies here. That directory is the superseded full-pool 6VAJ run; it is
+    recorded in `data/ready_to_delete.md` and nothing new writes to it.
+    """
+    return work / f"poses_{LIGAND_PREP_TAG}_{receptor.tag}"
 
 SEARCH_DEPTH = 20      # D0017 — the adoption evidence does not hold below this
 THREADS = 8000
@@ -231,12 +291,20 @@ def vina_timeout_s(n_ligands: int) -> int:
                int(n_ligands * SECONDS_PER_LIGAND * TIMEOUT_SAFETY_FACTOR))
 
 
-def run_vina_gpu(ligand_dir: Path, out_dir: Path, gpu: int) -> float:
-    """Vina-GPU in virtual-screening mode on ONE explicitly chosen GPU."""
+def run_vina_gpu(ligand_dir: Path, out_dir: Path, gpu: int,
+                 receptor: Receptor = DEFAULT_RECEPTOR) -> float:
+    """Vina-GPU in virtual-screening mode on ONE explicitly chosen GPU.
+
+    THE BOX COMES FROM THE RECEPTOR, NOT FROM A MODULE CONSTANT. A box is a set
+    of coordinates in one structure's frame; carrying it separately is how a
+    receptor and a box that do not belong together end up in the same command
+    line, docking into empty space beside the site and returning affinities
+    that look entirely normal.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
-    b = json.loads(BOX_EXPANDED.read_text())
+    b = json.loads(receptor.box.read_text())
     cmd = [str(VINA_GPU),
-           "--receptor", str(RECEPTOR_PDBQT),
+           "--receptor", str(receptor.pdbqt),
            "--ligand_directory", str(ligand_dir),
            "--output_directory", str(out_dir),
            "--center_x", str(b["center_x"]), "--center_y", str(b["center_y"]),
@@ -252,9 +320,10 @@ def run_vina_gpu(ligand_dir: Path, out_dir: Path, gpu: int) -> float:
     # STATED UP FRONT, NOT DISCOVERED AT THE END. The run that was killed by
     # the old flat cap gave no indication it was on a deadline it could not
     # meet until 24 h had already been spent.
-    log.info("Vina-GPU on GPU %d, depth %d, %d ligands; deadline %.1f h "
-             "(all-or-nothing: poses are written only on completion)",
-             gpu, SEARCH_DEPTH, n_ligands, timeout_s / 3600)
+    log.info("Vina-GPU on GPU %d, receptor %s (box %s), depth %d, %d ligands; "
+             "deadline %.1f h (all-or-nothing: poses are written only on "
+             "completion)", gpu, receptor.tag, receptor.box.name, SEARCH_DEPTH,
+             n_ligands, timeout_s / 3600)
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True,
@@ -296,11 +365,20 @@ def parse_modes(text: str) -> list[tuple[float, float, float]]:
             for a, lb, ub in _MODE_RE.findall(text)]
 
 
-def collect_modes(out_dir: Path) -> pd.DataFrame:
+def collect_modes(out_dir: Path,
+                  receptor: Receptor | None = None) -> pd.DataFrame:
     """Every mode of every ligand, summarised one row per candidate.
 
     See MODE_COLS for why the other eight poses are worth reading and what
     these numbers may NOT be used for.
+
+    KEYED ON (candidate, receptor) WHEN A RECEPTOR IS GIVEN. `candidate_id`
+    alone is not a key across an ensemble -- the same molecule has four scores,
+    one per structure -- and a frame keyed on less than its inputs is the
+    defect this project has now written nine times. `receptor` is left absent
+    rather than defaulted to 6VAJ for a single-receptor run, because stamping
+    an unasked-for receptor name onto a legacy pose directory would assert
+    provenance nobody established.
     """
     rows = []
     for f in out_dir.glob("*.pdbqt"):
@@ -321,22 +399,107 @@ def collect_modes(out_dir: Path) -> pd.DataFrame:
             "vina_affinity_spread": max(aff) - min(aff),
         })
     df = pd.DataFrame(rows, columns=list(("candidate_id", *MODE_COLS)))
+    if receptor is not None:
+        df.insert(1, "receptor", receptor.tag)
+        dup = df.duplicated(subset=["candidate_id", "receptor"]).sum()
+        if dup:
+            raise RuntimeError(
+                f"{dup} duplicate (candidate_id, receptor) rows parsed from "
+                f"{out_dir}; two receptors have written into one pose "
+                "directory. See `pose_dir` -- the path must carry the "
+                "receptor tag.")
     if not df.empty:
-        log.info("parsed %d ligands; %.2f modes each on average, median "
+        log.info("parsed %d ligands%s; %.2f modes each on average, median "
                  "mode-2 gap %.3f kcal/mol", len(df),
+                 f" for receptor {receptor.tag}" if receptor else "",
                  df["vina_n_modes"].mean(), df["vina_mode2_gap"].median())
     return df
 
 
+# --------------------------------------------------------------------------
+# the receptor ensemble (#6 item 6, D0052)
+# --------------------------------------------------------------------------
+
+ENSEMBLE_MEDIAN = "vina_affinity_ensemble_median"      # THE RANK METRIC
+ENSEMBLE_BEST = "vina_affinity_ensemble_best"          # carried, never sorted on
+ENSEMBLE_ARGBEST = "vina_affinity_ensemble_argbest"
+ENSEMBLE_N = "vina_affinity_ensemble_n"
+
+
+def combine_ensemble(per_receptor: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Four receptors' scores -> one row per candidate. RANKS ON THE MEDIAN.
+
+    Pre-registered in D0052 BEFORE any ensemble result was looked at, which is
+    the D0045 discipline: choosing the combination rule after seeing which one
+    improves the ranking is choosing the answer.
+
+    WHY NOT BEST-ACROSS, THE USUAL CHOICE. Best-across is a *maximum over four
+    correlated draws*, so its upward bias grows with the width of a ligand's
+    score distribution -- and that width scales with conformational
+    flexibility. Our pools differ enormously on exactly that axis: liu_2024_c3
+    averages 10.65 rotatable bonds against du_xu's 4.81 and guo_pfizer's 5.15.
+    Ranking on best-across would hand the flexible pool a systematic advantage
+    for a reason unrelated to binding, reintroducing the artefact class D0049
+    has just removed -- and doing it invisibly, because "we docked into an
+    ensemble" reads as a refinement. The median is also robust to one receptor
+    being a poor fit for one ligand, which is what an ensemble is actually for.
+
+    Best-across is still computed, because "which receptor does this ligand
+    prefer" is a real question. It is simply not the sort key.
+
+    `ENSEMBLE_N` IS NOT DECORATION. A median over two receptors is not the same
+    quantity as a median over four, and a ligand that failed on two structures
+    would otherwise get a median that looks exactly like everyone else's. The
+    count is carried on every row so a reader can refuse the ones that are not
+    comparable; nothing here silently drops them.
+    """
+    if not per_receptor:
+        raise ValueError("combine_ensemble got no receptors")
+
+    wide = None
+    for tag, df in per_receptor.items():
+        col = f"vina_affinity_{tag}"
+        part = df[["candidate_id", "vina_affinity"]].rename(
+            columns={"vina_affinity": col})
+        if part["candidate_id"].duplicated().any():
+            raise RuntimeError(
+                f"receptor {tag} supplied duplicate candidate_id rows; the "
+                "pose directory is not keyed on the receptor")
+        wide = part if wide is None else wide.merge(part, on="candidate_id",
+                                                    how="outer")
+
+    cols = [f"vina_affinity_{t}" for t in per_receptor]
+    scores = wide[cols]
+    wide[ENSEMBLE_MEDIAN] = scores.median(axis=1, skipna=True)
+    wide[ENSEMBLE_BEST] = scores.min(axis=1, skipna=True)   # kcal/mol: lower better
+    # `idxmin` returns the COLUMN NAME of the best receptor. Strip the prefix
+    # rather than positionally indexing into `cols` -- an index into a list is
+    # correct only while the column order is guaranteed, and it is not.
+    wide[ENSEMBLE_ARGBEST] = scores.idxmin(axis=1).str.replace(
+        "vina_affinity_", "", regex=False)
+    wide[ENSEMBLE_N] = scores.notna().sum(axis=1)
+
+    n_partial = int((wide[ENSEMBLE_N] < len(cols)).sum())
+    if n_partial:
+        log.warning("%d of %d candidates scored on fewer than all %d "
+                    "receptors; their %s is a median over fewer draws and is "
+                    "NOT comparable to a full one -- see %s",
+                    n_partial, len(wide), len(cols), ENSEMBLE_MEDIAN,
+                    ENSEMBLE_N)
+    return wide
+
+
 def run(*, experiment: str, approach: str, frame_prefix: str, gpu: int,
-        limit: int | None = None):
+        limit: int | None = None, receptor: Receptor = DEFAULT_RECEPTOR):
     """Dock one approach's survivors and merge the result onto its frame."""
     os.nice(NICE)
     work = DATA_ROOT / experiment / "docking"
     # Ligand dir carries the prep tag so a protonation change cannot be served
-    # from a cache built under different settings -- see LIGAND_PREP_TAG.
+    # from a cache built under different settings -- see LIGAND_PREP_TAG. The
+    # ligands themselves are receptor-independent, so they are NOT tagged by
+    # receptor: an ensemble run prepares once and docks four times.
     ligand_dir = work / f"ligands_{LIGAND_PREP_TAG}"
-    out_dir = work / f"poses_{LIGAND_PREP_TAG}"
+    out_dir = pose_dir(work, receptor)
 
     frame_path = dio.latest(DATA_ROOT / experiment, frame_prefix, ".parquet")
     if frame_path is None:
@@ -355,18 +518,20 @@ def run(*, experiment: str, approach: str, frame_prefix: str, gpu: int,
     if not n_ready:
         raise SystemExit("no ligand survived preparation")
 
-    elapsed = run_vina_gpu(ligand_dir, out_dir, gpu)
+    elapsed = run_vina_gpu(ligand_dir, out_dir, gpu, receptor)
     return merge_poses_onto_frame(
         experiment=experiment, approach=approach, frame_prefix=frame_prefix,
         out_dir=out_dir, elapsed=elapsed, gpu=gpu, limit=limit,
-        df=df, survivors=survivors)
+        df=df, frame_path=frame_path, survivors=survivors, receptor=receptor)
 
 
 def merge_poses_onto_frame(*, experiment: str, approach: str,
                            frame_prefix: str, out_dir: Path, elapsed: float,
                            gpu, limit: int | None = None,
                            df: pd.DataFrame | None = None,
-                           survivors: pd.DataFrame | None = None):
+                           frame_path: Path | None = None,
+                           survivors: pd.DataFrame | None = None,
+                           receptor: Receptor = DEFAULT_RECEPTOR):
     """Parse a pose directory, merge onto the frame, write it.
 
     SPLIT OUT SO A CHUNKED RUN USES THE SAME CODE. A pool too large for one
@@ -379,12 +544,31 @@ def merge_poses_onto_frame(*, experiment: str, approach: str,
 
     `df`/`survivors` are passed when the caller already loaded them; a chunked
     run has not, and reads the latest frame itself.
+
+    THE CALLER THAT SUPPLIES `df` MUST ALSO SUPPLY `frame_path`. The manifest
+    records the SHA-256 of every input a run consumed, and `frame_path` is the
+    frame this merge is written against. When this function was split out of
+    `run()` (2a22970) the reference to `frame_path` came with it but the
+    binding did not: it is assigned only in the `df is None` branch, so the
+    `run()` path -- which passes `df` -- raised `UnboundLocalError` at the
+    manifest call, AFTER the whole GPU run was already spent. The chunked path
+    passes no `df`, binds it, and works, which is why the break went unseen.
+
+    It is NOT resolved with `dio.latest` here when the caller supplied `df`.
+    That would look like a fix and would quietly record whichever frame is
+    newest at merge time rather than the one actually read -- a provenance lie
+    is worse than a crash. The caller knows which frame it read; it passes it.
     """
     if df is None:
         frame_path = dio.latest(DATA_ROOT / experiment, frame_prefix, ".parquet")
         if frame_path is None:
             raise SystemExit(f"no {frame_prefix} frame for {experiment}")
         df = dio.read_frame(frame_path)
+    elif frame_path is None:
+        raise ValueError(
+            "merge_poses_onto_frame was given `df` without `frame_path`. The "
+            "manifest cannot name the frame this run consumed, so the run is "
+            "unprovenanced. Pass the path the caller read.")
     if survivors is None:
         survivors = df[df["rejected_at"].isna()] if "rejected_at" in df else df
 
@@ -428,7 +612,12 @@ def merge_poses_onto_frame(*, experiment: str, approach: str,
         params={"engine": "Vina-GPU 2.1 (D0017)",
                 "search_depth": SEARCH_DEPTH,
                 "threads": THREADS,
-                "box": BOX_EXPANDED.name,
+                # Receptor and box together, never separately: a manifest that
+                # names a box without the structure it belongs to cannot be
+                # checked for the pairing that matters.
+                "receptor": receptor.tag,
+                "box": receptor.box.name,
+                "pose_dir": out_dir.name,
                 "gpu": gpu,
                 # In the manifest so a frame states its own protonation rather
                 # than leaving a reader to infer it from the run date.
@@ -444,5 +633,6 @@ def merge_poses_onto_frame(*, experiment: str, approach: str,
                     "weakly supported and must be shown with that verdict.",
                 "elapsed_s": round(elapsed, 1),
                 "n_docked": n_docked},
-        inputs={"frame": frame_path, "receptor": RECEPTOR_PDBQT})
+        inputs={"frame": frame_path, "receptor": receptor.pdbqt,
+                "box": receptor.box})
     return merged, out, survivors, n_docked, elapsed

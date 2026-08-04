@@ -55,7 +55,9 @@ from __future__ import annotations
 LOADED_MTIME = __import__("os").stat(__file__).st_mtime
 
 import io
+import logging
 import math
+import os
 import subprocess
 import zipfile
 from dataclasses import dataclass, field
@@ -68,6 +70,24 @@ POCKET_RESIDUES = Path(
     "/data/lab_vm/immutable/inhibition/receptor/pocket_residues.json")
 DATA = Path("/data/lab_vm/append_only/inhibition")
 GMX = Path("/data/lab_vm/envs/dwi_gromacs_cuda/bin/gmx")
+
+def receptor_readable() -> bool:
+    """Can this process actually READ the prepared receptor?
+
+    NOT `RECEPTOR.is_file()`. The data root is governed by an Isilon ACL the
+    client cannot see, so a file can be present, `stat`-able and listed while
+    every read of it raises `PermissionError` -- measured on this box for
+    @tt8804 on 2026-08-04, where `is_file()` is True and `os.access(R_OK)` is
+    False for every file under `immutable/inhibition/receptor/`.
+
+    Guards written as "is it present" therefore do not fire, and the failure
+    arrives later as an assertion about Arg-loop residues rather than as "you
+    cannot read the receptor". Thirteen tests failed that way before this
+    existed. Presence and readability are different questions; ask the one you
+    actually depend on.
+    """
+    return os.access(RECEPTOR, os.R_OK)
+
 
 DOCKING_DIRS = {
     "t1": DATA / "01_t1_de_novo" / "docking",
@@ -307,7 +327,20 @@ def pocket_resi(pdb: str | None = None) -> tuple[int, ...]:
         raw = json.loads(POCKET_RESIDUES.read_text(encoding="utf-8"))
         listed = {int(str(r).split(":")[-1]) for r in raw.get("resi_list", [])}
         return tuple(sorted(listed | declared)) if listed else tuple(sorted(declared))
-    except Exception:  # noqa: BLE001 - a missing shell file must not blank the view
+    except Exception as exc:  # noqa: BLE001 - a missing shell file must not blank the view
+        # MISSING AND UNREADABLE ARE DIFFERENT FACTS. The fallback is right for
+        # both -- a blank surface is worse than a small one -- but only the
+        # first is benign. When the file is PRESENT and we cannot read it, the
+        # view silently shrinks from the measured 8 A shell (>25 residues) to
+        # the 11 declared sub-pocket residues, and looks like a normal picture.
+        # That is the shape catalogued in `how_this_project_breaks.md`: a
+        # populated, plausible value computed from the wrong thing. Say so.
+        if POCKET_RESIDUES.exists():
+            logging.getLogger(__name__).warning(
+                "pocket shell %s exists but could not be read (%s); the grey "
+                "surface falls back to the %d declared sub-pocket residues and "
+                "is SMALLER than the measured 8 A shell",
+                POCKET_RESIDUES.name, type(exc).__name__, len(declared))
         return tuple(sorted(declared))
 
 

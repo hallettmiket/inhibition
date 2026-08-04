@@ -42,11 +42,14 @@ right*, and add a guard that can actually fail.
 
 ## Where the rest of the context lives
 
-- [`decisions/`](decisions/) — 51 records, the most valuable thing in the repo.
-  Format and rules in [`decisions/README.md`](decisions/README.md).
-- Open issues: **#4** (master plan), **#6** (open decisions + known defects),
-  **#8** (questions out to the Lu lab), **#9** / **#10** (current direction,
-  from a med-chemist review).
+- [`decisions/`](decisions/) — the most valuable thing in the repo. Format and
+  rules in [`decisions/README.md`](decisions/README.md). `origin` is an
+  **allowlist** (`adversary`/`implementation`/`spec`/`user`) and will refuse a
+  value you invent — that is deliberate, per D0051.
+- Open issues, consolidated 2026-08-04: **#12** (chemistry judgement, out to the
+  Lu lab) and **#13** (every open technical problem, audited against the code).
+  **#4** is the plan and reasoning of record. #2, #6, #8 and #11 are closed into
+  those; read them for history, not for status.
 - [`README.md`](README.md) — how to *run* things, the four controls, setup.
 - Spec: murmurent issue #108, Rev 3.
 
@@ -54,8 +57,28 @@ right*, and add a guard that can actually fail.
 
 - **Data lives outside git.** `/data/lab_vm/immutable/inhibition/` is read-only;
   `/data/lab_vm/append_only/inhibition/<exp>/` is append-only and
-  integer-versioned. Both are enforced by hooks, not convention. Retire
+  integer-versioned. **Both are a DISCIPLINE, not enforcement** — this line used
+  to claim "enforced by hooks, not convention" and that was wrong. Verified
+  2026-08-02: both trees are writable at the filesystem level, and the only
+  guarantee is `~/.claude/hooks/block-rm.sh`, a **per-user Claude Code hook**
+  that does nothing in a plain shell, nothing outside a CC session, and nothing
+  for another user until they install their own. See
+  [`docs/state_of_the_project.md`](docs/state_of_the_project.md) §8. Retire
   superseded frames in `data/ready_to_delete.md` rather than deleting them.
+- **Read access is governed by an Isilon ACL the client cannot see**, and it
+  does not match the POSIX mode. Frames under `append_only/inhibition/` show
+  mode `rwxrwx---` with group `ssmd-ud-vmlab`; a member of that group can still
+  get `Permission denied` on every one of them (measured for `@tt8804`,
+  2026-08-04: 0 of 166 sampled files readable, and several experiment
+  directories not even listable). If the GUI comes up with every panel absent,
+  check `test -r` on a frame before debugging the app. `load_frame` carries the
+  real reason (`no frame: [Errno 13] Permission denied: .../D1_30.parquet`), but
+  **`seed_status` does not** — [`data.py:186`](integration/app/data.py#L186)
+  catches every exception and reports the fixed string `"no frame written yet"`,
+  so an unreadable seed is displayed as an unfinished one. That is a live
+  instance of the catalogue's disguise #4 in
+  [`how_this_project_breaks.md`](docs/how_this_project_breaks.md), and the
+  docstring three lines above it warns against exactly this confusion.
 - **Environments live outside the repo**, under `/data/lab_vm/envs/dwi_*`.
   Clone-and-run will not work without them. The shared CPU workhorse is
   `/data/lab_vm/envs/dwi_cheminf`.
