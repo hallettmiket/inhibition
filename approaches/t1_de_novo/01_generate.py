@@ -73,6 +73,19 @@ def load_config() -> dict:
         "sanitize": bool(g.get("sanitize", True)),
         "relax": bool(g.get("relax", False)),
         "timesteps": g.get("timesteps"),
+        # WAS DECLARED IN CONFIG AND READ BY NOTHING. DiffSBDD's own
+        # `generate_ligands.py` takes `--num_nodes_lig`, and the config has
+        # carried the key since 2026-07-27 with the comment "let the model
+        # choose ligand size" -- but `load_config` never read it and
+        # `run_diffsbdd` never passed it, so setting it did nothing at all.
+        # Currently `null`, which happens to match the model default, so the
+        # behaviour was right BY ACCIDENT and no output ever looked wrong.
+        #
+        # This is the one T_1 parameter that matters most: it controls ligand
+        # SIZE, and D0043 found the ranking is partly a size sort. Anyone
+        # setting it to test that would have seen no change and concluded size
+        # was not the lever.
+        "num_nodes_lig": g.get("num_nodes_lig"),
         "min_heavy": int(f.get("min_heavy_atoms", 0)),
         "max_heavy": int(f.get("max_heavy_atoms", 10_000)),
         "size_classes": cfg.get("size_classes") or {},
@@ -119,6 +132,8 @@ def run_diffsbdd(cfg: dict, workdir: Path, n_samples: int,
         cmd.append("--relax")
     if cfg["timesteps"]:
         cmd += ["--timesteps", str(cfg["timesteps"])]
+    if cfg["num_nodes_lig"] is not None:
+        cmd += ["--num_nodes_lig", str(cfg["num_nodes_lig"])]
 
     log.info("running DiffSBDD for %d samples (the slow part)", n_samples)
     proc = subprocess.run(cmd, cwd=cfg["repo"], capture_output=True, text=True,
@@ -220,6 +235,11 @@ def main() -> None:
                 "pocket_mode": "resi_list (NOT ref_ligand — no chemotype prior)",
                 "resi_list": cfg["resi_list"],
                 "n_samples_requested": n,
+                # Recorded so a frame states its own ligand-size policy rather
+                # than leaving a reader to infer it. `null` means the model
+                # chose, which is a CHOICE and is upstream of D0043.
+                "num_nodes_lig": cfg["num_nodes_lig"],
+                "timesteps": cfg["timesteps"],
                 "min_heavy_atoms": cfg["min_heavy"],
                 "max_heavy_atoms": cfg["max_heavy"],
                 "enrichment_verdict": cfg["enrichment_verdict"],

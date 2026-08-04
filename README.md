@@ -37,7 +37,7 @@ machinery for *describing* choreographies belongs in the murmurent repo.
 | **T_1** | de novo, structure-based generation | none — the pocket | DiffSBDD (pocket-conditioned diffusion) | non-covalent | weak (reversible occupancy) |
 | **T_2** | derivative neighborhood of a known binder | 5 seeds (ATRA, Liu-2024-C3, Potter-Astex, Du-Xu, Guo-Pfizer) | CReM, degree-bounded | non-covalent | weak (reversible occupancy) |
 | **T_3** | single-warhead R-group decoration | sulfopin (core + warhead fixed) | REINVENT 4 `libinvent` | covalent | strong (covalent Cys113) |
-| **T_4** | warhead × R-group combinatorial | sulfopin (core fixed) | combinatorial, 16 × 444 = 7,104 | covalent | strong (covalent Cys113) |
+| **T_4** | warhead × R-group combinatorial | sulfopin (core fixed) | combinatorial, 9 × 198 = 1,782 | covalent | strong (covalent Cys113) |
 
 Each approach emits a candidate frame `D^i` (rows = candidates, columns =
 attributes, keyed on canonical SMILES) and hands its **top 10** to the

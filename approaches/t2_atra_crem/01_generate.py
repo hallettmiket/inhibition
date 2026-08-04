@@ -107,27 +107,51 @@ def load_seed(name: str) -> str:
     return canon
 
 
-def probe_radius(seed_smiles: str, db: str, radii=(1, 2, 3, 4, 5)) -> dict:
+def probe_radius(seed_smiles: str, db: str, cfg: dict,
+                 radii=(1, 2, 3, 4, 5)) -> dict:
     """How many derivatives each radius yields for THIS seed.
 
     D0018's lesson as a runnable check: the usable radius belongs to the seed.
     A seed whose counts collapse to zero at the configured radius would
     enumerate an empty frontier and report success.
+
+    THE PROBE MUST RUN THE SAME ENUMERATION AS `expand_once`, OR IT IS
+    MEASURING A DIFFERENT QUESTION. It previously hardcoded `max_size=8,
+    min_size=1` / `max_atoms=8, min_atoms=1` and omitted `max_inc` entirely,
+    while `expand_once` reads all four from config and passes `max_inc`.
+    Measured on ATRA at radius 2 (2026-08-04): the probe reported 113 mutate +
+    1,679 grow = **1,792**, and the run produces 203 + 1,679 = **1,882**. The
+    check that decides whether a radius is usable was reporting a stricter
+    enumeration than the one about to happen, and any config change to the size
+    parameters would have widened the gap silently.
     """
     from crem.crem import grow_mol, mutate_mol
     from rdkit import Chem
 
+    mut, grw = cfg["mutate"], cfg["grow"]
     mol = Chem.MolFromSmiles(seed_smiles)
     out = {}
     for r in radii:
         try:
-            m = len(set(mutate_mol(mol, db, radius=r, max_size=8, min_size=1)))
-            g = len(set(grow_mol(mol, db, radius=r, max_atoms=8, min_atoms=1)))
+            m = len(set(mutate_mol(mol, db, radius=r,
+                                   min_size=int(mut.get("min_size", 1)),
+                                   max_size=int(mut.get("max_size", 8)),
+                                   max_inc=int(mut.get("max_inc", 4)))))
+            g = len(set(grow_mol(mol, db, radius=r,
+                                 min_atoms=int(grw.get("min_atoms", 1)),
+                                 max_atoms=int(grw.get("max_atoms", 8)))))
         except Exception as exc:  # noqa: BLE001
+            # AN ERROR IS NOT A MEASURED ZERO. Callers used to read this with
+            # `.get("mutate", 0)`, so a DB failure at radius 3 became "radius 3
+            # yields nothing" -- the same shape as the mmCIF parser that
+            # reported zero covalent entries across all 190 and read as a
+            # finding. `total` is left absent so it cannot be summed.
             out[r] = {"error": str(exc)[:120]}
+            log.warning("radius %d: PROBE FAILED (%s) — this is not a zero",
+                        r, str(exc)[:80])
             continue
-        out[r] = {"mutate": m, "grow": g}
-        log.info("radius %d: %d mutations, %d grows", r, m, g)
+        out[r] = {"mutate": m, "grow": g, "total": m + g}
+        log.info("radius %d: %d mutations, %d grows, %d total", r, m, g, m + g)
     return out
 
 
@@ -245,7 +269,7 @@ def main() -> None:
                          "  python -m shared.sources stage")
 
     if args.probe:
-        counts = probe_radius(seed, cfg["db"])
+        counts = probe_radius(seed, cfg["db"], cfg)
         print(f"\nCReM yield per radius for seed {cfg['seed_name']!r}:")
         for r, v in counts.items():
             print(f"  radius {r}: {v}")
@@ -259,9 +283,21 @@ def main() -> None:
                   "before running generation.")
         else:
             print(f"\nconfigured radius is {cfg['radius']}")
-            if counts.get(cfg["radius"], {}).get("mutate", 0) == 0:
+            # BOTH OPERATORS, NOT JUST mutate. This checked `mutate` alone
+            # while `grow` supplies 1,679 of ATRA's 1,882 products -- 89% of
+            # the frontier. A seed whose `grow` collapsed to zero passed the
+            # check silently, and the `best` calculation eight lines above
+            # already used mutate+grow, so two adjacent code paths disagreed
+            # about what "yields anything" means.
+            at_radius = counts.get(cfg["radius"], {})
+            if "error" in at_radius:
+                # Distinguished from a zero on purpose -- see probe_radius.
+                print(f"  WARNING: the probe FAILED at the configured radius "
+                      f"({at_radius['error']}). This is NOT a measurement that "
+                      "the radius yields nothing; it is a missing measurement.")
+            elif at_radius.get("mutate", 0) + at_radius.get("grow", 0) == 0:
                 print("  WARNING: the configured radius yields NOTHING "
-                      "for this seed")
+                      "for this seed (neither mutate nor grow)")
         return
 
     df, stats = generate(cfg, seed)
