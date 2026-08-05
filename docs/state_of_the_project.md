@@ -253,15 +253,15 @@ within 24 h of being written.*
 <!-- AUTO:arms:BEGIN -->
 | arm | frame | rows | docked | ranked | shortlist |
 |---|---|---:|---:|---:|---:|
-| T_1 de novo (DiffSBDD) | `D1_30.parquet` | 4,803 | 3,233 | 3,233 | 25 (`shortlist_synth`) |
-| T_3 R-group (LibInvent) | `D3_26.parquet` | 5,396 | 4,080 | 4,080 | 25 (`shortlist_synth`) |
-| T_4 warhead x R-group | `D4_38.parquet` | 1,782 | 1,683 | 1,683 | 27 (`shortlist_synth`) |
+| T_1 de novo (DiffSBDD) | `D1_31.parquet` | 4,803 | 3,233 | 3,233 | 25 (`shortlist_synth`) |
+| T_3 R-group (LibInvent) | `D3_27.parquet` | 5,396 | 4,080 | 4,080 | 25 (`shortlist_synth`) |
+| T_4 warhead x R-group | `D4_39.parquet` | 1,782 | 1,683 | 1,683 | 27 (`shortlist_synth`) |
 <!-- AUTO:arms:END -->
 
 <!-- AUTO:t2:BEGIN -->
 | T_2 seed | frame | docked | ranked | shortlist |
 |---|---|---:|---:|---:|
-| ATRA | `D2_32.parquet` | 1,882 | 1,882 | 25 |
+| ATRA | `D2_33.parquet` | 1,882 | 1,882 | 25 |
 | Liu-2024-C3 | `D2_5.parquet` | 16,806 | 16,806 | 25 |
 | Potter-Astex | `D2_5.parquet` | 7,376 | 7,376 | 25 |
 | Du-Xu | `D2_10.parquet` | 9,736 | 9,736 | 25 |
@@ -271,7 +271,7 @@ within 24 h of being written.*
 <!-- AUTO:t2:END -->
 
 <!-- AUTO:decisions:BEGIN -->
-**56** decision records.
+**57** decision records.
 <!-- AUTO:decisions:END -->
 
 All six T_2 variants are ranked (size-decorrelated, D0049) and carry rebuilt

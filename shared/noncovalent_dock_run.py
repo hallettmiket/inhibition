@@ -91,15 +91,36 @@ class Receptor:
 # seeds -- each seed gets its own crystal form INSIDE the ensemble, which keeps
 # scores comparable across seeds in a way a per-seed cognate receptor would not.
 SIX_VAJ = Receptor("6VAJ", RECEPTOR_PDBQT, BOX_EXPANDED, "QT7")
-ENSEMBLE: tuple[Receptor, ...] = (
-    SIX_VAJ,
-    Receptor("3IKG", RECEPTOR_ROOT / "3IKG_prepared.pdbqt",
-             RECEPTOR_ROOT / "box_3IKG.json", "J8Z"),
-    Receptor("3IKD", RECEPTOR_ROOT / "3IKD_prepared.pdbqt",
-             RECEPTOR_ROOT / "box_3IKD.json", "J9Z"),
-    Receptor("9INR", RECEPTOR_ROOT / "9INR_prepared.pdbqt",
-             RECEPTOR_ROOT / "box_9INR.json", "A1D9K"),
-)
+
+# The three prepared by `scripts/prepare_ensemble_receptors.py`. RESOLVED BY
+# GLOB, never pinned to a version literal: they are derived artefacts written
+# by `shared/outputs.py`, a re-preparation writes `_2` beside `_1`, and a
+# hard-coded `_1` is the stale-pin defect this project has now written five
+# times. `tests/test_reference_version.py` walks the AST for exactly that.
+#
+# They live under append_only, not beside 6VAJ in immutable/: a prepared
+# receptor is DERIVED. 6VAJ_prepared.pdbqt sitting in immutable/ is a
+# pre-existing inconsistency, not a precedent.
+_ENS = ("3IKG", "J8Z"), ("3IKD", "J9Z"), ("9INR", "A1D9K")
+
+
+def _prepared(pdb_id: str, ref_ligand: str) -> Receptor | None:
+    """The newest prepared receptor + its own box, or None if not yet built."""
+    try:
+        from . import outputs as sout
+        return Receptor(
+            pdb_id,
+            sout.latest_path("blacksmith", "ensemble_receptors",
+                             f"{pdb_id}_prepared", ".pdbqt"),
+            sout.latest_path("blacksmith", "ensemble_receptors",
+                             f"box_{pdb_id}", ".json"),
+            ref_ligand)
+    except Exception:  # noqa: BLE001 - not prepared yet is a normal state
+        return None
+
+
+ENSEMBLE: tuple[Receptor, ...] = tuple(
+    [SIX_VAJ] + [r for r in (_prepared(p, l) for p, l in _ENS) if r])
 DEFAULT_RECEPTOR = SIX_VAJ
 
 
