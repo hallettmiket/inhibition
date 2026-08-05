@@ -29,12 +29,23 @@ neighbourhood and is not a sample of one. It is announced (the log says so, and
 the manifest carries `frontier_truncated`), so it is not silent; it is simply
 not interpretable. A uniform sample is.
 
-HOW THE SAMPLE IS DRAWN. Every parent is expanded in full, then each NEW unique
-child is kept independently with probability p = target / estimated_population.
-That is Bernoulli sampling over the deduplicated union, so every degree-2
-molecule has the same inclusion probability regardless of which parent produced
-it or where that parent sat in the frame. The realised size varies slightly
-around `target`; that is the price of not biasing by position.
+HOW THE SAMPLE IS DRAWN. Every parent is expanded in full; each NEW unique child
+that also clears the pocket governor enters a RESERVOIR of exactly `target`
+items (Algorithm R). Every eligible molecule ends up equally likely to be in the
+reservoir, regardless of which parent produced it or where that parent sat in
+the frame — and the sample is exactly the size asked for.
+
+THIS REPLACED BERNOULLI-AGAINST-AN-ESTIMATE, WHICH WAS WRONG BY 2x. The old
+draw kept each child with p = target / (n_parents * MEAN_CHILDREN_PER_PARENT),
+extrapolating linearly from a 30-parent probe. The deduplicated union grows
+SUBLINEARLY, because parents' children overlap more and more as the pool grows,
+so the denominator was inflated and p was too small. Measured on the ATRA run:
+estimated 7,800,890 against a realised 4,063,427 — 1.92x high, so the frame kept
+15,653 where the target was 30,000. The sample was still UNBIASED; only its SIZE
+was wrong, and nothing detected it. Worse, MEAN_CHILDREN_PER_PARENT was measured
+on ATRA and would have been applied unchanged to seeds whose degree-1
+neighbourhoods differ by up to 9x. The reservoir needs no population estimate at
+all, so the whole class of error is gone.
 
 DEGREE 2 IS TERMINAL HERE. Nothing sampled is reseeded -- this measures whether
 a second edit from the seed finds anything better, and a third would need its
@@ -153,12 +164,31 @@ def main() -> None:
     if args.limit_parents:
         parents = parents[:args.limit_parents]
 
-    estimated = len(parents) * MEAN_CHILDREN_PER_PARENT
-    p_keep = min(1.0, args.target / estimated)
+    # RESERVOIR, NOT BERNOULLI-AGAINST-AN-ESTIMATE. The population no longer has
+    # to be guessed at all, which removes the defect that halved the ATRA run.
+    #
+    # `p = target / (n_parents * MEAN_CHILDREN_PER_PARENT)` extrapolated
+    # LINEARLY from a 30-parent probe and ignored that the deduplicated union
+    # grows SUBLINEARLY as parents' children overlap. Measured on the ATRA run
+    # that used it: estimated 7,800,890, realised 4,063,427 -- 1.92x high, so p
+    # was half what it should have been and the frame kept 15,653 against a
+    # target of 30,000. The sample was still UNBIASED (every molecule had the
+    # same p); only its SIZE was wrong, and nothing flagged it. The docstring
+    # claimed the realised size "varies slightly around target".
+    #
+    # Worse for the other seeds: 4145.0 was measured on ATRA and would be
+    # applied by name to seeds whose degree-1 neighbourhoods differ by up to
+    # 9x. A constant measured in one context, used in another.
+    #
+    # Reservoir sampling returns EXACTLY `target` items, uniformly, in one pass,
+    # in O(target) memory, with no estimate of any kind. If the population is
+    # smaller than the target it returns all of it -- the honest answer rather
+    # than a scaled-down one.
     log.info("seed %s: %d degree-1 parents from %s", args.seed, len(parents),
              frame1.name)
-    log.info("estimated degree-2 population ~%.0f; keeping each with p=%.5f "
-             "to target %d", estimated, p_keep, args.target)
+    log.info("RESERVOIR sampling to exactly %d (the old estimator would have "
+             "guessed a population of %.0f; it is no longer used)",
+             args.target, len(parents) * MEAN_CHILDREN_PER_PARENT)
 
     # Seed the dedup set with degree 1 AND the seed itself, so "new at degree 2"
     # means genuinely new rather than rediscovered one edit later.
@@ -173,7 +203,7 @@ def main() -> None:
 
     rng = random.Random(args.rng_seed)
     kept: list[dict] = []
-    n_raw = n_unique = n_oversize = 0
+    n_raw = n_unique = n_oversize = n_eligible = 0
     t0 = time.time()
 
     payload = [(p, cfg) for p in parents]
@@ -198,17 +228,32 @@ def main() -> None:
                 if not ps.fits_pocket(canon, max_heavy=cfg["max_heavy_atoms"]):
                     n_oversize += 1
                     continue
-                # BERNOULLI, AFTER DEDUP. Sampling before dedup would
-                # over-represent molecules reachable by many edit paths.
-                if rng.random() >= p_keep:
-                    continue
-                kept.append({
+                # RESERVOIR, AFTER DEDUP AND AFTER THE GOVERNOR. Sampling
+                # before dedup would over-represent molecules reachable by many
+                # edit paths; sampling before the governor would spend
+                # reservoir slots on molecules that cannot fit the pocket.
+                #
+                # `n_eligible` counts everything that reached this point, which
+                # is the population the sample is drawn FROM -- so the realised
+                # fraction is a measured quantity afterwards rather than an
+                # assumption beforehand.
+                n_eligible += 1
+                row = {
                     "canonical_smiles": canon,
                     "candidate_id": smi.candidate_id(canon, prefix=APPROACH),
                     "approach": APPROACH,
                     "parent_smiles": parent,
                     "degree": 2,
-                })
+                }
+                if len(kept) < args.target:
+                    kept.append(row)
+                else:
+                    # Algorithm R: the j-th eligible item replaces a uniformly
+                    # chosen slot with probability target/j, which leaves every
+                    # item seen so far equally likely to be in the reservoir.
+                    j = rng.randrange(n_eligible)
+                    if j < args.target:
+                        kept[j] = row
             if i % 100 == 0:
                 log.info("[%d/%d parents] %d unique, %d kept, %.0fs",
                          i, len(parents), n_unique, len(kept), time.time() - t0)
@@ -223,9 +268,10 @@ def main() -> None:
     # EVERY ROW CARRIES THE FACT THAT IT IS SAMPLED. A frame that loses this in
     # the manifest alone is one join away from being counted as a census.
     out_df["is_sample"] = True
-    out_df["sampling_fraction"] = p_keep
+    # MEASURED, not assumed: the fraction is now a RESULT.
+    out_df["sampling_fraction"] = len(kept) / n_eligible if n_eligible else 0.0
 
-    realised_population = n_unique - n_oversize
+    realised_population = n_eligible
     out = dio.write_full_frame(
         out_df, approach=APPROACH, experiment=out_experiment,
         stage="t2_generate_degree2_sample",
@@ -235,10 +281,15 @@ def main() -> None:
                 "seed_name": cfg["seed_name"],
                 "source_experiment": src_experiment,
                 "n_parents": len(parents),
-                "sampling": "bernoulli after global inchikey dedup",
-                "sampling_fraction": p_keep,
+                "sampling": "reservoir (Algorithm R) after global inchikey "
+                            "dedup and the pocket governor",
+                "sampling_fraction": (len(kept) / n_eligible) if n_eligible else 0.0,
                 "rng_seed": args.rng_seed,
-                "estimated_population": estimated,
+                "target": args.target,
+                # No estimate is used any more. Recorded only so a reader can
+                # see how far the retired estimator would have been off.
+                "legacy_estimator_would_have_said":
+                    len(parents) * MEAN_CHILDREN_PER_PARENT,
                 "realised_population": realised_population,
                 "n_kept": len(out_df),
                 "governor_pruned_oversize": n_oversize,
@@ -251,12 +302,16 @@ def main() -> None:
     print(f"  new unique (degree 2) {n_unique}")
     print(f"  governor pruned       {n_oversize}")
     print(f"  population (post-gov) {realised_population}")
-    print(f"  estimate was          {estimated:.0f} "
-          f"({realised_population / estimated:.2f}x)")
-    print(f"  kept                  {len(out_df)} at p={p_keep:.5f}")
+    legacy = len(parents) * MEAN_CHILDREN_PER_PARENT
+    frac = (len(out_df) / realised_population) if realised_population else 0.0
+    print(f"  kept                  {len(out_df)} of {realised_population} "
+          f"(fraction {frac:.5f}, MEASURED not assumed)")
+    print(f"  retired estimator     would have said {legacy:.0f} "
+          f"({legacy / realised_population:.2f}x the truth)"
+          if realised_population else "")
     print(f"  elapsed               {time.time() - t0:.0f}s")
     print("\n  THIS IS A SAMPLE, NOT AN ENUMERATION. Any count derived from it "
-          f"must be scaled by 1/{p_keep:.5f}.")
+          f"must be scaled by 1/{frac:.5f}.")
 
 
 if __name__ == "__main__":
