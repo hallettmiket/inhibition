@@ -165,6 +165,11 @@ def main() -> None:
                     help="output experiment dir (default: <seed dir>_degree2)")
     ap.add_argument("--limit-parents", type=int, default=None,
                     help="smoke testing only: expand just N parents")
+    ap.add_argument("--fragment-db-local", default=None,
+                    help="read the CReM fragment DB from this LOCAL copy "
+                         "instead of the governed path (e.g. /dev/shm/...). "
+                         "The manifest still records the canonical path, and "
+                         "the copy is SHA-256 verified against it first.")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO,
                         format="%(levelname)s %(name)s: %(message)s")
@@ -184,6 +189,46 @@ def main() -> None:
     rec = sd.resolve(APPROACH, args.seed)
     src_experiment = rec["experiment"]
     out_experiment = args.experiment or f"{src_experiment}_degree2"
+
+    # THE FRAGMENT DB IS A 2 GB SQLite FILE ON NFS, AND 160 WORKERS DOING SMALL
+    # RANDOM READS AGAINST IT OVER NFS IS A PATHOLOGICAL PATTERN. Measured on
+    # potter_astex at 160 workers: 79 of 210 processes sat in `D` state
+    # (uninterruptible I/O wait) and only 137 of the 160 requested cores were
+    # busy, so the campaign was I/O-bound, not CPU-bound. Reading the same bytes
+    # from a local copy removes the wait entirely.
+    #
+    # PROVENANCE IS NOT ALLOWED TO MOVE WITH THE BYTES. The manifest keeps
+    # recording the canonical governed path, because that is the input the run
+    # consumed; a manifest naming `/dev/shm/...` would record a location that
+    # does not exist by the next reboot and cannot be checked by anyone. The
+    # copy is SHA-256 verified against the original BEFORE use, so "same bytes"
+    # is established rather than assumed -- a stale or truncated scratch copy
+    # would otherwise produce a perfectly plausible, quietly different
+    # neighbourhood.
+    canonical_db = cfg["db"]
+    if args.fragment_db_local:
+        local = Path(args.fragment_db_local)
+        if not local.is_file():
+            raise SystemExit(f"--fragment-db-local not found: {local}")
+        import hashlib
+
+        def _sha(p: Path) -> str:
+            h = hashlib.sha256()
+            with open(p, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 22), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+
+        log.info("verifying local fragment DB against the governed copy…")
+        a, b = _sha(Path(canonical_db)), _sha(local)
+        if a != b:
+            raise SystemExit(
+                f"local fragment DB does not match the governed one\n"
+                f"  {canonical_db}  {a[:16]}\n  {local}  {b[:16]}\n"
+                "Refusing to enumerate a different neighbourhood than the "
+                "manifest would claim.")
+        log.info("local DB verified (sha256 %s); reading from %s", a[:16], local)
+        cfg["db"] = str(local)
 
     df1, frame1 = dio.latest_frame(src_experiment, APPROACH)
     d1 = df1[df1["degree"] == 1].drop_duplicates("canonical_smiles")
@@ -302,7 +347,12 @@ def main() -> None:
     out = dio.write_full_frame(
         out_df, approach=APPROACH, experiment=out_experiment,
         stage="t2_generate_degree2_sample",
-        params={"engine": "crem", "fragment_db": cfg["db"],
+        # THE CANONICAL PATH, never the scratch copy it was read from. The
+        # bytes are identical (SHA-256 verified above); the governed path is
+        # the one a reader can check.
+        params={"engine": "crem", "fragment_db": canonical_db,
+                "fragment_db_read_from":
+                    args.fragment_db_local or canonical_db,
                 "radius": cfg["radius"], "degree": 2,
                 "mutate": cfg["mutate"], "grow": cfg["grow"],
                 "seed_name": cfg["seed_name"],

@@ -266,8 +266,8 @@ within 24 h of being written.*
 | Potter-Astex | `D2_5.parquet` | 7,376 | 7,376 | 25 |
 | Du-Xu | `D2_10.parquet` | 9,736 | 9,736 | 25 |
 | Guo-Pfizer | `D2_10.parquet` | 8,670 | 8,670 | 25 |
-| ATRA degree-2 | `D2_6.parquet` | 15,653 | 15,653 | 25 |
-| **all six** | | **60,123** | | |
+| ATRA degree-2 | `D2_7.parquet` | 0 | 0 | 0 |
+| **all six** | | **44,470** | | |
 <!-- AUTO:t2:END -->
 
 <!-- AUTO:decisions:BEGIN -->
