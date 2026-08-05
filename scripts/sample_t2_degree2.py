@@ -89,12 +89,25 @@ MEAN_CHILDREN_PER_PARENT = 4145.0
 
 
 def _expand_one(args: tuple) -> list[str]:
-    """Expand ONE parent and return its canonical children.
+    """Expand ONE parent and return (canonical_smiles, inchikey, fits) per child.
 
-    Runs in a worker process. Returns SMILES rather than a set of InChIKeys
-    because global dedup must happen in the parent -- a per-worker set would
-    dedup within a parent only, and the whole point is that the same molecule is
-    reachable from many parents.
+    THE PER-MOLECULE RDKit WORK HAPPENS HERE, NOT IN THE PARENT. Global dedup
+    still happens in the parent -- a per-worker set would dedup within one
+    parent only, and the whole point is that the same molecule is reachable
+    from many parents -- but the parent now only needs a SET LOOKUP on a
+    precomputed key.
+
+    MEASURED, WHICH IS WHY THIS CHANGED. Returning raw SMILES left the parent
+    doing three RDKit calls per child (canonical, inchikey, fits_pocket) on one
+    thread while 48 workers waited: the parent sat at 99.7% CPU and the workers
+    at 59%. On potter_astex that was ~1,940 s per 100 parents, dead linear --
+    compute-bound on those calls, not on the growing dedup set -- projecting
+    ~40 h for one seed and ~330 h for the four remaining. The expensive part is
+    embarrassingly parallel and was running serially.
+
+    `fits` is computed here too: the pocket governor is another RDKit parse,
+    and it is applied AFTER dedup in the parent, so the flag travels with the
+    molecule rather than being recomputed.
     """
     parent, cfg = args
     os.nice(19)
@@ -104,23 +117,37 @@ def _expand_one(args: tuple) -> list[str]:
     RDLogger.DisableLog("rdApp.*")
     from crem.crem import grow_mol, mutate_mol
 
+    from shared import pocket_size as _ps
+    from shared import smiles as _smi
+
     mol = Chem.MolFromSmiles(parent)
     if mol is None:
         return []
     mut, grw = cfg["mutate"], cfg["grow"]
-    out: list[str] = []
+    raw: list[str] = []
     try:
         for child in mutate_mol(mol, cfg["db"], radius=cfg["radius"],
                                 min_size=int(mut.get("min_size", 1)),
                                 max_size=int(mut.get("max_size", 8)),
                                 max_inc=int(mut.get("max_inc", 4))):
-            out.append(child)
+            raw.append(child)
         for child in grow_mol(mol, cfg["db"], radius=cfg["radius"],
                               min_atoms=int(grw.get("min_atoms", 1)),
                               max_atoms=int(grw.get("max_atoms", 8))):
-            out.append(child)
+            raw.append(child)
     except Exception as exc:  # noqa: BLE001 - one bad parent must not end the run
         log.warning("expansion failed for %s: %s", parent[:40], str(exc)[:120])
+
+    out: list[tuple[str, str, bool]] = []
+    max_heavy = cfg["max_heavy_atoms"]
+    for s in raw:
+        canon = _smi.canonical(s)
+        if canon is None:
+            continue
+        key = _smi.inchikey(canon)
+        if not key:
+            continue
+        out.append((canon, key, _ps.fits_pocket(canon, max_heavy=max_heavy)))
     return out
 
 
@@ -213,19 +240,19 @@ def main() -> None:
             parent = futs[fut]
             children = fut.result()
             n_raw += len(children)
-            for raw in children:
-                canon = smi.canonical(raw)
-                if canon is None:
-                    continue
-                key = smi.inchikey(canon)
-                if not key or key in seen:
+            # The worker already canonicalised, keyed and governor-checked each
+            # child; the parent's only serial job is the GLOBAL dedup set, which
+            # is a hash lookup. See `_expand_one` for the measurement that moved
+            # the RDKit work out of this loop.
+            for canon, key, fits in children:
+                if key in seen:
                     continue
                 seen.add(key)
                 n_unique += 1
                 # The governor still applies. It prunes nothing at degree 1 for
                 # any declared seed, but a degree-2 product can carry two
                 # growths and is exactly what the ceiling exists for.
-                if not ps.fits_pocket(canon, max_heavy=cfg["max_heavy_atoms"]):
+                if not fits:
                     n_oversize += 1
                     continue
                 # RESERVOIR, AFTER DEDUP AND AFTER THE GOVERNOR. Sampling
