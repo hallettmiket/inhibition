@@ -1,6 +1,6 @@
 ---
 id: D0066
-title: 77% of T_3 is an acrylimide, not an acrylamide, and the ranking mildly prefers them
+title: 97% of T_3 carries a second electron-withdrawing group on the acrylamide nitrogen
 date: 2026-08-05
 status: proposed
 approach: T_3
@@ -13,7 +13,10 @@ affects:
   - docs/ranking_rationale.md
 evidence:
   - 'T_3 scaffold as generated: [*]N(C(=O)C=C)C1CCS(=O)(=O)C1 -- all 4,086 kept candidates share it, and the attachment point is on the NITROGEN'
-  - '3,138 of 4,086 kept T_3 candidates (76.8%) match [NX3](C(=O)C=C)C(=O)[#6]: the acrylamide nitrogen carries a second acyl group'
+  - 'CORRECTED COUNT, all activating groups on the acrylamide nitrogen: N-acyl 76.6%, N-urea 9.6%, N-sulfonyl 8.9%, N-carbamate 1.8% -- 96.8% of 2,403 scored T_3 candidates carry at least one'
+  - 'genuinely plain N-alkyl / N-aryl acrylamides: 76 of 2,403 (3.2%)'
+  - 'CORRECTED PREFERENCE: plain acrylamides score HIGHER than activated ones (median 1.78x vs 1.59x, AUC 0.398). The earlier 0.580 compared N-acyl imides against a pool dominated by the weaker sulfonyl/urea classes, not against plain amides.'
+  - '51 of the 76 plain acrylamides reach the crystallographic Michael range (>=1.59x); 8 exceed the best crystal positive (2.69x)'
   - 'sulfopin (the parent) is NOT an imide -- its nitrogen carries one acyl and two alkyls'
   - 'neither crystallographic Michael positive is an imide: 9INN COC(=O)/C=C/C(=O)N[C@@H]1CCS(=O)(=O)C1, 9JF6 COC(=O)/C=C\\C(=O)N(Cc1cc2ccccc2s1)[C@H]3CCS(=O)(=O)C3'
   - 'ranking prefers them: imide median enrichment 1.59x vs 1.41x non-imide, AUC 0.580, p=3.3e-05 (n=937 vs 267)'
@@ -93,3 +96,71 @@ someone had actually made (#12 §B3), and that discipline holds here.
 - Whether T_3 should be **re-generated** with the attachment point moved off the
   nitrogen, which is the upstream fix if imides are ruled out. That would
   invalidate the T_3 arm rather than filter it, so it is not proposed lightly.
+
+
+---
+
+# Correction, 2026-08-05 (same day)
+
+Two things above were wrong, and the corrected version is both worse and better.
+
+## The scope was understated: 97%, not 77%
+
+The original SMARTS, `[NX3](C(=O)C=C)C(=O)[#6]`, requires the second carbonyl to
+be bonded to **carbon**. That misses three groups that are just as activating,
+for the same reason — they compete for the same nitrogen lone pair:
+
+| group on the acrylamide N | share of T_3 |
+|---|---|
+| N-acyl (a true imide) | 76.6% |
+| N-urea / carbamoyl | 9.6% |
+| N-sulfonyl | 8.9% |
+| N-carbamate | 1.8% |
+| **any of them** | **96.8%** |
+
+**Only 76 of 2,403 scored T_3 candidates (3.2%) are genuinely plain N-alkyl or
+N-aryl acrylamides** — the chemotype sulfopin is, and the chemotype both
+crystallographic Michael acceptors are. The earlier "non-imide" count of 562 was
+too generous by 486, because the sulfonyl, urea and carbamate compounds were
+being counted as clean.
+
+## The ranking does NOT prefer the activated compounds
+
+Redone against genuinely plain acrylamides rather than against a mixed pool:
+
+| | median enrichment |
+|---|---|
+| any activating group on N (n = 2,327) | 1.59× |
+| **genuinely plain (n = 76)** | **1.78×** |
+
+AUC 0.398 — the plain compounds score **higher**. The earlier figure (imides
+beating non-imides, AUC 0.580) was a real comparison but a misleading one: the
+"non-imide" side was dominated by sulfonyl and urea compounds, which score lower
+than both. Comparing the activated chemotype against the one we actually want
+reverses the direction.
+
+**So the concern that the ranking promotes chemically undesirable compounds is
+withdrawn.** It does not. The desirable chemotype scores best.
+
+## What the real problem is
+
+Not the ranking — the **generation**. T_3 produced 97% activated acrylamides
+because its scaffold puts the attachment point on the nitrogen and LibInvent
+almost always hung an electron-withdrawing group there. The approach explored
+overwhelmingly the wrong chemotype, and the ranking is finding the right one in
+spite of that.
+
+**There is still a usable shortlist.** Of the 76 plain acrylamides, **51 reach
+the crystallographic Michael range (≥ 1.59×) and 8 exceed the best crystal
+positive (2.69×)**:
+
+    2.94x  C=CC(=O)N(Cc1ccc(F)cc1)C1CCS(=O)(=O)C1
+    2.82x  C=CC(=O)N(CC1CCCCO1)C1CCS(=O)(=O)C1
+    2.82x  C=CC(=O)N(c1ccc(C)cc1)C1CCS(=O)(=O)C1
+    2.82x  C=CC(=O)N(Cc1ccc(C)o1)C1CCS(=O)(=O)C1
+    2.69x  C=CC(=O)N(Cc1ccc2c(c1)OCO2)C1CCS(=O)(=O)C1
+
+The consequence for shortlisting is therefore stronger than before, not weaker:
+**a T_3 shortlist should be drawn from the plain acrylamides**, which is 3% of
+the approach's output. Whether the activated ones are usable at all remains the
+chemistry judgement for #12 §B4.
