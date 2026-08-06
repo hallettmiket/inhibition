@@ -1652,8 +1652,70 @@ def panel_pose_clusters() -> None:
                        key=f"pc_{cid}")
 
 
+
+def panel_nac_ranking() -> None:
+    """The near-attack ranking, shown WITH the reasons not to over-read it.
+
+    Kept as its own panel rather than folded into "Shortlists" on purpose. The
+    existing shortlists are the PI-approved selection (issue #1); this is a
+    different ranking on a different quantity, and two rankings that look alike
+    on screen are the confusion this project keeps paying for.
+    """
+    st.header("Near-attack ranking — can the molecule present its warhead?")
+    st.caption("Covalent arms only (T₃, T₄). T₁ and T₂ carry no warhead, so the "
+               "question is undefined for them rather than false — they are not "
+               "ranked last, they are absent (D0043).")
+
+    st.warning(
+        "**Read this as a FILTER, not a fine ordering.**\n\n"
+        "- The score **does not converge** (D0068). The same molecules score "
+        "2.91× at 200 runs and 0.96× at 2,000, and the crystallographic "
+        "positives — never selected on score — fall identically. Every "
+        "enrichment below is quoted **with the run count that produced it**, "
+        "because without one it is not a quantity.\n"
+        "- The 95% interval is ~1.12× wide at 200 runs, so **1,239 of 1,806 "
+        "molecules have an interval reaching the top-25 band**. Do not read the "
+        "order within the shortlist.\n"
+        "- What it *is* good for, measured: the top 300 sit at 0.96× on the "
+        "converged scale against **0.99× for known crystallographic binders** "
+        "and **0.76× for random warhead-matched inactives** — indistinguishable "
+        "from known binders (p = 0.21), clearly above random (AUC 0.620, "
+        "p = 0.0017). It concentrates active-like molecules.")
+
+    st.info(
+        "**Pose stability (BPMD) is not here yet.** `shared/bpmd.py` is built and "
+        "tested but not run — it ranks by whether the warhead *stays* in "
+        "position under thermal motion, which is a property of the pose rather "
+        "than of how hard the search looked, and is the intended fix for the "
+        "convergence problem above. **MD residence over 100 ns** — the criterion "
+        "the Lu lab chemists actually weigh (#12 §F) — is running now on 3IKD.")
+
+    for key in ("t3", "t4"):
+        df, fname = D.load_frame(key)
+        st.subheader(D.display_name(key))
+        if df is None or "nac_enrichment" not in df.columns:
+            st.info(f"no near-attack ranking in this frame ({fname})")
+            continue
+        scored = df.dropna(subset=["nac_enrichment"])
+        st.caption(f"`{fname}` — {len(scored)} of {len(df)} scored")
+
+        top = scored.nlargest(25, "nac_enrichment").copy()
+        top["enrichment"] = [f"{r.nac_enrichment:.2f}× [{r.nac_enrichment_lo:.2f}, "
+                             f"{r.nac_enrichment_hi:.2f}]" for r in top.itertuples()]
+        top["runs"] = top.nac_run_count.astype(int)
+        cols = [c for c in ("candidate_id", "enrichment", "runs", "warhead_class",
+                            "canonical_smiles", "QED", "SAscore") if c in top.columns]
+        st.dataframe(top[cols], width="stretch", hide_index=True)
+
+        # The reference band, so a number on this page can be placed against
+        # something real rather than against the other numbers on this page.
+        st.caption("Crystallographic Cys113 binders scored **1.6–4.3×** on this "
+                   "same gate at 200 runs. A candidate above that range is not "
+                   "thereby better than a known binder — see the intervals.")
+
 PANELS = {
     "Shortlists": panel_candidates,
+    "Near-attack ranking": panel_nac_ranking,
     "T₂ seed comparison": panel_seed_comparison,
     "Candidate dossier": panel_dossier,
     "Pose clusters": panel_pose_clusters,
