@@ -52,6 +52,7 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
 from shared import nac_criterion as nac          # noqa: E402
+from shared import pose_consensus as pc          # noqa: E402
 import nac_screen as ns                          # noqa: E402
 import nac_rank as nr                            # noqa: E402
 
@@ -72,8 +73,23 @@ def next_version(subdir: str, stem: str) -> int:
     return max(int(re.search(r"_(\d+)\.parquet$", p.name).group(1)) for p in fs) + 1
 
 
-def export_one(cand: ns.Candidate, rec_dir: Path, nrun: int, gpu: str) -> dict:
-    """Re-dock under the scoring protocol and write the best NAC-viable pose."""
+def export_one(cand: ns.Candidate, rec_dir: Path, nrun: int, gpu: str,
+               top_n: int = 10) -> dict:
+    """Re-dock under the scoring protocol and write the TOP-N poses.
+
+    ALL TOP-N, NOT JUST THE BEST. Two reasons, and the first is the panel's
+    whole point: consensus is a statement about whether the top poses AGREE
+    (`shared/pose_consensus.py`), and a single pose makes that unreadable — a
+    molecule whose top ten land in one place and one whose top ten scatter across
+    the pocket look identical when you only draw one of them.
+
+    The second is that the viewer already supports every mode and selects one by
+    default; showing a single pose was throwing that away.
+
+    ORDERED WITH THE BEST NAC-VIABLE POSE FIRST, so the mode shown by default is
+    the one the enrichment is about, not merely the lowest-energy one. The rest
+    follow by energy, each carrying whether it cleared the criterion.
+    """
     from meeko import PDBQTMolecule, RDKitMolCreate
     from rdkit import Chem
 
@@ -94,38 +110,76 @@ def export_one(cand: ns.Candidate, rec_dir: Path, nrun: int, gpu: str) -> dict:
             # Prefer the lowest-energy pose that CLEARS the criterion.
             viable = [(e, i) for i, (r, e) in enumerate(zip(res, energies))
                       if r.viable and not np.isnan(e)]
+            match = mol.GetSubstructMatches(Chem.MolFromSmarts(cand.reactive_smarts))
+            if not match:
+                continue
+            rx_idx = list(match[0])
             if viable:
                 e, i = min(viable)
-                cand_best = (True, e, i, mol, res[i])
+                cand_best = (True, e, i, mol, res[i], res, energies)
             else:
-                finite = [(e, i) for i, e in enumerate(energies) if not np.isnan(e)]
-                if not finite:
+                fin = [(e, i) for i, e in enumerate(energies) if not np.isnan(e)]
+                if not fin:
                     continue
-                e, i = min(finite)
-                cand_best = (False, e, i, mol, res[i])
+                e, i = min(fin)
+                cand_best = (False, e, i, mol, res[i], res, energies)
             if best is None or (cand_best[0], -cand_best[1]) > (best[0], -best[1]):
                 best = cand_best
 
         if best is None:
             raise ValueError("no usable pose")
-        viable, energy, idx, mol, geom = best
+        viable, energy, idx, mol, geom, res, energies = best
+
+        # Rank: best NAC-viable first, then the rest by energy. `order` indexes
+        # into the docked conformers.
+        finite = [i for i, e in enumerate(energies) if not np.isnan(e)]
+        viable_i = sorted((i for i in finite if res[i].viable),
+                          key=lambda i: energies[i])
+        other_i = sorted((i for i in finite if not res[i].viable),
+                         key=lambda i: energies[i])
+        order = (viable_i + other_i)[:top_n]
 
         POSES.mkdir(parents=True, exist_ok=True)
         out = POSES / f"{cand.ident}.sdf"
-        one = Chem.Mol(mol)
-        one.RemoveAllConformers()
-        one.AddConformer(mol.GetConformer(idx), assignId=True)
-        one.SetProp("_Name", cand.ident)
-        one.SetProp("nac_viable", str(viable))
-        one.SetProp("nac_energy_kcal", f"{energy:.3f}")
-        one.SetProp("nac_distance_A", f"{geom.distance:.3f}")
-        one.SetProp("nac_angle_deg", f"{geom.angle:.2f}")
-        one.SetProp("nac_angle_kind", geom.angle_kind)
-        one.SetProp("receptor", "3IKD reactive (D0059/D0064)")
-        w = Chem.SDWriter(str(out)); w.write(one); w.close()
+        w = Chem.SDWriter(str(out))
+        for rank, i in enumerate(order, 1):
+            one = Chem.Mol(mol)
+            one.RemoveAllConformers()
+            one.AddConformer(mol.GetConformer(i), assignId=True)
+            one.SetProp("_Name", f"{cand.ident}_pose{rank}")
+            one.SetProp("pose_rank", str(rank))
+            one.SetProp("nac_viable", str(res[i].viable))
+            one.SetProp("nac_energy_kcal", f"{energies[i]:.3f}")
+            one.SetProp("nac_distance_A", f"{res[i].distance:.3f}")
+            one.SetProp("nac_angle_deg", f"{res[i].angle:.2f}")
+            one.SetProp("nac_angle_kind", res[i].angle_kind)
+            one.SetProp("receptor", "3IKD reactive (D0059/D0064)")
+            w.write(one)
+        w.close()
+
+        # Consensus over the SAME poses, so what the viewer draws and what the
+        # number describes cannot drift apart.
+        cons = None
+        try:
+            rp = [pc.ReactivePose(energy=float(energies[i]),
+                                  reactive_xyz=np.asarray(
+                                      mol.GetConformer(i).GetPositions()[list(rx_idx)]),
+                                  atom_ids=tuple(rx_idx))
+                  for i in finite]
+            if len(rp) >= pc.MIN_POSES_FOR_CONSENSUS:
+                cons = pc.consensus(rp, top_n=min(top_n, len(rp)))
+        except Exception as exc:                        # noqa: BLE001
+            log.debug("%s: consensus unavailable: %s", cand.ident, exc)
+
         return {"ident": cand.ident, "nac_pose_path": str(out),
                 "nac_pose_viable": viable, "nac_pose_energy": energy,
                 "nac_pose_distance": geom.distance, "nac_pose_angle": geom.angle,
+                "nac_n_poses_shown": len(order),
+                "nac_n_viable_shown": sum(1 for i in order if res[i].viable),
+                "nac_consensus": cons.agreement if cons else np.nan,
+                "nac_consensus_n": cons.n_poses if cons else np.nan,
+                "nac_consensus_median_rmsd": cons.median_rmsd if cons else np.nan,
+                "nac_consensus_modes": cons.n_modes if cons else np.nan,
                 "status": "ok"}
     except Exception as exc:                            # noqa: BLE001
         return {"ident": cand.ident, "nac_pose_path": None,
