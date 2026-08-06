@@ -3,7 +3,7 @@ id: D0066
 title: 97% of T_3 carries a second electron-withdrawing group on the acrylamide nitrogen
 date: 2026-08-05
 status: proposed
-approach: T_3
+approach: t3
 decided_by: '@tt8804'
 origin: implementation
 supersedes: []
