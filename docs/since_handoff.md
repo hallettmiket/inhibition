@@ -252,6 +252,64 @@ looking for the literal atom type `C1`, where meeko derives it from the base typ
 
 ---
 
+## The production run, and what scrutinising it turned up
+
+Three stages, chained across six A100s overnight: score all 5,769 warhead-bearing
+candidates → measure whether the validation survives a different draw of
+negatives → re-score the shortlist at high precision. All resumable; nothing is
+appended to or overwritten, so a late crash costs minutes.
+
+### The ranking is a filter, not a rank order
+
+At 200 runs per molecule the 95% CI on enrichment is **~1.12× wide** against a
+median enrichment of 1.59× — about ±36%. On 1,806 molecules scored:
+
+- the **leader is separated**: 5.70×, CI [4.87, 6.54], with only 5 of 1,806
+  intervals reaching it;
+- a **top-25 is not**: **1,239 of 1,806 (69%)** have an interval reaching the
+  top-25 band.
+
+So the wide screen identifies a few clear leaders and cannot legitimately order a
+shortlist. `--report` now prints every enrichment with its interval and says so
+outright, and `--refine-top` re-scores the shortlist at 2,000 runs (CI width
+scales as 1/√runs, so ~0.38×). Paying that for all 5,769 would cost 10× the
+screen; paying it for 300 costs about as much as screening 2,000 more.
+
+### 77% of T_3 is an acrylimide, and the ranking mildly prefers them (D0066)
+
+Every top-ranked T_3 candidate had a **second acyl group on the acrylamide
+nitrogen**. It is not a property of the top of the list: **3,138 of 4,086 kept
+T_3 candidates (76.8%)** are N,N-diacyl. The scaffold's attachment point sits on
+the nitrogen, so LibInvent was asked to decorate exactly there and three times in
+four attached an acyl.
+
+Neither sulfopin nor either crystallographic Michael positive shares this. An
+imide's second carbonyl competes for the nitrogen lone pair, leaving the β-carbon
+far more electrophilic than a normal acrylamide and the compound hydrolytically
+labile — the two classic covalent failure modes.
+
+The ranking prefers them (median 1.59× vs 1.41×, AUC 0.580, p = 3.3 × 10⁻⁵; top
+25 is 88% imide against 78% of the pool), and the preference is probably *real* —
+a second acyl locks the nitrogen planar and pre-organises the warhead. **That is
+the problem.** The rationale rests on step 2's rate being a property of the
+warhead *class*; an imide is a different class with a different intrinsic rate,
+so these compounds break the assumption that licenses ranking on geometry alone.
+
+Nothing is filtered — it is a chemistry judgement, and #12 §B3 records five rules
+discarded for rejecting molecules someone had actually made. Until the Lu lab
+answers, T_3 shortlists must state their imide fraction and be split
+imide / non-imide.
+
+### Molecular size does not explain the result
+
+The obvious objection — a small floppy molecule reaches a near-attack geometry
+trivially — does not hold. Enrichment vs heavy-atom count ρ = −0.09 (p = 0.36),
+positives and negatives indistinguishable in size (p = 0.97), and size-matching
+the negatives leaves AUC at **0.812 vs 0.822**. All three correlations are
+*negative* in sign, the opposite of the failure mode.
+
+---
+
 ## Parked
 
 - **guo_pfizer degree-2 enumeration** — running. atra is done (30,000 kept from a
