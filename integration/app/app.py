@@ -526,7 +526,8 @@ def render_pose_viewer(approach: str, approach_name: str,
             "candidate. Switch to *pick* or *overlay all* to see it.")
 
     components.html(
-        p3d.pose_html(pose_file, show=show, zoom_on=framing, height=height),
+        p3d.pose_html(pose_file, show=show, zoom_on=framing, height=height,
+                      receptor=p3d.receptor_for(pose_column)),
         height=height + 20)
 
     st.caption(

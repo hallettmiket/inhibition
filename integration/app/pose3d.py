@@ -66,6 +66,36 @@ from pathlib import Path
 from typing import Sequence
 
 RECEPTOR = Path("/data/lab_vm/immutable/inhibition/receptor/6VAJ_prepared.pdb")
+
+# THE RECEPTOR MUST MATCH THE POSE'S COORDINATE FRAME, AND 6VAJ IS NOT UNIVERSAL.
+#
+# 6VAJ and the chemist-prepared 3IKD sit **48.6 A apart** in space: their Cys113
+# sulfurs are at [-12.53, -35.87, 8.19] and [13.38, 3.99, -2.04]. A pose docked
+# into one, drawn against the other, renders as a molecule floating in open
+# solvent — which is exactly how the near-attack poses first appeared, and it
+# reads as "the docking is broken" rather than "the viewer loaded the wrong
+# protein".
+#
+# Keyed by the pose SOURCE, because the two coexist: the production poses were
+# docked into 6VAJ and the near-attack poses into 3IKD (D0059), and both are
+# valid against their own receptor.
+RECEPTOR_3IKD = Path(
+    "/data/lab_vm/modifiable/inhibition/receptor_3ikd_prep/3IKD_noligand.pdb")
+
+RECEPTOR_FOR_POSE_COLUMN = {
+    "pose_path": RECEPTOR,           # production docking, 6VAJ
+    "nac_pose_path": RECEPTOR_3IKD,  # reactive near-attack docking, 3IKD
+}
+
+
+def receptor_for(pose_column: str = "pose_path") -> Path:
+    """The receptor a pose from `pose_column` must be drawn against.
+
+    Unknown columns fall back to the historical default rather than raising:
+    a new pose source should render something recognisable while its receptor is
+    wired up, and the frames themselves say which column was used.
+    """
+    return RECEPTOR_FOR_POSE_COLUMN.get(pose_column, RECEPTOR)
 POCKET_RESIDUES = Path(
     "/data/lab_vm/immutable/inhibition/receptor/pocket_residues.json")
 DATA = Path("/data/lab_vm/append_only/inhibition")
@@ -677,7 +707,8 @@ def pose_html(pose_file: Path, *, show: Sequence[int] = (1,),
               width: int | None = None, height: int = 620,
               surface: bool = True, label_subpockets: bool = True,
               show_covalent: bool = True, cartoon: bool = False,
-              zoom_on: str = "ligand") -> str:
+              zoom_on: str = "ligand",
+              receptor: Path | None = None) -> str:
     """Docked pose(s) inside the receptor, on a labelled sub-pocket surface.
 
     `show` is a list of 1-based pose indices. Passing more than one overlays
@@ -701,7 +732,8 @@ def pose_html(pose_file: Path, *, show: Sequence[int] = (1,),
     wanted = [p for p in poses if p.index in set(show)] or poses[:1]
 
     v = py3Dmol.view(width=width or "100%", height=height)
-    v.addModel(RECEPTOR.read_text(), "pdb")
+    rec = receptor or RECEPTOR
+    v.addModel(rec.read_text(), "pdb")
 
     # THE SURFACE IS THE RECEPTOR REPRESENTATION, the cartoon is optional
     # context. A ribbon answers "where does the chain run"; the question a
