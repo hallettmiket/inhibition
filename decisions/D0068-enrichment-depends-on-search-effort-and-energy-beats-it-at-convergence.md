@@ -112,3 +112,43 @@ shortlist drawn from the 200-run screen is not usable.
 4. **D0065 is not withdrawn but is now conditional** — its numbers describe
    200-run enrichment, and the interpretation section must carry this record's
    caveat.
+
+---
+
+# Correction, 2026-08-06 — the screen still works as a FILTER
+
+The consequence stated above ("no shortlist is issued from the 200-run screen")
+was too strong, and @tt8804 was right to push back on it.
+
+Everything re-measured on the converged (2,000-run) scale:
+
+| | median enrichment |
+|---|---|
+| known actives (crystallographic) | 0.99× |
+| **top-300 selected by the 200-run screen** | **0.96×** |
+| random warhead-matched inactives | 0.76× |
+
+- top-300 vs random inactives: **AUC 0.620, p = 0.0017** — the screen enriched.
+- top-300 vs known actives: AUC 0.438, p = 0.21 — **statistically
+  indistinguishable**. The molecules it picked look like known binders once
+  measured properly.
+
+**So the selection was real.** What does not survive is the *absolute scale*
+(every molecule's number falls, so the values are not a property of the molecule)
+and the *fine ordering within* the shortlist (Spearman ρ 0.364, top-50 overlap
+23/50).
+
+The corrected position, and it is a much more useful one:
+
+- **The 200-run screen is a valid coarse filter.** It concentrates
+  active-like molecules, and that is what a screen is for.
+- **It cannot order the molecules it selects.** Something else has to do that.
+- **Absolute enrichments must never be quoted without their run count.**
+
+This is exactly the shape @tt8804's original #14 proposal anticipated: docking
+generates and filters, and **binding-pose metadynamics ranks**, because the
+stability of a pose under thermal motion is a property of the *pose and the
+physics* — not of how hard the search looked. Frequency-of-occurrence was always
+going to inherit the search; stability does not. The cost objection that pushed
+us to a frequency proxy is now the objection that has to be paid, because the
+proxy is the part that failed.
