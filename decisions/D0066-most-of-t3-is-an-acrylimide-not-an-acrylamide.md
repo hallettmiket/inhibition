@@ -160,6 +160,25 @@ positive (2.69×)**:
     2.82x  C=CC(=O)N(Cc1ccc(C)o1)C1CCS(=O)(=O)C1
     2.69x  C=CC(=O)N(Cc1ccc2c(c1)OCO2)C1CCS(=O)(=O)C1
 
+## T_4 does not have this problem at all
+
+The same test on T_4, which builds combinatorially from a curated R-group library
+rather than generating decorations:
+
+| | N-activated share |
+|---|---|
+| T_3 acrylamide (LibInvent, attachment on N) | **96.8%** |
+| T_4 acrylamide (combinatorial, curated R-groups) | **0.0%** (0 of 187) |
+| T_4 chloroacetamide | **0.0%** (0 of 187) |
+
+Every T_4 acrylamide is a plain N-alkyl or N-aryl amide —
+`C=CC(=O)N(c1ccccc1)[C@@H]1CCS(=O)(=O)C1` and the like. The constrained design
+protected the chemotype; the generative freedom on the nitrogen destroyed it.
+
+**This is the clearest head-to-head the project has between the two approaches**,
+and it goes against the more sophisticated one. T_4 is 41% the size of T_3 and
+essentially all of it is the chemotype we want, against 3% for T_3.
+
 The consequence for shortlisting is therefore stronger than before, not weaker:
 **a T_3 shortlist should be drawn from the plain acrylamides**, which is 3% of
 the approach's output. Whether the activated ones are usable at all remains the
