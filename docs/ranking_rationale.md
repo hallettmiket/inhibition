@@ -284,6 +284,51 @@ stripping. The reasons are unrelated to what they would have scored, but droppin
 negatives can only help an AUC, so the asymmetry is recorded rather than
 buried.*
 
+### Stage 4, and an uncomfortable result the pre-registration did not anticipate
+
+The five stage-4 rules were fixed and committed **before** the labelled set
+existed. Run against it:
+
+| class | incumbent (enrichment) | best pre-registered rule | verdict |
+|---|---|---|---|
+| chloroacetamide | 0.908 | **C2 enrichment × energy, 0.953** | delta +0.045 [+0.018, +0.076] — **beats it** |
+| Michael | 0.734 | C1 0.776 | delta +0.043 [−0.157, +0.182] — indistinguishable |
+| SNAr | 0.451 | E1 0.839 | unstable at n = 2; not read as a result |
+
+So **stage 4 exists, for chloroacetamide**: combining how often a molecule
+reaches a near-attack conformation with how good that pose is beats frequency
+alone, and the improvement clears a pre-registered bar.
+
+**But E1 was mis-specified, and fixing it produces the real finding.** E1 was
+labelled "energy alone, expected to fail" and used `best_viable_dg` — which is
+conditioned on the geometric gate, so it was never the clean control. The
+unconditioned score is `best_dg`:
+
+| class | **`best_dg` alone** | enrichment |
+|---|---|---|
+| chloroacetamide | **0.915** | 0.908 |
+| naphthoquinone / Michael | 0.636 | **0.734** |
+| snar_chloroazine | **0.807** | 0.451 |
+
+**The plain docking energy from these runs discriminates about as well as the
+geometry** — better for two classes of three. And it is not the geometry in
+disguise: `best_dg` correlates with the viable fraction at only ρ = +0.13, −0.01
+and −0.12.
+
+**This does not contradict the five prior failures.** None of them measured this:
+D0041 was Vina enrichment on 6VAJ, D0046 was pose *recovery*, D0036 was MM-GBSA,
+D0038/D0044 was MD residence, D0061 was pose *selection*. This is AutoDock4's
+function, on the corrected receptor, asked to separate molecules — a question
+none of them put. It is a new measurement, not a reversal.
+
+**What it does do is remove the framework's licence to assume geometry is
+necessary.** The honest position is that geometry and energy carry comparable
+signal here, that combining them is better than either for chloroacetamide, and
+that the outstanding control is **unbiased docking** — these energies come from
+runs whose *sampling* was biased toward the warhead–sulfur contact, so a clean
+AutoDock run without the reactive potential is required before `best_dg` can be
+called an affinity signal at all.
+
 ### Confidence ledger — what is established, and what is not
 
 *Asked directly by @tt8804, 2026-08-06: "are we confident in the current rank
