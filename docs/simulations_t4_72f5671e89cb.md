@@ -73,17 +73,12 @@ not just the paperwork.
 *The chemists' own criterion (#12 §F), whose only previous measurement was on
 6VAJ and is invalidated by D0059.*
 
-**Status: RUNNING, not complete.** Started 15:43; at hand-off the production
-trajectory is at **14.5 ns of 100 ns**. It is in tmux session `leadmd` window 0
-and will finish unattended. **No residence number is quoted here because none
-has been measured yet** — the short verification run below proves the chain,
-not the answer.
+**Status: COMPLETE.** 100 ns, 10,001 frames, finished 19:14 at 663.9 ns/day —
+the box freed up, so the ~15 ns/h quoted at hand-off did not hold for the whole
+run. **Result in §1.1.** The headline: the molecule stays in the pocket for
+54 ns, and its warhead is in near-attack geometry for 7.5% of that time.
 
-Observed throughput is ~15 ns/h rather than the 752 ns/day (31 ns/h) the card
-gives unshared: the box is carrying 91 users at load average 56 and GPU 7 is
-shared. **ETA ~22:15 today**, and that estimate is a division, not a promise.
-
-When it lands, the script writes the metrics itself to
+The script writes the metrics itself to
 `00_outputs/blacksmith/md_residence/md_residence_t4_72f5671e89cb_100ns_<N>.csv`.
 To recompute them from the trajectory without re-running the MD:
 
@@ -104,6 +99,78 @@ mr.measure_residence(Path("/data/lab_vm/modifiable/inhibition/"
 | protocol | GAFF2/AM1-BCC ligand, ff19SB protein, PME, h-bond constraints, NVT → NPT → production |
 | throughput | 752 ns/day unshared on one A100 |
 | workdir | `/data/lab_vm/modifiable/inhibition/md_residence_3ikd/t4_72f5671e89cb/` |
+
+### 1.1 Result — bound for 54 ns, in near-attack geometry for 7.5% of it
+
+**The summary CSV's headline number must not be quoted.**
+`explicit_ligand_rmsd_nm_mean = 1.525` is a mean over a **bimodal** trajectory —
+half bound, half dissociated — and describes neither state. The script's own
+`explicit_rmsd_suspect = True` flag fired on it, correctly. What follows splits
+the trajectory at the transition instead.
+
+**The ligand.** Ligand RMSD (superposed on protein) sits at **0.435 nm** for the
+first **54.45 ns**, then leaves and **never returns** within the window:
+
+| phase | frames | ligand RMSD | min-dist to protein | contacts |
+|---|---:|---:|---:|---:|
+| bound, 0 – 54.45 ns | 5,446 | **0.435 nm** | 0.378 nm | 3.07 |
+| dissociated, 54.45 – 100 ns | 4,555 | 2.829 nm (max 5.655) | 1.017 nm | 1.26 |
+
+So the pose is **not** a docking artefact — it survives 54 ns of unrestrained
+explicit-solvent dynamics, which is ~180× the 300 ps that the elevation
+experiment's tier 1 applies. Then it dissociates irreversibly.
+
+**The warhead is the different story.** Distance from the BDHI electrophilic
+carbon (`C10`, the C bearing Br and double-bonded to N3, atom 1776) to Cys113
+`SG` (residue 63, atom 1012), measured directly off `prod.xtc`:
+
+| | distance |
+|---|---:|
+| docked pose | **0.301 nm** (3.01 Å) |
+| start of production, after min + NVT + NPT (300 ps) | **0.620 nm** |
+| bound phase, mean / median | 0.782 / 0.855 nm |
+| bound phase, min / max | 0.322 / 1.639 nm |
+| after dissociation, median | 2.306 nm |
+
+**Fraction of the 54 ns bound phase inside the near-attack window
+(0.28 – 0.42 nm): 7.5%.** Within 6 Å: 24.2%.
+
+The docked geometry is therefore **not the resting state**. Under explicit
+water the molecule sits with its warhead ~8–9 Å from the sulfur and swings into
+attack distance intermittently — it revisits the window (0.368 nm at 45 ns,
+0.415 nm at 50 ns), so the NAC is accessible, not excluded.
+
+**Why this matters for the ranking.** The frame credits this molecule with
+*10 of 10* near-attack poses at 3.04 Å and 5.9° off perpendicular. That is a
+true statement about the docking output and a misleading one about the
+molecule: it implies the near-attack conformation is where the molecule *lives*,
+and 100 ns of water says it is where the molecule *visits* 7.5% of the time.
+Docking has no solvent and no entropy; the criterion inherits both gaps.
+
+For a **covalent** inhibitor a 7.5% NAC occupancy is not disqualifying — the
+reaction only needs the window to be reached, and reaching it 7.5% of 54 ns is
+ample on chemical timescales. What it does disqualify is reading pose-geometry
+scores as if they were occupancies.
+
+**The cross-check against the elevation experiment is exact and unflattering.**
+This molecule is in elevation group A (enrichment 6.86, consensus 1.000). Its
+tier-1 warhead displacement over 300 ps is **0.540 nm across 3 replicas
+(0.350 / 0.762 / 0.508)** — **rank 37 of 37, the worst molecule in the cohort**,
+against a crystallographic median of 0.102 nm. The independent 100 ns run
+reproduces it: 0.620 nm by the start of production. Two separately-built
+systems, same conclusion.
+
+So the top-ranked molecule on both metrics is the least able to hold its warhead
+in place. That is not a coincidence to be explained away — it is the elevation
+experiment's null (`docs/elevation_results.md`) showing up in a single molecule.
+
+**Uncertainty, stated plainly.** *n* = 1 replicate. One dissociation event
+gives a residence-time estimate with ~100% relative standard error, so
+**"54 ns" is one draw, not a residence time**; the autocorrelation-corrected
+count of independent RMSD samples is 3.8. The 7.5% occupancy is better
+determined than the escape time (5,446 frames, 11.6 independent samples by the
+contact statistic) but still single-replicate. Nothing here should be ranked
+against another molecule on one trajectory.
 
 **Free form, not the adduct** — residence asks whether the molecule stays long
 enough to react, which is a question about the reactant state. A tethered

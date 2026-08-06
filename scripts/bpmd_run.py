@@ -490,7 +490,8 @@ def cv_atoms(md_wd: Path, sysres: dict, mol, warhead_pose_idx: int) -> dict:
     sg, lig = sysres["sg"], sysres["lig"]
     sg_xyz = sysres["sg_xyz"]
 
-    sys_atoms = [(a.idx, a.atomic_number, (a.xx, a.xy, a.xz)) for a in lig.atoms]
+    sys_atoms = [(a.idx, a.atomic_number, (a.xx, a.xy, a.xz), a.name)
+                 for a in lig.atoms]
     sys_heavy = [t for t in sys_atoms if t[1] > 1]
     sys_xyz = np.array([t[2] for t in sys_heavy], dtype=float)
     sys_z = [t[1] for t in sys_heavy]
@@ -516,6 +517,10 @@ def cv_atoms(md_wd: Path, sysres: dict, mol, warhead_pose_idx: int) -> dict:
     d0_a = float(np.linalg.norm(np.array(warhead[2]) - sg_xyz))
     return {**found,
             "warhead_serial0": warhead_serial, "sg_serial0": sg_serial,
+            # Carried so a LATER reader of a coordinate file can check that the
+            # serial still names the atom it was derived for, instead of
+            # trusting an integer across a file format boundary.
+            "warhead_atom_name": warhead[3], "sg_atom_name": sg.name,
             "warhead_plumed": w1, "sg_plumed": s1,
             "sg_atom": sysres["sg_label"], "lig_resname": sysres["lig_resname"],
             "start_distance_A": round(d0_a, 3),
@@ -528,7 +533,8 @@ def cv_atoms(md_wd: Path, sysres: dict, mol, warhead_pose_idx: int) -> dict:
 
 def run_replicate(cand_id: str, src: Path, md_wd: Path, plumed_txt: str,
                   replicate: int, *, gpu: int, threads: int,
-                  production_ps: float) -> tuple[Path, dict]:
+                  production_ps: float,
+                  reuse_equilibration: bool = False) -> tuple[Path, dict]:
     """One replicate, or the COLVAR a previous run already produced.
 
     `prod.gro` is written only when mdrun finishes (including a PLUMED COMMITTOR
@@ -556,7 +562,8 @@ def run_replicate(cand_id: str, src: Path, md_wd: Path, plumed_txt: str,
                             gx.replicate_seed(cand_id, replicate)}
     res = gx.run_pipeline(src, md_wd, gpu_id=gpu, threads=threads,
                           production_ps=production_ps, replicate=replicate,
-                          candidate_id=cand_id, plumed=plumed_txt)
+                          candidate_id=cand_id, plumed=plumed_txt,
+                          reuse_equilibration=reuse_equilibration)
     if not res.get("plumed"):
         raise BPMDRunError("run_pipeline reports no PLUMED on production — the "
                            "trajectory is unbiased and is not a BPMD replicate")
@@ -622,7 +629,8 @@ def prepare_pose(cand: ns.Candidate, *, nrun: int, gpu: str, allow_redock: bool
 
 def run_pose(cand: ns.Candidate, *, replicates: int, production_ps: float,
              gpu: int, threads: int, nrun: int, dock_gpu: str,
-             allow_redock: bool, on_row) -> list[dict]:
+             allow_redock: bool, on_row,
+             reuse_equilibration: bool = False) -> list[dict]:
     """`replicates` replicates of one pose. Every replicate produces a row."""
     base = {"ident": cand.ident, "warhead_class": cand.warhead_class,
             "mechanism": cand.mechanism, "approach": cand.label,
@@ -648,7 +656,8 @@ def run_pose(cand: ns.Candidate, *, replicates: int, production_ps: float,
             colvar, info = run_replicate(cand.ident, prep["wd"], prep["md_wd"],
                                          prep["plumed"], k, gpu=gpu,
                                          threads=threads,
-                                         production_ps=production_ps)
+                                         production_ps=production_ps,
+                                         reuse_equilibration=reuse_equilibration)
             r = bpmd.analyse_replica(colvar, k)
             t = _colvar_times(colvar)
             row.update({"colvar": str(colvar), "covered_ps": float(t[-1]),

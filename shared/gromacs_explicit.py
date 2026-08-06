@@ -89,6 +89,7 @@ class StageResult:
     name: str
     seconds: float
     ns_per_day: float | None = None
+    reused: bool = False
 
 
 def _bin(env: Path, tool: str) -> str:
@@ -257,8 +258,25 @@ def production_mdp(ps: float, seed: int = BASE_SEED) -> str:
 
 def _stage(wd: Path, name: str, mdp: str, start_gro: str, start_cpt: str | None,
            gpu_id: int | None, threads: int,
-           plumed: str | None = None) -> StageResult:
+           plumed: str | None = None, reuse: bool = False) -> StageResult:
     import time
+    # REUSE IS OFF BY DEFAULT AND REQUIRES THE .mdp TO BE BYTE-IDENTICAL. A
+    # finished .gro on its own says only that SOME run of this name completed --
+    # it does not say it was run under the protocol being asked for now. The
+    # seed lives in the .mdp, so an identical file means identical nsteps,
+    # identical thermostat AND identical velocities: the same replicate, not
+    # merely a similar one. Anything less and a 100 ps verification run gets
+    # silently promoted into a production protocol, which is the bookkeeping
+    # error `bpmd_run.run_replicate` already guards against one level up.
+    #
+    # Never offered for a biased stage: two PLUMED inputs can share an .mdp and
+    # bias completely different atoms, so the .mdp is not evidence about them.
+    if reuse and plumed is None:
+        gro, prev = wd / f"{name}.gro", wd / f"{name}.mdp"
+        if gro.is_file() and prev.is_file() and prev.read_text() == mdp:
+            log.info("%s/%s: reusing the completed stage on disk (identical mdp)",
+                     wd.name, name)
+            return StageResult(name=name, seconds=0.0, reused=True)
     (wd / f"{name}.mdp").write_text(mdp, encoding="utf-8")
     grompp = [_bin(GMX_ENV, "gmx"), "grompp", "-f", f"{name}.mdp",
               "-c", start_gro, "-p", "sys.top", "-o", f"{name}.tpr",
@@ -320,7 +338,8 @@ def _stage(wd: Path, name: str, mdp: str, start_gro: str, start_cpt: str | None,
 def run_pipeline(src: Path, wd: Path, gpu_id: int | None = None,
                  threads: int = 8, production_ps: float = PRODUCTION_PS,
                  replicate: int = 1, candidate_id: str | None = None,
-                 plumed: str | None = None) -> dict:
+                 plumed: str | None = None, stop_after: str | None = None,
+                 reuse_equilibration: bool = False) -> dict:
     """Solvate once, then run ONE replicate from that shared system.
 
     Layout: solvation and minimisation live in `wd`; each replicate gets
@@ -331,7 +350,20 @@ def run_pipeline(src: Path, wd: Path, gpu_id: int | None = None,
 
     Solvation is skipped when it already exists, so replicates 2..N cost only
     their own dynamics.
+
+    `stop_after="npt"` ends the replicate at the end of equilibration and returns
+    without a trajectory. That is not a truncated production run: NVT and NPT are
+    UNRESTRAINED here, so the 300 ps they cover is already a measurement -- does
+    the docked pose survive plain dynamics -- and it is one the caller would
+    otherwise pay for and discard. `reuse_equilibration=True` then lets the
+    biased run start from those exact frames instead of repeating them, which is
+    what makes the two tiers describe ONE trajectory rather than two.
     """
+    if stop_after not in (None, "nvt", "npt"):
+        raise GromacsError(
+            f"stop_after={stop_after!r}: only the equilibration stages can be "
+            "stopped at. Production is where the bias lives, and a run that "
+            "stopped before it is not a shortened BPMD replicate.")
     cid = candidate_id or wd.name
     seed = replicate_seed(cid, replicate)
 
@@ -367,9 +399,15 @@ def run_pipeline(src: Path, wd: Path, gpu_id: int | None = None,
             link.symlink_to(wd / f)
 
     stages.append(_stage(rep, "nvt", nvt_mdp(seed), "min.gro", None, gpu_id,
-                         threads))
+                         threads, reuse=reuse_equilibration))
+    if stop_after == "nvt":
+        return _pipeline_result(info, rep, replicate, seed, production_ps,
+                                stages, plumed, stopped_after="nvt")
     stages.append(_stage(rep, "npt", npt_mdp(seed), "nvt.gro", "nvt.cpt",
-                         gpu_id, threads))
+                         gpu_id, threads, reuse=reuse_equilibration))
+    if stop_after == "npt":
+        return _pipeline_result(info, rep, replicate, seed, production_ps,
+                                stages, plumed, stopped_after="npt")
     # PLUMED is applied to PRODUCTION ONLY. Biasing equilibration would push the
     # ligand before the system has settled, so the "escape" being measured would
     # partly be the box relaxing rather than the pose failing.
@@ -381,19 +419,36 @@ def run_pipeline(src: Path, wd: Path, gpu_id: int | None = None,
         raise GromacsError(f"{cid} rep{replicate}: production produced no "
                            "trajectory")
 
+    return _pipeline_result(info, rep, replicate, seed, production_ps, stages,
+                            plumed, trajectory=traj)
+
+
+def _pipeline_result(info: dict, rep: Path, replicate: int, seed: int,
+                     production_ps: float, stages: list[StageResult],
+                     plumed: str | None, trajectory: Path | None = None,
+                     stopped_after: str | None = None) -> dict:
+    """The pipeline's return value, identical in shape whether or not it ran production.
+
+    `plumed` reports whether production was actually biased, so a run that
+    stopped at equilibration reports False even when a PLUMED input was handed
+    in but never used. `bpmd_run.run_replicate` refuses a replicate on that flag,
+    and it must not be able to read True off an unbiased trajectory.
+    """
     return {
         **info,
         "replicate": replicate,
         "velocity_seed": seed,
-        "production_ps": production_ps,
+        "production_ps": production_ps if stopped_after is None else 0.0,
         "frame_interval_ps": FRAME_INTERVAL_PS,
         "water_model": "TIP3P",
         "explicit_solvent": True,
         "gromacs": "2026.3 CUDA (dwi_gromacs_cuda)",
-        "plumed": bool(plumed),
-        "stages": {s.name: {"seconds": s.seconds, "ns_per_day": s.ns_per_day}
-                   for s in stages},
-        "trajectory": str(traj),
+        "plumed": bool(plumed) and stopped_after is None,
+        "stopped_after": stopped_after,
+        "equilibration_dir": str(rep),
+        "stages": {s.name: {"seconds": s.seconds, "ns_per_day": s.ns_per_day,
+                            "reused": s.reused} for s in stages},
+        "trajectory": str(trajectory) if trajectory else None,
         "not_a_ranking": "explicit-solvent behaviour of one complex; feeds no "
                          "gate and reorders no shortlist (D0036)",
     }

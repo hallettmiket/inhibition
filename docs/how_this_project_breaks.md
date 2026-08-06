@@ -1,6 +1,6 @@
 # How this project breaks
 
-*Written 2026-07-31, at handover. Last updated 2026-08-02 (catalogue now 21
+*Written 2026-07-31, at handover. Last updated 2026-08-06 (catalogue now 22
 entries). Read this before the README.*
 
 Every substantive bug found in this project has been the same bug.
@@ -47,6 +47,7 @@ test, because the code was doing exactly what it was written to do.**
 | 19 | `timeout=86400`, sized when a pool was 1,882 molecules | Scaled to the pool | 16,806 ligands ran 24 h, were killed, and wrote **0 poses**. A day of GPU time |
 | 20 | mmCIF parsed as `loop_` only | Also the single-record `_tag value` form | Reported **zero** covalent entries across all 190 — which reads as a finding |
 | 21 | Covalent ligands matched against the **adduct** pattern | The warhead-as-drawn: PDB component SMILES is the FREE ligand | Reported **11 novel chemistries**. Sulfopin itself came back "unclassified" |
+| 22 | `bpmd_run.already_done()` keyed on `(ident, replicate)` | Keyed on `(ident, replicate, **trajectory length**)` | `bpmd/` still held `status == ok` replicates for two elevation-cohort molecules at 300 ps and 10,000 ps. A 3 ns between-group run would have SKIPPED both molecules and seated a 300 ps replica beside 3 ns ones. Caught by reading the existing chunk files before launching — nothing in the code would have said |
 
 ---
 
@@ -83,7 +84,7 @@ you have this bug.
 A constant naming a version. It was right when written. The file it names still
 exists and still parses, so nothing ever complains.
 
-Instances **6, 7, 15, 18, 19**, and the pattern behind **8, 9** (a cache key
+Instances **6, 7, 15, 18, 19**, and the pattern behind **8, 9, 22** (a cache key
 is a pin on its inputs). Reference files alone have done this **five** times:
 generalising the version guard on 2026-08-01 found five stale pins at once, two
 of them in `choreography.yaml` naming a binder set and a warhead library two

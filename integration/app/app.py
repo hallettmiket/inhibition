@@ -1679,6 +1679,59 @@ def panel_nac_ranking() -> None:
                "question is undefined for them rather than false — they are not "
                "ranked last, they are absent (D0043).")
 
+    # THE FORMULA, ON THE PAGE. A ranking score whose definition lives in a
+    # decision record is a number people compare without knowing what they are
+    # comparing. The denominator is the part that surprises readers: it is what
+    # makes values from different warhead mechanisms mean the same thing.
+    with st.expander("**How the enrichment score is computed** — read this before "
+                     "comparing any two numbers", expanded=True):
+        st.markdown(
+            r"""
+$$\text{enrichment} \;=\; \frac{\text{fraction of independent docking runs reaching a viable near-attack conformation}}
+{\text{fraction a randomly-oriented approach would reach by chance}}$$
+
+**Numerator — measured.** The molecule is docked *N* times independently into
+3IKD (currently **N = 200**). A pose counts as *viable* when it satisfies both:
+
+| | |
+|---|---|
+| **distance** | warhead atom to Cys113 **SG**, **2.8 – 4.2 Å** — a van der Waals *contact*, the reactant state, **not** a formed bond |
+| **angle** | mechanism-specific (see below) |
+
+**Denominator — computed exactly, not sampled.** The fraction of *all possible
+approach directions* that would satisfy that angular window, from its solid
+angle. This is the number a nucleophile arriving from a uniformly random
+direction would score.
+
+| mechanism | angular criterion | chance baseline |
+|---|---|---|
+| SN2 (chloroacetamide, sulfamate/sulfonate acetamide) | S···C–LG **≥ 150°** — backside, anti to the leaving group | **6.70 %** |
+| Michael, SNAr, BDHI ring-opening | **≤ 30°** off the sp² plane normal **and** Bürgi–Dunitz approach 85–125° | **8.16 %** |
+
+**So the score reads:** *how many times more often than chance does this molecule
+reach a chemically competent geometry?*
+
+- **1.0×** — no better than a randomly-oriented approach.
+- **> 1.0×** — the pocket and the molecule's own shape actively steer the warhead into position.
+
+**Why divide at all?** The two angular windows differ in solid angle, so raw
+viable fractions are **not comparable across mechanisms** — acrylamides would
+out-score chloroacetamides for reasons that are pure trigonometry. Dividing each
+by its own baseline removes that. Pooling the *raw* fractions gives AUC ≈ 0.5,
+which is an artefact of the windows rather than a result.
+
+**Reference points, measured on this same gate:**
+
+| | enrichment |
+|---|---|
+| crystallographic Cys113 binders | **1.6 – 4.3×** |
+| random warhead-matched *measured* inactives | **≈ 0.8×** |
+
+*Implementation: `shared/nac_criterion.py` — `viable_fraction()` and
+`isotropic_null()`. Windows are pre-registered from stereoelectronics (D0045)
+and every raw angle is retained so a window can be redrawn without re-docking.*
+""")
+
     st.warning(
         "**Read this as a FILTER, not a fine ordering.**\n\n"
         "- The score **does not converge** (D0068). The same molecules score "
