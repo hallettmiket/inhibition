@@ -1,0 +1,17 @@
+ATTRIBUTION CORRECTION.
+
+This commit's message describes the consensus convergence result (D0070), but a
+concurrent 'git add -A' of mine swept in an in-flight agent's BPMD work that has
+nothing to do with consensus:
+
+    scripts/bpmd_run.py          (1026 lines) - the BPMD execution driver
+    tests/test_bpmd_run.py        (316 lines) - its 22 tests
+    shared/gromacs_explicit.py      (52 lines) - plumed_kernel() resolution
+    scripts/setup_envs.sh           (26 lines) - build_plumed
+
+Those belong to the BPMD driver work whose own record is 23f80ae. History was not
+rewritten because another worker was active in the tree at the time.
+
+The lesson is mine: 'git add -A' in a shared working tree stages whatever anyone
+else has in flight, and a commit message that describes only my own change then
+misattributes theirs. Stage explicitly when other work may be running.
