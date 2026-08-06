@@ -196,6 +196,62 @@ Consolidated 2026-08-04 from a tangle of seven into two, then two more opened:
 
 ---
 
+## The ranking framework now separates actives from inactives, for one class
+
+Built and measured on 2026-08-05. Full reasoning in
+[`ranking_rationale.md`](ranking_rationale.md); decisions D0063, D0064.
+
+**Reactive docking was adopted, then cut down to size.** It biases docking
+*sampling* toward reaction-competent geometry and it works — 20/20 poses put the
+warhead carbon 1.55 Å from Cys113's sulfur, in ~2 seconds for 40 runs. Every one
+of those poses was **chemically dead**: S–C–Cl median 97.6°, where SN2 needs the
+nucleophile anti to the leaving group near 180°. The biasing term is a potential
+in distance, isotropic by construction, so it cannot encode an angle at any
+parameter value. It is a **sampler, not a criterion** (D0064).
+
+**`shared/nac_criterion.py`** supplies the criterion it cannot: mechanism-specific
+approach geometry, windows pre-registered from stereoelectronics before anything
+was scored, raw angles always reported so a window can be redrawn without
+re-docking. 26 tests, each of three mutations killing exactly the test that names
+its claim.
+
+**The result**, 3IKD, 200 runs per molecule, positives = ligands
+**crystallographically** bonded to Cys113, negatives = warhead-matched molecules
+**measured** inactive:
+
+| class | positives | negatives | AUC | p |
+|---|---|---|---|---|
+| **chloroacetamide** | 9 | 30 | **0.872** | **0.0004** |
+| snar_chloroazine | 2 | 30 | 0.317 | 0.81 |
+
+Positives enrich 2.39× over chance, negatives 0.82×. **This is the first thing
+measured on this project that separates actives from inactives** — after five
+levels of theory that did not (D0041, D0046, D0036, D0038/D0044, D0057, D0061).
+
+It is one class of two, and it is the class the literature had already converged
+on. The SNAr arm failed for a diagnosable reason: its window admits 57% of
+negatives against a 29.3% chance baseline, so it is not gating anything.
+
+**Controls were scrutinised rather than trusted**, on @tt8804's instruction. The
+HTS's own 34 *actives* were **rejected** as positives — the 11 warhead-bearing
+ones are a catalogue of frequent hitters (two rhodanines, an azlactone, an
+arylidene barbiturate, an embelin-like quinone…) at 3–75 µM in a 387,000-compound
+screen, plus a cephalosporin matching the warhead SMARTS spuriously. Negatives
+were re-drawn shuffled, because PubChem file order tracks depositor and therefore
+chemical series. And raw viable fractions turned out **not comparable across
+mechanisms** — the perpendicular window is 4.4× wider than the SN2 one by solid
+angle alone, so an exact isotropic baseline is now divided out.
+
+**Two bugs of mine, both the project's signature defect** — a value taken by
+position or name rather than by identity. I keyed pose atoms on the PDBQT *name*
+field, where every carbon is named `C`, so each overwrote the last and I measured
+the wrong carbon (2.2 Å instead of 1.54 Å). And I guarded reactive typing by
+looking for the literal atom type `C1`, where meeko derives it from the base type
+— an aromatic carbon becomes `A1` — silently deleting **an entire warhead class**,
+30 negatives and 2 positives, by my check rather than by the tool.
+
+---
+
 ## Parked
 
 - **guo_pfizer degree-2 enumeration** — running. atra is done (30,000 kept from a

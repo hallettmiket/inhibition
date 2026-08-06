@@ -141,3 +141,83 @@ Fixed before any candidate is scored, per D0045: the near-attack window per
 mechanism, the acceptance bar on the 17 positives, and the rule combining stage-2
 reproducibility with stage-4 stability. Each is otherwise a knob that can be
 turned until the ranking looks reasonable.
+
+---
+
+# Measured, 2026-08-05
+
+The pipeline above was built and run. What follows replaces the plan for stages
+1–3; stage 4 is still unbuilt.
+
+## Stage 1 changed: bias the search, don't filter afterwards
+
+Reactive docking (D0063) replaced dock-then-filter. It biases *sampling* toward
+reaction-competent geometry, which addresses the sampling problem rather than
+working around it, and it costs ~2 seconds for 40 independent runs.
+
+**It solves the distance and not the chemistry** (D0064). On a test
+chloroacetamide, 20/20 poses put the electrophilic carbon 1.55 Å from Cys113's
+sulfur — and every one was chemically dead, S–C–Cl median **97.6°** where SN2
+needs ~180°. The modified term is a potential in *distance*, isotropic by
+construction, so no parameter value encodes an angle. Two changes follow:
+
+- **`r_eq_12` = 3.2 Å, not the published 1.8 Å.** A NAC is a van der Waals
+  *contact* — the reactant state. 1.8 Å is a bond distance, past the transition
+  state, where the free molecule cannot be while it still holds its leaving group.
+- **Neighbour radii unscaled**, so the leaving group keeps its real bulk.
+
+## Stage 3 is now the load-bearing one
+
+`shared/nac_criterion.py`. **Mechanism matters, and not as a refinement**: SNAr
+attacks along the ring normal with the leaving group in-plane, so its S–C–LG sits
+near **90°** — the exact value that is dead for SN2. One rule across mechanisms
+inverts the verdict for one of them.
+
+**Raw viable fractions are not comparable across mechanisms.** The SN2 window
+(≥150°) covers 6.7% of approach directions; the perpendicular window (≤45°, two
+faces) covers 29.3% — **4.4× wider by solid angle alone**. `isotropic_null()`
+computes that baseline exactly and `enrichment()` divides it out. This is D0020's
+"rank within warhead class, not globally" arriving from a new direction.
+
+## Stage 2's bar is met, for one class
+
+3IKD, 200 runs per molecule. Positives are ligands **crystallographically bonded
+to Cys113** (verified against `_struct_conn`; issue #12 §A). Negatives are
+warhead-matched molecules **measured** inactive in AID 504891, shuffled rather
+than taken in file order.
+
+| class | mechanism | positives | negatives | AUC | p |
+|---|---|---|---|---|---|
+| **chloroacetamide** | SN2 | 9 | 30 | **0.872** | **0.0004** |
+| snar_chloroazine | SNAr | 2 | 30 | 0.317 | 0.81 |
+
+Chloroacetamide positives enrich **2.39×** over chance against **0.82×** for
+negatives; 8 of 9 beat ≥73% of same-class negatives. **This is the first
+measurement in the project that separates actives from inactives** — against five
+levels of theory that did not (D0041, D0046, D0036, D0038/D0044, D0057, D0061).
+
+It is also one class of two, and chloroacetamide is where the literature already
+converged (#12 §A). The SNAr result is not a failure of the idea so much as a
+failure of the *window*: negatives score 57% median against a 29.3% baseline, and
+a criterion two thirds of random molecules pass is not a gate.
+
+**AID 504891's 34 actives were rejected as positives.** Read as chemistry rather
+than as labels, the 11 warhead-bearing ones are frequent hitters — two
+rhodanines, an azlactone, an arylidene barbiturate, a furfurylidene indandione,
+an embelin-like dihydroxyquinone, two naphthoquinone sulfonylimines — at 3–75 µM
+in a 387,000-compound qHTS, plus a cephalosporin whose warhead match is spurious.
+Validating a geometric criterion against compounds that hit everything would
+confirm nothing.
+
+## What is still open
+
+- **Tighten the SNAr/Michael window**, then re-measure. It is pre-registered, so
+  it is changed once, on stated stereoelectronic grounds, and never tuned against
+  the positives.
+- **Symmetric warheads are skipped** — a molecule whose reactive SMARTS matches
+  twice (fumarate/maleate esters read the alkene from both carbonyls) is dropped
+  rather than docked once per reactive centre. This currently removes the whole
+  Michael class from validation.
+- **Stage 4 is unbuilt.** Nothing yet ranks *among* the molecules that pass.
+- **The pocket basis is still 6VAJ's** (D0062), unused by this criterion but
+  wrong for anything contact-profile based.
