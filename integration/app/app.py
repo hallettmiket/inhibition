@@ -1751,6 +1751,40 @@ def panel_nac_ranking() -> None:
             key=f"nacpose_{key}")
         prow = have[have.candidate_id.astype(str) == pick].iloc[0]
 
+        # THE 2D STRUCTURE, BESIDE THE POSE. The 3D view answers "where does it
+        # sit"; the flat depiction answers "what IS it", and a chemist reads the
+        # second one first. The warhead is highlighted so the atom the geometry
+        # is measured on is identifiable without counting bonds in the 3D.
+        s1, s2 = st.columns([2, 3])
+        with s1:
+            hl = depict.warhead_smarts(str(prow.get("warhead_class", "")))
+            smi = prow.get("canonical_smiles")
+            if isinstance(smi, str) and smi:
+                try:
+                    st.image(depict.png(smi, highlight_smarts=hl, width=460,
+                                        height=360),
+                             caption=f"{prow.candidate_id} — free form"
+                                     + (", warhead highlighted" if hl else ""))
+                except Exception as exc:                    # noqa: BLE001
+                    st.warning(f"could not depict: {str(exc)[:80]}")
+                st.code(smi, language=None)
+            else:
+                st.info("no SMILES on this row")
+        with s2:
+            st.caption("**The docked form is the FREE molecule, not the adduct** "
+                       "— the question is whether it can orient to react, which "
+                       "an already-reacted adduct cannot answer. Verified: the "
+                       "pose matches `canonical_smiles` on formula and heavy-atom "
+                       "count, with the warhead unsaturated.")
+            adduct = prow.get("adduct_smiles")
+            if isinstance(adduct, str) and adduct and adduct != "nan":
+                with st.expander("the adduct, for comparison — NOT what was docked"):
+                    try:
+                        st.image(depict.png(adduct, width=420, height=320),
+                                 caption="post-reaction adduct")
+                    except Exception:                        # noqa: BLE001
+                        st.code(adduct, language=None)
+
         g1, g2, g3 = st.columns(3)
         g1.metric("enrichment", f"{prow.nac_enrichment:.2f}×",
                   help=f"at {int(prow.nac_run_count)} runs — the score does not "

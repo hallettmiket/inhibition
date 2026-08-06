@@ -1,10 +1,11 @@
 #!/bin/bash
 # Consensus + enrichment for every candidate, from ONE docking run each.
-# Fair use: 2 GPUs, nice -n 19, avoiding 0/2/4 (other jobs + the BPMD run).
+# Fair use: 4 GPUs, nice -n 19. Avoids 0 (other users), 2 (my BPMD run) and 4
+# (someone holding memory). Checked with nvidia-smi before scaling, not assumed.
 set -u
 P=$HOME/.micromamba/envs/dwi_reactive/bin/python
 cd "$HOME/repos/inhibition" || exit 1
-GPUS=(5 6)
+GPUS=(1 3 5 6)
 for i in "${!GPUS[@]}"; do
   g=${GPUS[$i]}
   echo "$(date -Is) shard $i -> GPU $g"
