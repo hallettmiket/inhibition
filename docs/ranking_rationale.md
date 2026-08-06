@@ -329,6 +329,37 @@ runs whose *sampling* was biased toward the warhead–sulfur contact, so a clean
 AutoDock run without the reactive potential is required before `best_dg` can be
 called an affinity signal at all.
 
+### The decoy-site control ran, and was inconclusive
+
+Pin1's other cysteine, Cys57, was used as a decoy: same file, same preparation,
+same parameters, only the site moved. The pre-registered reading was "positives
+separate at Cys113 and not at Cys57 ⇒ site-specific".
+
+| | Cys113 | Cys57 |
+|---|---|---|
+| positives, median enrichment | 2.24× | **0.00×** |
+| negatives, median enrichment | 1.21× | **0.00×** |
+| positives vs negatives | AUC 0.734, p = 0.0021 | AUC 0.500, p = 1.0 |
+| median S···C distance | 3.56 Å | **12.17 Å** |
+
+**On the letter of the pre-registration this passes. It should not be read that
+way.** Nothing scores at Cys57 — positives *and* negatives are uniformly zero —
+and the reason is that **ligands never reach the sulfur**: median distance 12.2 Å
+against 3.6 Å at Cys113. Cys57 is buried, with 120 heavy protein atoms within 8 Å
+against 77 for Cys113. The criterion is never given an angle to judge.
+
+**What it does establish:** the criterion is not satisfiable at an arbitrary
+sulfur, which rules out the weakest form of "generic warhead exposure".
+
+**What it does not establish:** that the signal reflects recognition of *this
+pocket*. The alternative site was inaccessible rather than merely different, so
+the comparison never happened. **Claim 2 in the ledger stays untested.**
+
+**The control that would settle it** needs a *solvent-accessible* decoy cysteine
+— a different protein's exposed cysteine, prepared identically. Cheap to run once
+the receptor exists, and worth doing before anything is committed to synthesis on
+the strength of the recognition story.
+
 ### Confidence ledger — what is established, and what is not
 
 *Asked directly by @tt8804, 2026-08-06: "are we confident in the current rank
@@ -338,7 +369,7 @@ claims sit at different confidence levels and should not be quoted as one.*
 | # | claim | status |
 |---|---|---|
 | **1** | **The measurement.** Enrichment separates crystallographic Cys113 binders from warhead-matched measured inactives. | **Supported, and now robust to the negative draw.** On a 10× larger, independently-seeded negative pool: chloroacetamide **AUC 0.908** [0.857, 0.954], Michael **0.734** [0.593, 0.839]. **Ten disjoint draws of 30 all clear chance** (0.846–0.974 and 0.679–0.875). Replicates across 4 docking seeds. Not molecular size (ρ = −0.09; size-matched AUC 0.812). Not the docking score (max \|ρ\| = 0.255). |
-| **2** | **The interpretation.** It measures *Cys113 recognition*, rather than generic warhead exposure. | **UNTESTED.** Everything was measured at one site, so both readings fit. The Cys57 decoy control decides it. If positives enrich equally at both sites, this interpretation is withdrawn — the AUCs would stand but would not mean what §"The one sentence" says. |
+| **2** | **The interpretation.** It measures *Cys113 recognition*, rather than generic warhead exposure. | **STILL UNTESTED.** The Cys57 decoy control ran and was **inconclusive** — Cys57 is buried (120 protein atoms within 8 Å vs 77 for Cys113), so ligands dock 12.2 Å away and the angular criterion is never exercised. It rules out the weakest form of the exposure hypothesis and does not establish recognition. Needs an *accessible* decoy cysteine. |
 | **3** | **The application.** The ranking can order 5,769 candidates. | **Insufficient as built.** 95% CI ≈ 1.12× at 200 runs: the leader is separated, but 1,239 of 1,806 molecules have an interval reaching the top-25 band. Supports "these ~300 deserve a closer look", not "these are the top 25". `--refine-top` addresses it. |
 
 **Structural limits that no amount of compute removes:**
