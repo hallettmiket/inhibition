@@ -539,6 +539,24 @@ def run(*, experiment: str, approach: str, frame_prefix: str, gpu: int,
     if not n_ready:
         raise SystemExit("no ligand survived preparation")
 
+    # STAMP THE LIGANDS THAT COULD NOT BE PREPARED. `prepare_ligands` already
+    # knows which failed and logs a count, but nothing wrote it to the frame --
+    # so those rows carried `rejected_at = NA` and `vina_affinity = NaN`, which
+    # is indistinguishable from "queued, not yet docked". Measured on T_1 on
+    # 2026-08-05: 112 of 3,345 survivors (3.3%) sat in exactly that state, with
+    # no prepared ligand file and no pose, looking like pending work that would
+    # never arrive.
+    #
+    # `rank_shortlist` already insists that "did not dock" and "docked badly"
+    # are different facts. "Could not be prepared" is a third, and it is the one
+    # a reader most needs, because it is the only one that will never resolve on
+    # its own.
+    failed = {r["candidate_id"]: r for r in prep if not r["ok"]}
+    if failed:
+        mask = df["candidate_id"].isin(failed) & df["rejected_at"].isna()
+        df.loc[mask, "rejected_at"] = "ligand_prep_failed"
+        log.info("stamped %d candidate(s) as ligand_prep_failed", int(mask.sum()))
+
     elapsed = run_vina_gpu(ligand_dir, out_dir, gpu, receptor)
     return merge_poses_onto_frame(
         experiment=experiment, approach=approach, frame_prefix=frame_prefix,

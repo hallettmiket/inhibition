@@ -253,7 +253,7 @@ within 24 h of being written.*
 <!-- AUTO:arms:BEGIN -->
 | arm | frame | rows | docked | ranked | shortlist |
 |---|---|---:|---:|---:|---:|
-| T_1 de novo (DiffSBDD) | `D1_31.parquet` | 4,803 | 3,233 | 3,233 | 25 (`shortlist_synth`) |
+| T_1 de novo (DiffSBDD) | `D1_32.parquet` | 4,803 | 3,233 | 3,233 | 25 (`shortlist_synth`) |
 | T_3 R-group (LibInvent) | `D3_27.parquet` | 5,396 | 4,080 | 4,080 | 25 (`shortlist_synth`) |
 | T_4 warhead x R-group | `D4_39.parquet` | 1,782 | 1,683 | 1,683 | 27 (`shortlist_synth`) |
 <!-- AUTO:arms:END -->
@@ -266,8 +266,8 @@ within 24 h of being written.*
 | Potter-Astex | `D2_5.parquet` | 7,376 | 7,376 | 25 |
 | Du-Xu | `D2_10.parquet` | 9,736 | 9,736 | 25 |
 | Guo-Pfizer | `D2_10.parquet` | 8,670 | 8,670 | 25 |
-| ATRA degree-2 | `D2_7.parquet` | 0 | 0 | 0 |
-| **all six** | | **44,470** | | |
+| ATRA degree-2 | `D2_8.parquet` | 127 | 0 | 0 |
+| **all six** | | **44,597** | | |
 <!-- AUTO:t2:END -->
 
 <!-- AUTO:decisions:BEGIN -->
