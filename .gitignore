@@ -68,3 +68,8 @@ site/
 # Kept as a backstop: this directory held 1.1 MB of gzipped search trees and
 # rendered pose HTML before the move.
 outputs/
+
+# --- vendored third-party JS, fetched on demand and cached beside the script
+# that fetches it (scripts/build_t4_top_catalogue.py) so a self-contained HTML
+# build does not re-fetch or fail offline. Re-fetchable, not source.
+scripts/.cache_*.js
