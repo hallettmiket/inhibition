@@ -442,7 +442,8 @@ def row_value(frame: pd.DataFrame, row: pd.Series, name: str) -> str | None:
     return str(val) if pd.notna(val) else None
 
 
-def locate_pose(approach: str, frame: pd.DataFrame, row: pd.Series) -> Path | None:
+def locate_pose(approach: str, frame: pd.DataFrame, row: pd.Series,
+                pose_column: str = "pose_path") -> Path | None:
     """The pose file for one row, using the frame's own answer when it has one.
 
     `pose_path` is recorded by T_3/T_4 and is authoritative; `dock_id` is the
@@ -450,14 +451,22 @@ def locate_pose(approach: str, frame: pd.DataFrame, row: pd.Series) -> Path | No
     nothing with `candidate_id` — deriving the name from the candidate id found
     nothing and rendered as missing data rather than as a lookup bug.
     """
+    # `pose_column` exists because the near-attack panel must show the pose ITS
+    # score came from -- reactive 3IKD -- and the frame also carries `pose_path`
+    # from the earlier production docking. Both resolve to a real file, and
+    # showing the wrong one would be a confident, correctly-rendered lie.
+    explicit = row_value(frame, row, pose_column)
+    if pose_column != "pose_path" and not explicit:
+        return None          # no fallback: the wrong pose is worse than none
     return p3d.find_pose(approach, str(row["candidate_id"]),
                          dock_id=row_value(frame, row, "dock_id"),
-                         pose_path=row_value(frame, row, "pose_path"))
+                         pose_path=explicit)
 
 
 def render_pose_viewer(approach: str, approach_name: str,
                        frame: pd.DataFrame, row: pd.Series, *,
-                       key: str, height: int = 620) -> None:
+                       key: str, height: int = 620,
+                       pose_column: str = "pose_path") -> None:
     """The docked-pose viewer: labelled surface, every mode, and an export.
 
     3Dmol.js has no on-screen controls at all -- no buttons, no hint that
@@ -470,7 +479,7 @@ def render_pose_viewer(approach: str, approach_name: str,
     old viewer showed one — but the fix for that is a control, not a truncation.
     """
     cid = str(row["candidate_id"])
-    pose_file = locate_pose(approach, frame, row)
+    pose_file = locate_pose(approach, frame, row, pose_column)
     if pose_file is None:
         st.info(f"no docked pose file found for {cid}")
         return
@@ -1718,6 +1727,50 @@ def panel_nac_ranking() -> None:
         cols = [c for c in ("candidate_id", "enrichment", "runs", "warhead_class",
                             "canonical_smiles", "QED", "SAscore") if c in top.columns]
         st.dataframe(top[cols], width="stretch", hide_index=True)
+
+        # THE POSE, AND IT IS THE ONE THE SCORE CAME FROM.
+        # `nac_pose_path` points at the reactive-3IKD pose written by
+        # scripts/export_nac_poses.py. The frame ALSO carries `pose_path` from
+        # the earlier production docking, which resolves to a real file and is
+        # the wrong molecule's answer here — showing it would be a confident,
+        # correctly-rendered lie about which geometry earned the number.
+        if "nac_pose_path" not in top.columns or top.nac_pose_path.isna().all():
+            st.info("No near-attack poses exported for this approach yet. "
+                    "`scripts/export_nac_poses.py` re-docks the shortlist under "
+                    "the scoring protocol and writes them.")
+            continue
+
+        have = top[top.nac_pose_path.notna()]
+        pick = st.selectbox(
+            f"pose to view — {D.display_name(key)}",
+            list(have.candidate_id.astype(str)),
+            format_func=lambda c: (
+                f"{c}  ·  "
+                f"{have.set_index(have.candidate_id.astype(str)).loc[c, 'nac_enrichment']:.2f}×"),
+            key=f"nacpose_{key}")
+        prow = have[have.candidate_id.astype(str) == pick].iloc[0]
+
+        g1, g2, g3 = st.columns(3)
+        g1.metric("enrichment", f"{prow.nac_enrichment:.2f}×",
+                  help=f"at {int(prow.nac_run_count)} runs — the score does not "
+                       "converge, so the run count is part of the number (D0068)")
+        if "nac_pose_distance" in prow and pd.notna(prow.get("nac_pose_distance")):
+            g2.metric("warhead → SG", f"{prow.nac_pose_distance:.2f} Å",
+                      help="near-attack window is 2.8–4.2 Å: a van der Waals "
+                           "CONTACT, not a formed bond")
+        if "nac_pose_angle" in prow and pd.notna(prow.get("nac_pose_angle")):
+            g3.metric("approach angle", f"{prow.nac_pose_angle:.1f}°",
+                      help="mechanism-specific: SN2 wants ≥150° anti to the "
+                           "leaving group; Michael/SNAr want ≤30° off the sp² "
+                           "plane normal")
+        if "nac_pose_viable" in prow and prow.get("nac_pose_viable") is False:
+            st.warning("This molecule's best pose does **not** clear the "
+                       "near-attack criterion. Shown so the failure is "
+                       "inspectable rather than absent.")
+
+        render_pose_viewer(key, D.display_name(key), have, prow,
+                           key=f"nacview_{key}_{pick}",
+                           pose_column="nac_pose_path")
 
         # The reference band, so a number on this page can be placed against
         # something real rather than against the other numbers on this page.
