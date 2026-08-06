@@ -124,6 +124,27 @@ build_admet() {
   "$p/bin/pip" install --no-input admet-ai
 }
 
+build_plumed() {
+  # BPMD's bias. GROMACS 2025+ ships PLUMED support in-tree, so the stock
+  # conda-forge dwi_gromacs_cuda advertises `mdrun -plumed` and ACCEPTS the flag
+  # with no PLUMED installed anywhere -- the kernel is dlopened from
+  # $PLUMED_KERNEL when the force provider starts. A missing kernel is therefore
+  # invisible until a run that was supposed to be biased turns out not to have
+  # been, so it is installed here and resolved by
+  # `shared.gromacs_explicit.plumed_kernel()`.
+  #
+  # SEPARATE FROM dwi_gromacs_cuda ON PURPOSE: that env is shared by every MD
+  # job running on this box, and adding packages to it mid-flight is not a
+  # change anyone else agreed to. libplumedKernel.so carries its own RPATH, so
+  # it loads correctly from a foreign prefix.
+  local p="${DWI_PLUMED_PREFIX:-/data/lab_vm/modifiable/inhibition/envs/dwi_plumed}"
+  _log "building plumed kernel -> $p"
+  conda create --prefix "$p" "${CONDA_SOLVER_ARGS[@]}" \
+    -c conda-forge 'plumed=2.10.0=nompi*'
+  test -f "$p/lib/libplumedKernel.so" || { _log "FATAL: no libplumedKernel.so"; return 1; }
+  _log "plumed kernel OK: $p/lib/libplumedKernel.so"
+}
+
 main() {
   local what="${1:-}"
   case "$what" in
@@ -134,12 +155,13 @@ main() {
     gnina)     build_gnina     2>&1 | tee "$LOG_DIR/gnina.log" ;;
     gui)       build_gui       2>&1 | tee "$LOG_DIR/gui.log" ;;
     admet)     build_admet     2>&1 | tee "$LOG_DIR/admet.log" ;;
+    plumed)    build_plumed    2>&1 | tee "$LOG_DIR/plumed.log" ;;
     all)
-      for e in cheminf gui admet gnina diffsbdd reinvent4 amber_md; do
+      for e in cheminf gui admet gnina diffsbdd reinvent4 amber_md plumed; do
         main "$e"
       done ;;
     *)
-      echo "usage: $0 {cheminf|diffsbdd|reinvent4|amber_md|gui|admet|gnina|all}" >&2
+      echo "usage: $0 {cheminf|diffsbdd|reinvent4|amber_md|gui|admet|gnina|plumed|all}" >&2
       exit 2 ;;
   esac
   _log "done: $what"

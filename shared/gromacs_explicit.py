@@ -39,6 +39,7 @@ OpenCL binary is still first on PATH and will mislead the next person.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -48,6 +49,22 @@ log = logging.getLogger(__name__)
 
 AMBER_ENV = Path("/data/lab_vm/envs/dwi_amber_md")
 GMX_ENV = Path("/data/lab_vm/envs/dwi_gromacs_cuda")   # CUDA, not the OpenCL one
+
+# PLUMED IS DLOPENED AT RUN TIME, NOT LINKED. GROMACS 2025+ ships PLUMED support
+# in-tree, so `gmx mdrun -h` advertises `-plumed` on a stock conda-forge build
+# and `mdrun -plumed plumed.dat` is accepted -- with no PLUMED anywhere on the
+# machine. The kernel is loaded from $PLUMED_KERNEL when the force provider
+# starts, and libgromacs carries the failure text for when it is not there:
+# "An error occurred while initializing the PLUMED force provider ... Check your
+# PLUMED_KERNEL environment variable".
+#
+# So the flag being present is NOT evidence that metadynamics can run, and the
+# only way to find out was to look for the .so. It is resolved here, once, and a
+# missing kernel is a loud error BEFORE any GPU time is spent -- a biased run
+# that silently became an unbiased one would report a stability for a pose
+# nothing ever pushed on, which is the highest-value wrong answer this pipeline
+# could produce.
+PLUMED_ENV = Path("/data/lab_vm/modifiable/inhibition/envs/dwi_plumed")
 
 WATER_MODEL = "TIP3PBOX"
 BOX_PADDING_A = 12.0
@@ -81,10 +98,32 @@ def _bin(env: Path, tool: str) -> str:
     return str(p)
 
 
-def _run(cmd: list[str], cwd: Path, log_name: str, timeout: int = 86400) -> str:
+def plumed_kernel() -> Path:
+    """The libplumedKernel.so `gmx mdrun -plumed` will dlopen.
+
+    An explicit $PLUMED_KERNEL wins, so a different PLUMED can be swapped in
+    without editing code; otherwise the project's own env is used. Raises rather
+    than returning None: every caller is about to spend GPU time on a run whose
+    entire point is the bias.
+    """
+    env = os.environ.get("PLUMED_KERNEL")
+    if env and Path(env).is_file():
+        return Path(env)
+    p = PLUMED_ENV / "lib" / "libplumedKernel.so"
+    if p.is_file():
+        return p
+    raise GromacsError(
+        f"no PLUMED kernel: neither $PLUMED_KERNEL nor {p}. `gmx mdrun` accepts "
+        "-plumed on this build regardless, so this must be checked rather than "
+        "assumed. Install with: micromamba create --prefix "
+        f"{PLUMED_ENV} -c conda-forge 'plumed=2.10.0=nompi*'")
+
+
+def _run(cmd: list[str], cwd: Path, log_name: str, timeout: int = 86400,
+         env: dict[str, str] | None = None) -> str:
     """Run one command, tee its output, and fail loudly with the tail."""
     proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                          timeout=timeout)
+                          timeout=timeout, env=env)
     out = (proc.stdout or "") + "\n" + (proc.stderr or "")
     (cwd / log_name).write_text(out, encoding="utf-8")
     if proc.returncode != 0:
@@ -229,6 +268,7 @@ def _stage(wd: Path, name: str, mdp: str, start_gro: str, start_cpt: str | None,
     _run(grompp, wd, f"grompp_{name}.log", timeout=3600)
 
     t0 = time.time()
+    env = None
     mdrun = [_bin(GMX_ENV, "gmx"), "mdrun", "-deffnm", name,
              "-ntmpi", "1", "-ntomp", str(threads)]
     if gpu_id is not None:
@@ -241,8 +281,11 @@ def _stage(wd: Path, name: str, mdp: str, start_gro: str, start_cpt: str | None,
         pf = wd / "plumed.dat"
         pf.write_text(plumed, encoding="utf-8")
         mdrun += ["-plumed", pf.name]
+        # Resolved before the run, so "PLUMED is not installed" surfaces here and
+        # not as a stability score computed from a COLVAR that was never written.
+        env = dict(os.environ, PLUMED_KERNEL=str(plumed_kernel()))
     try:
-        _run(mdrun, wd, f"mdrun_{name}.log")
+        _run(mdrun, wd, f"mdrun_{name}.log", env=env)
     except GromacsError:
         # GROMACS' GPU update kernel requires constrained atoms to be
         # contiguous, and an Amber-ordered topology need not satisfy that:
@@ -258,7 +301,8 @@ def _stage(wd: Path, name: str, mdp: str, start_gro: str, start_cpt: str | None,
             raise
         log.warning("%s/%s: GPU update kernel rejected this atom ordering; "
                     "retrying with -update cpu", wd.name, name)
-        _run(mdrun + ["-update", "cpu"], wd, f"mdrun_{name}_updatecpu.log")
+        _run(mdrun + ["-update", "cpu"], wd, f"mdrun_{name}_updatecpu.log",
+             env=env)
     secs = time.time() - t0
 
     nsday = None
