@@ -2,7 +2,7 @@
 
 `inhibition` ("Dance with Inhibition") is a murmurent **choreography**: four
 independent computational approaches to finding an inhibitor of human **Pin1**
-at catalytic **Cys113**, against **PDB 6VAJ**, plus an integration layer that
+at catalytic **Cys113**, plus an integration layer that
 presents their shortlists for a human to adjudicate.
 
 **The deliverable is the method, not the molecule.** Pin1 is the testbed. A
@@ -31,16 +31,28 @@ position, name, or default rather than by identity, failing silently because
 both the right and the wrong candidate were populated and plausible. Before
 using any column, ask what selected it and what that selection omits.
 
+**The receptor is 3IKD, not 6VAJ** (D0059, 2026-08-05) — the chemist's
+prepared structure, on branch `receptor/3ikd-chemist-prepared`. **Every 6VAJ
+measurement is invalidated until re-run**, including D0046's 5% pose recovery.
+Re-measured on 3IKD: top-1 2.4%, best-of-9 **41.5%** (was 15.9% on 6VAJ by the
+same metric) — the search improved 2.6x and the score still cannot exploit it.
+
 **Ranking is not validated on this target.** The docking-enrichment gate has
-fired (D0041), and pose recovery is 5% in production (D0046). Every shortlist
-carries `rank_validated = False`. Never describe a shortlist as evidence that
-the molecules at the top bind — it is an ordering the pipeline produced.
+fired (D0041) and five independent levels of theory have now been measured and
+failed. Every shortlist carries `rank_validated = False`. Never describe a
+shortlist as evidence that the molecules at the top bind — it is an ordering
+the pipeline produced.
 
 **When you find a defect, fix the class and not the case**, write a decision
 record in [`decisions/`](decisions/) including *why the wrong thing looked
 right*, and add a guard that can actually fail.
 
 ## Where the rest of the context lives
+
+- **[`docs/since_handoff.md`](docs/since_handoff.md) — what has changed since
+  @mhallet left, newest first.** Read it before trusting a number from before
+  2026-08-02: the receptor changed, five defects were producing plausible wrong
+  output, and every 6VAJ measurement is invalidated.
 
 - [`decisions/`](decisions/) — the most valuable thing in the repo. Format and
   rules in [`decisions/README.md`](decisions/README.md). `origin` is an
