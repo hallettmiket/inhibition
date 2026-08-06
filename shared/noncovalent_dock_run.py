@@ -60,7 +60,44 @@ DATA_ROOT = Path("/data/lab_vm/append_only/inhibition")
 RECEPTOR_ROOT = Path("/data/lab_vm/immutable/inhibition/receptor")
 RECEPTOR_PDBQT = RECEPTOR_ROOT / "6VAJ_prepared.pdbqt"
 BOX_EXPANDED = RECEPTOR_ROOT / "box_expanded.json"
-VINA_GPU = Path("/data/lab_vm/envs/dwi_vinagpu/bin/vina-gpu")
+# THE GOVERNED WRAPPER SEGFAULTS FOR ANYONE WHO IS NOT ITS OWNER.
+#
+# `/data/lab_vm/envs/dwi_vinagpu/bin/vina-gpu` cds into a source tree owned by
+# @mhallet that other lab members cannot write. Vina-GPU recompiles its OpenCL
+# kernels at startup and writes Kernel*_Opt.bin into its working directory; when
+# that write fails it SEGFAULTS (exit 139 / -11) instead of falling back to the
+# cached kernels it can read perfectly well.
+#
+# Measured 2026-08-05 for @tt8804: every invocation segfaulted -- 6VAJ with its
+# own box, 3IKD, and 3IKD with waters stripped, identically. Not a receptor or
+# input problem.
+#
+# IT FAILED SILENTLY, WHICH IS THE PART THAT COST SOMETHING. The ATRA degree-2
+# run reported driver exit 0 while all six chunks failed, docking 127 of 30,000;
+# the pose directory still held the previous run's 15,653 files, so it looked
+# populated and plausible.
+#
+# `VINA_GPU_LOCAL` is a byte-identical binary (sha256 a53d33554320d41b0ac22d9d)
+# in a directory we can write. Resolved by preference at import so the governed
+# path is used again automatically once /data/lab_vm/envs/ is writable, without
+# anyone having to remember to change this back.
+_VINA_GPU_GOVERNED = Path("/data/lab_vm/envs/dwi_vinagpu/bin/vina-gpu")
+_VINA_GPU_LOCAL = Path("/data/lab_vm/modifiable/inhibition/vinagpu_writable/vina-gpu")
+
+
+def _resolve_vina_gpu() -> Path:
+    """The governed wrapper when its working directory is writable, else the copy."""
+    workdir = Path("/data/lab_vm/envs/_src/Vina-GPU-2.1/AutoDock-Vina-GPU-2.1")
+    if os.access(workdir, os.W_OK):
+        return _VINA_GPU_GOVERNED
+    if _VINA_GPU_LOCAL.is_file():
+        log.warning("Vina-GPU's governed working directory is not writable; "
+                    "using the byte-identical copy at %s (D0060)", _VINA_GPU_LOCAL)
+        return _VINA_GPU_LOCAL
+    return _VINA_GPU_GOVERNED
+
+
+VINA_GPU = _resolve_vina_gpu()
 OBABEL = "/data/lab_vm/envs/dwi_cheminf/bin/obabel"
 
 
