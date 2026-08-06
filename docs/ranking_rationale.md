@@ -360,6 +360,37 @@ the comparison never happened. **Claim 2 in the ledger stays untested.**
 the receptor exists, and worth doing before anything is committed to synthesis on
 the strength of the recognition story.
 
+### The metric does not converge, and the energy beats it (D0068)
+
+Refining the top 300 at 2,000 runs was meant to sharpen them. It showed instead
+that **enrichment is a function of search effort**. The same 300 molecules fell
+from **2.91× to 0.96×** — and the 15 crystallographic positives, never selected
+on score, fell identically (**2.27× → 0.97×**), so this is not winner's curse.
+
+With 10× the search, on the same molecules: median S···C distance 3.34 → 3.79 Å,
+median angle 44.6° → 57.5°, viable fraction 0.235 → 0.077. **More search finds
+lower-energy poses that are less reaction-competent** — the reactive well is not
+deep enough to dominate the true minimum.
+
+Discrimination survives, weakened, and is beaten by the energy. Same 75 molecules:
+
+| | AUC | p |
+|---|---|---|
+| enrichment, 200 runs | 0.787 | 0.0003 |
+| enrichment, 2,000 runs | **0.672** | 0.0207 |
+| **`best_dg` alone, 2,000 runs** | **0.824** | **0.0001** |
+
+**This overturns the framework's central claim as written.** §"The one sentence"
+says to rank on orientation *rather than* affinity, justified by five
+measurements showing the docking score carries no signal. On this receptor, with
+this program, asked to separate molecules, the energy carries **more** signal
+than the geometry.
+
+It does **not** overturn the validation: D0065 compared positives and negatives
+at the same `nrun`, so it was like-for-like, and geometry carries real signal at
+every effort tested. What it removes is the licence to discard the energy — and
+the production shortlist, which was built on a quantity that does not converge.
+
 ### Confidence ledger — what is established, and what is not
 
 *Asked directly by @tt8804, 2026-08-06: "are we confident in the current rank
@@ -368,9 +399,9 @@ claims sit at different confidence levels and should not be quoted as one.*
 
 | # | claim | status |
 |---|---|---|
-| **1** | **The measurement.** Enrichment separates crystallographic Cys113 binders from warhead-matched measured inactives. | **Supported, and now robust to the negative draw.** On a 10× larger, independently-seeded negative pool: chloroacetamide **AUC 0.908** [0.857, 0.954], Michael **0.734** [0.593, 0.839]. **Ten disjoint draws of 30 all clear chance** (0.846–0.974 and 0.679–0.875). Replicates across 4 docking seeds. Not molecular size (ρ = −0.09; size-matched AUC 0.812). Not the docking score (max \|ρ\| = 0.255). |
+| **1** | **The measurement.** Enrichment separates crystallographic Cys113 binders from warhead-matched measured inactives. | **Supported at a FIXED run count, and weaker at convergence** (AUC 0.787 → 0.672 on the same 75 molecules; chloroacetamide 0.756, p = 0.016). Robust to the negative draw. On a 10× larger, independently-seeded negative pool: chloroacetamide **AUC 0.908** [0.857, 0.954], Michael **0.734** [0.593, 0.839]. **Ten disjoint draws of 30 all clear chance** (0.846–0.974 and 0.679–0.875). Replicates across 4 docking seeds. Not molecular size (ρ = −0.09; size-matched AUC 0.812). Not the docking score (max \|ρ\| = 0.255). |
 | **2** | **The interpretation.** It measures *Cys113 recognition*, rather than generic warhead exposure. | **STILL UNTESTED.** The Cys57 decoy control ran and was **inconclusive** — Cys57 is buried (120 protein atoms within 8 Å vs 77 for Cys113), so ligands dock 12.2 Å away and the angular criterion is never exercised. It rules out the weakest form of the exposure hypothesis and does not establish recognition. Needs an *accessible* decoy cysteine. |
-| **3** | **The application.** The ranking can order 5,769 candidates. | **Insufficient as built.** 95% CI ≈ 1.12× at 200 runs: the leader is separated, but 1,239 of 1,806 molecules have an interval reaching the top-25 band. Supports "these ~300 deserve a closer look", not "these are the top 25". `--refine-top` addresses it. |
+| **3** | **The application.** The ranking can order 5,769 candidates. | **NO — withdrawn (D0068).** Re-scoring the top 300 at 2,000 runs collapsed them from 2.91× to 0.96×, and the crystallographic positives fell the same way (2.27× → 0.97×), so it is not selection bias: **enrichment does not converge**. More search finds lower-energy, less reaction-competent poses. No shortlist is issued from the 200-run screen. |
 
 **Structural limits that no amount of compute removes:**
 
