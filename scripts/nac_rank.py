@@ -183,15 +183,93 @@ def run_shard(shard: int, n_shards: int, nrun: int, gpu: str, chunk: int) -> Non
             buf = []
 
 
-def report() -> None:
+REFINE = sout.Topic("blacksmith", "nac_refine")
+
+
+def wilson_enrichment_ci(vf: np.ndarray, n: np.ndarray, null: np.ndarray,
+                         z: float = 1.96) -> tuple[np.ndarray, np.ndarray]:
+    """95% CI on enrichment, from the binomial CI on the viable fraction.
+
+    Wilson rather than the normal approximation: many molecules sit near a
+    viable fraction of zero, where the normal interval runs negative and
+    understates the width exactly where precision matters least.
+    """
+    den = 1 + z ** 2 / n
+    centre = (vf + z ** 2 / (2 * n)) / den
+    half = z * np.sqrt(vf * (1 - vf) / n + z ** 2 / (4 * n ** 2)) / den
+    return (centre - half) / null, (centre + half) / null
+
+
+def refine(top_n: int, nrun: int, shard: int, n_shards: int, gpu: str,
+           chunk: int) -> None:
+    """Re-score the shortlist at high precision.
+
+    WHY A SECOND PASS EXISTS. At 200 runs the 95% CI on enrichment is ~1.12x
+    wide against a median enrichment of 1.59x -- about +/-36%. That is enough to
+    separate the top of the list from the bulk (only 5 of 1,806 molecules'
+    intervals reach the leader's) and NOT enough to order molecules within the
+    shortlist. Reporting a rank order at that precision would be inventing
+    detail the measurement does not carry.
+
+    CI width scales as 1/sqrt(runs), so 2,000 runs narrows it to ~0.38x. Paying
+    that for every candidate would be 10x the whole screen; paying it for a few
+    hundred costs about as much as screening 2,000 more. Screen wide and cheap,
+    then measure the shortlist properly.
+
+    Written to its own topic. A 200-run and a 2,000-run enrichment are not the
+    same measurement and must never be concatenated into one column.
+    """
+    scored = load_scored()
+    if scored.empty:
+        raise SystemExit("nothing scored yet — run the screen first")
+    ok = scored[scored.status == "ok"]
+    short = ok.nlargest(top_n, "enrichment")
+    log.info("refining top %d of %d at %d runs (cutoff %.2fx)",
+             len(short), len(ok), nrun, short.enrichment.min())
+
+    by_id = {c.ident: c for c in load_candidates()}
+    mine = [by_id[i] for k, i in enumerate(short.ident.astype(str))
+            if k % n_shards == shard and i in by_id]
+    done = {*_ids_in(REFINE.dir, "nac_refine_s*.csv")}
+    todo = [c for c in mine if c.ident not in done]
+    log.info("shard %d: %d assigned, %d to do", shard, len(mine), len(todo))
+
+    rec = ns.build_reactive_receptor(ns.RX_RECEPTOR)
+    buf = []
+    for k, c in enumerate(todo, 1):
+        buf.append(score_one(c, rec, nrun, gpu))
+        if len(buf) >= chunk or k == len(todo):
+            dest = REFINE.write(f"nac_refine_s{shard}", ".csv")
+            pd.DataFrame(buf).to_csv(dest, index=False)
+            log.info("refine shard %d: %d/%d -> %s", shard, k, len(todo), dest.name)
+            buf = []
+
+
+def _ids_in(d: Path, pattern: str) -> set[str]:
+    ids = set()
+    for f in glob.glob(str(d / pattern)):
+        try:
+            ids.update(pd.read_csv(f).ident.astype(str))
+        except Exception:                              # noqa: BLE001
+            pass
+    return ids
+
+
+def load_scored() -> pd.DataFrame:
     fs = sorted(glob.glob(str(OUT.dir / "nac_rank_s*.csv")))
     if not fs:
-        raise SystemExit("nothing written yet")
+        return pd.DataFrame()
     df = pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)
-    df = df.drop_duplicates("ident", keep="first")
+    return df.drop_duplicates("ident", keep="first")
+
+
+def report() -> None:
+    df = load_scored()
+    if df.empty:
+        raise SystemExit("nothing written yet")
     ok = df[df.status == "ok"].copy()
     print(f"\n=== NAC ranking: {len(df)} scored, {len(ok)} ok, "
-          f"{len(df) - len(ok)} failed ({len(fs)} chunks) ===")
+          f"{len(df) - len(ok)} failed ===")
     if df.status.ne("ok").any():
         print("  failures:")
         print(df[df.status != "ok"].status.str.slice(0, 60).value_counts().head().to_string())
@@ -206,10 +284,24 @@ def report() -> None:
     for c, g in ok.groupby("warhead_class"):
         print(f"    {c:<24} n={len(g):>5}  median {g.enrichment.median():>5.2f}x  "
               f"max {g.enrichment.max():>5.2f}x")
+    # The interval travels with the number. At 200 runs it is ~1.12x wide, so a
+    # bare rank order would imply a precision the measurement does not have.
+    null = (ok.viable_fraction / ok.enrichment).values
+    lo, hi = wilson_enrichment_ci(ok.viable_fraction.values,
+                                  ok.n_poses.values.astype(float), null)
+    ok["e_lo"], ok["e_hi"] = lo, hi
+    med_w = float(np.nanmedian(hi - lo))
+    print(f"\n  median 95% CI width {med_w:.2f}x — fine-grained rank order is NOT "
+          f"supported;\n  read this as a filter, not a ranking. --refine-top "
+          f"re-scores the shortlist.")
+    top = ok.nlargest(25, "enrichment")
+    cut = float(top.e_lo.min())
     print(f"\n  TOP 25 (crystallographic positives ran 1.6-4.3x on the same gate)")
-    for r in ok.nlargest(25, "enrichment").itertuples():
-        print(f"    {r.enrichment:>5.2f}x  {r.viable_fraction:>6.1%}  "
-              f"{r.approach}  {r.warhead_class[:20]:<21}{r.ident[:26]}")
+    for r in top.itertuples():
+        print(f"    {r.enrichment:>5.2f}x [{r.e_lo:>4.2f},{r.e_hi:>5.2f}]  "
+              f"{r.approach}  {r.warhead_class[:18]:<19}{r.ident[:24]}")
+    print(f"    ({int((ok.e_hi >= cut).sum())} molecules have an interval reaching "
+          f"this top-25 band)")
 
 
 def main() -> None:
@@ -221,11 +313,18 @@ def main() -> None:
     ap.add_argument("--chunk", type=int, default=100)
     ap.add_argument("--report", action="store_true",
                     help="summarise what has actually landed, and exit")
+    ap.add_argument("--refine-top", type=int, default=None, metavar="N",
+                    help="re-score the top N of an existing screen at --nrun "
+                         "(use a high --nrun; writes to the nac_refine topic)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO,
                         format=f"%(levelname)s [s{args.shard}] %(message)s")
     if args.report:
         report()
+        return
+    if args.refine_top:
+        refine(args.refine_top, args.nrun, args.shard, args.n_shards,
+               args.gpu, args.chunk)
         return
     run_shard(args.shard, args.n_shards, args.nrun, args.gpu, args.chunk)
 
