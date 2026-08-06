@@ -120,10 +120,26 @@ def score_one(c: ns.Candidate, rec_dir: Path, nrun: int, gpu: str) -> dict:
         per_centre = []
         for j, lig in enumerate(ns.prepare_ligand(c, work / "lig.pdbqt")):
             dlg = ns.dock(lig, rec_dir, work / f"c{j}", nrun, gpu)
-            per_centre.append(ns.measure_dlg(dlg, c))
-        res = max(per_centre, key=nac.viable_fraction)
+            res_j = ns.measure_dlg(dlg, c)
+            energies = ns.pose_energies(dlg)
+            # Both parse MODEL blocks in file order, so they align — asserted
+            # rather than assumed, because a silent off-by-one would attach each
+            # pose's energy to a different pose's geometry and still look
+            # perfectly plausible.
+            if len(energies) != len(res_j):
+                raise ValueError(f"{c.ident}: {len(energies)} energies for "
+                                 f"{len(res_j)} poses")
+            per_centre.append((res_j, energies))
+        res, energies = max(per_centre, key=lambda t: nac.viable_fraction(t[0]))
         angles = np.array([r.angle for r in res])
         vf = nac.viable_fraction(res)
+
+        # STAGE 4's raw material: the energy of poses that PASSED the geometric
+        # gate, kept separate from the energy of all poses. The docking score is
+        # not trusted to rank molecules (D0041, D0046, D0061); it is only being
+        # asked to compare poses of ONE molecule that already cleared geometry.
+        viable_e = [e for r, e in zip(res, energies) if r.viable and not np.isnan(e)]
+        all_e = [e for e in energies if not np.isnan(e)]
         return {
             "ident": c.ident, "approach": c.label, "warhead_class": c.warhead_class,
             "mechanism": c.mechanism, "n_centres": len(per_centre), "n_poses": len(res),
@@ -131,6 +147,9 @@ def score_one(c: ns.Candidate, rec_dir: Path, nrun: int, gpu: str) -> dict:
             "enrichment": vf / nac.isotropic_null(c.mechanism),
             "median_angle": float(np.median(angles)),
             "median_dist": float(np.median([r.distance for r in res])),
+            "best_viable_dg": min(viable_e) if viable_e else np.nan,
+            "median_viable_dg": float(np.median(viable_e)) if viable_e else np.nan,
+            "best_dg": min(all_e) if all_e else np.nan,
             "status": "ok", "smiles": c.smiles,
         }
     except Exception as exc:                           # noqa: BLE001

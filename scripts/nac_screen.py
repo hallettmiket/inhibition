@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -218,6 +219,27 @@ def sg_position(dlg: Path) -> np.ndarray:
         if rec[17:20].strip() == "CYS" and rec[12:16].strip() == "SG":
             return np.array([float(rec[30:38]), float(rec[38:46]), float(rec[46:54])])
     raise ValueError(f"no flexible Cys SG in {dlg}")
+
+
+def pose_energies(dlg: Path) -> list[float]:
+    """AutoDock's estimated free energy of binding, one per pose, in MODEL order.
+
+    STAGE 4's INPUT. `enrichment` measures how OFTEN a molecule reaches a
+    near-attack conformation; this is what lets us ask whether it reaches one in
+    a good pose or only in a strained one. Two molecules can reach a NAC equally
+    often and not be equally promising.
+
+    The score is deliberately NOT used to rank molecules directly -- five
+    measurements say it carries no signal on this target (D0041, D0046, D0061).
+    It is used only to compare poses OF ONE MOLECULE that have already passed
+    the geometric gate, which is a much weaker thing to ask of it.
+    """
+    out = []
+    for body in re.findall(r"MODEL\s+\d+(.*?)ENDMDL",
+                           dlg.read_text(errors="replace"), re.S):
+        m = re.search(r"Estimated Free Energy of Binding\s+=\s+([-\d.]+)", body)
+        out.append(float(m.group(1)) if m else float("nan"))
+    return out
 
 
 def _reactive_xyz(dlg: Path) -> np.ndarray:
