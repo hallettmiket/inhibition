@@ -198,8 +198,25 @@ def resolve_pose(cand: ns.Candidate, *, nrun: int, gpu: str,
     return Path(r["nac_pose_path"]), "redocked"
 
 
-def read_pose(sdf: Path):
-    """The pose as a complete molecule, with its recorded near-attack geometry."""
+def read_pose(sdf: Path, pose_rank: int = 1):
+    """The pose as a complete molecule, with its recorded near-attack geometry.
+
+    ONE POSE PER FILE USED TO BE THE EXPORT'S CONTRACT AND IS NOT ANY MORE.
+    `export_nac_poses` now writes the TOP-N poses per molecule so that pose
+    consensus is visible, and this reader refused every file it produced:
+
+        t4_72f5671e89cb.sdf holds 10 molecules; one pose per file is the
+        export's contract
+
+    which is BPMD declining to run on the current pose set while reporting it
+    as a malformed input. The contract moved; this reader did not.
+
+    The pose is selected by its own `pose_rank` property, never by position.
+    Taking `mols[0]` would work today — the export happens to write them in
+    rank order — and would begin biasing a different pose the day that
+    changes. This module is more exposed to that than most: BPMD on the wrong
+    pose completes normally and reports a perfectly plausible stability.
+    """
     from rdkit import Chem, RDLogger
     RDLogger.DisableLog("rdApp.*")
 
@@ -207,8 +224,16 @@ def read_pose(sdf: Path):
     if not mols:
         raise BPMDRunError(f"no readable molecule in {sdf}")
     if len(mols) > 1:
-        raise BPMDRunError(f"{sdf.name} holds {len(mols)} molecules; "
-                           "one pose per file is the export's contract")
+        ranked = [m for m in mols if m.HasProp("pose_rank")
+                  and int(m.GetProp("pose_rank")) == pose_rank]
+        if len(ranked) != 1:
+            raise BPMDRunError(
+                f"{sdf.name} holds {len(mols)} poses and {len(ranked)} carry "
+                f"pose_rank={pose_rank}; the rank does not identify one pose. "
+                f"Ranks present: "
+                f"{sorted(int(m.GetProp('pose_rank')) for m in mols if m.HasProp('pose_rank'))}")
+        log.info("  pose_rank %d of %d poses in %s", pose_rank, len(mols), sdf.name)
+        mols = ranked
     props = mols[0].GetPropsAsDict()
     # Hydrogens at the pose geometry, not by re-embedding: re-embedding would
     # discard the pose this whole run exists to test.

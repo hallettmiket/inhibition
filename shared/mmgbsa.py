@@ -99,6 +99,29 @@ LIGAND_RESNAME = "LIG"
 
 PROTEIN_FF = "leaprc.protein.ff19SB"
 LIGAND_FF = "leaprc.gaff2"
+
+# CRYSTALLOGRAPHIC WATER NEEDS A WATER FORCE FIELD, EVEN IN IMPLICIT SOLVENT.
+#
+# 6VAJ was stripped of solvent before preparation, so ff19SB + gaff2 typed
+# every atom in it and this line was never needed. 3IKD is used EXACTLY as the
+# chemist prepared it (D0059) and retains 2 ordered waters, which neither the
+# protein nor the ligand force field can type:
+#
+#     FATAL:  Atom .R<HOH 114>.A<O 1> does not have a type.
+#
+# tleap then exits 31 having written nothing, and the failure surfaced as
+# "tleap produced no usable complex topology" — a message that points at the
+# junction parameters, which were fine. The explicit-solvent path
+# (`gromacs_explicit.SOLVATE_LEAP`) has sourced tip3p all along; only this
+# implicit path was missing it, which is why covalent MM-GBSA on 3IKD had
+# never once succeeded.
+#
+# THE WATERS ARE KEPT, NOT STRIPPED. Stripping them would also make the build
+# succeed, and would silently substitute a different receptor for the one
+# D0059 mandates. They enter the complex leg and the receptor leg alike so
+# they largely cancel in dG — "largely", not "exactly", so the per-leg count
+# is reported rather than assumed away.
+WATER_FF = "leaprc.water.tip3p"
 PB_RADII = "mbondi3"             # required by igb=8
 IGB = 8
 
@@ -403,6 +426,7 @@ def build_topologies(workdir: Path, mol2: Path, frcmod: Path, cyx_pdb: Path,
 
     script = f"""source {PROTEIN_FF}
 source {LIGAND_FF}
+source {WATER_FF}
 loadamberparams {frcmod.name}
 loadamberparams junction.frcmod
 set default PBRadii {PB_RADII}

@@ -77,6 +77,43 @@ BIASFACTOR = 10.0                  # well-tempered: bias decays, estimate conver
 # Beyond this the warhead has unambiguously left; no point simulating further.
 UNBOUND_NM = 1.0
 
+# --------------------------------------------------------------------------
+# THE CV MUST BE BOUNDED BY A WALL, NOT BY THE COMMITTOR.
+#
+# The first convergence run died in every one of its replicas:
+#
+#     An error occurred while PLUMED was calculating the forces
+#     (tools/Grid.cpp:111) PLMD::GridBase::index_t ... getIndex
+#     An error happened while calculating metad
+#
+# That is METAD indexing its bias grid outside the grid's own bounds. The
+# protocol relied on `COMMITTOR` to end the run once the warhead was gone, so
+# the grid only had to reach a little past UNBOUND_NM and GRID_MAX was 2.0 nm.
+#
+# COMMITTOR FIRED AND THE RUN DID NOT STOP. PLUMED's own output records
+# "SET COMMITTED TO BASIN 1" from t = 681 ps onward and keeps printing it for
+# the next two nanoseconds: PLUMED raised its stop flag every step and GROMACS
+# ignored it. The CV then wandered to 1.97 nm and the next step took it off the
+# grid. Every replica crashed at ~3 ns of a 10 ns run, so the convergence run
+# that was supposed to fix the protocol's parameters produced nothing at all.
+#
+# THE FAILURE LOOKED LIKE A TOPOLOGY PROBLEM. It arrived immediately after the
+# "GPU update kernel rejected this atom ordering; retrying with -update cpu"
+# warning, which is unrelated (GROMACS always refuses the GPU update path when
+# PLUMED is driving forces) and reads like the cause.
+#
+# So the CV is now confined by an UPPER_WALLS restraint, which is a force and
+# cannot be ignored by the host MD engine. The wall sits BEYOND UNBOUND_NM: by
+# the time it is felt the warhead has already left by any definition this
+# module uses, so it cannot alter the escape barrier being measured — it only
+# stops an escaped ligand from diffusing off the grid. GRID_MAX keeps clear
+# headroom above the wall so even a hard overshoot stays indexable.
+WALL_NM = 1.5                      # 0.5 nm past "unambiguously gone"
+WALL_KAPPA_KJ_PER_NM2 = 2000.0
+GRID_MIN_NM = 0.1
+GRID_MAX_NM = 2.5                  # 1.0 nm of headroom above the wall
+GRID_SPACING_NM = 0.005            # ~4 bins per SIGMA
+
 
 class BPMDError(RuntimeError):
     """The run could not be set up or its output could not be read."""
@@ -140,6 +177,7 @@ def plumed_input(warhead_idx: int, sg_idx: int, *, stride: int = 500,
     if warhead_idx < 1 or sg_idx < 1:
         raise BPMDError(f"PLUMED indices are 1-based; got warhead={warhead_idx}, "
                         f"sg={sg_idx}. Use bpmd_atom_indices().")
+    nbin = int(round((GRID_MAX_NM - GRID_MIN_NM) / GRID_SPACING_NM))
     return f"""# Binding-pose metadynamics, biased along the WARHEAD-SULFUR distance.
 # Not ligand RMSD: a scaffold that drifts while the warhead stays locked is a
 # good answer, and RMSD would punish it (D0062).
@@ -151,17 +189,25 @@ metad: METAD ARG=d ...
    SIGMA={sigma}
    BIASFACTOR={biasfactor}
    TEMP={temp_k}
-   GRID_MIN=0.1
-   GRID_MAX=2.0
-   GRID_BIN=380
+   GRID_MIN={GRID_MIN_NM}
+   GRID_MAX={GRID_MAX_NM}
+   GRID_BIN={nbin}
    FILE=HILLS
 ...
 
-# Stop once the warhead is unambiguously gone — further sampling costs GPU and
-# tells us nothing we did not already know.
+# KEEPS THE CV ON THE GRID. This is a force, so the MD engine cannot decline it
+# the way it declined COMMITTOR's stop flag. It sits {WALL_NM - UNBOUND_NM:.1f} nm beyond
+# UNBOUND_NM, so it acts only on ligands that have already left.
+uwall: UPPER_WALLS ARG=d AT={WALL_NM} KAPPA={WALL_KAPPA_KJ_PER_NM2}
+
+# INFORMATIONAL ONLY — GROMACS DOES NOT HONOUR THIS. PLUMED raises its stop
+# flag and the run continues; the convergence run's replicas all logged
+# "SET COMMITTED TO BASIN 1" for 2 ns before dying off the end of the grid.
+# Escape is therefore read from the COLVAR by `read_colvar`, never inferred
+# from a run having stopped early, and cost is bounded by the run LENGTH.
 COMMITTOR ARG=d BASIN_LL1={UNBOUND_NM} BASIN_UL1=99.0
 
-PRINT ARG=d,metad.bias FILE=COLVAR STRIDE={stride}
+PRINT ARG=d,metad.bias,uwall.bias FILE=COLVAR STRIDE={stride}
 """
 
 
