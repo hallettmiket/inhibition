@@ -15,25 +15,34 @@ work.
 **2026-08-05.** @tt8804's chemist recommended abandoning 6VAJ for a prepared
 3IKD. Re-running D0046's pose-recovery benchmark on it:
 
-| crystal pose within 2 Å | 6VAJ | **3IKD** |
+| is *any* pose in the top-k within 2 Å | 6VAJ | **3IKD** |
 |---|---:|---:|
-| top-1 — *what the pipeline carries* | 4.9% | **2.4%** |
-| top-3 | 6.1% | **13.4%** |
-| top-5 | 8.5% | **28.0%** |
-| **best-of-9 — *what is findable*** | **15.9%** | **41.5%** |
+| top-1 — *what the pipeline carries* | 6.1% | **18.3%** |
+| top-3 | 9.8% | **29.3%** |
+| top-5 | 12.2% | **34.1%** |
+| **best-of-9 — *the ceiling*** | **15.9%** | **41.5%** |
+| **random pick of the 9 — *the floor*** | 5.3% | **19.8%** |
 
 **The right pose is now in the ensemble 2.6× more often.** 6VAJ is co-crystallised
 with sulfopin, so its pocket is induced-fit around that ligand; the improvement is
 the size of what that was costing.
 
-**And the score still cannot find it.** Top-1 got marginally *worse*. The rank of
-the closest-to-crystal mode is essentially uniform (5, 12, 9, 12, 11, 12, 9, 6, 6
-across ranks 1–9), and among the 34 cases where a ≤2 Å pose genuinely exists, the
-score ranks it first in **2**.
+**And the score is indistinguishable from chance at picking it.** Random selection
+among the nine gives **19.8%**; Vina's score gives **18.3%**. The rank of the
+closest-to-crystal mode is essentially uniform (5, 12, 9, 12, 11, 12, 9, 6, 6
+across ranks 1–9).
 
-So the gap between what docking *finds* and what it *hands us* widened from ~2.4×
-to **17×**. That is the strongest argument yet for #14's pose-selection framework:
-there is far more signal sitting unused in the ensemble than anyone thought.
+So the headroom for pose selection is **18.3% → 41.5%** — more than doubling
+recovery. But the bar any method must clear is **random (19.8%)**, not the score,
+and those are effectively the same number.
+
+**Correction, 2026-08-05:** an earlier version of this table reported top-1 as
+2.4% and a 17× gap. That was a reporting bug of mine, not a docking result:
+`top-k` was computed as *"the single closest pose is within the top k"* rather
+than the standard *"a good pose exists within the top k"*, which excluded cases
+where mode 1 was within 2 Å but some later mode was closer. Both arms were
+understated. The direction and conclusion are unchanged; the magnitudes were
+wrong. Catalogue shape, committed here.
 
 **Caveats that travel with these numbers.** The comparison is confounded — 6VAJ
 was water-stripped and `reduce`-protonated, 3IKD keeps 6 waters and the chemist's

@@ -27,8 +27,43 @@ machinery for *describing* choreographies belongs in the murmurent repo.
 - **Spec:** [issue #108](https://github.com/hallettmiket/murmurent/issues/108),
   Rev 3 (comment `5083543621`) + implementation plan (comment `5083611947`).
 - **Authors:** Mike Hallett (hallett.mike.t@gmail.com), with Claude Code.
-- **Target:** Pin1, catalytic Cys113. Shared receptor **PDB 6VAJ**
-  (Pin1 + sulfopin/QT7, covalent at Cys113, 1.42 Å).
+- **Target:** Pin1, catalytic Cys113. Shared receptor **3IKD, curated by the
+  project's medicinal chemist** — replaced 6VAJ on 2026-08-05 (D0059).
+
+### Why the receptor changed, and what it bought
+
+6VAJ is Pin1 co-crystallised with sulfopin, so its pocket is **induced-fit around
+that ligand** and biases docking toward sulfopin-like chemistry. The curated 3IKD
+is used *exactly as delivered* — no re-protonation, its 6 waters kept, nothing
+rebuilt. Only the cognate ligand J9Z is removed (a receptor holding its own
+ligand has an occupied pocket); its coordinates define the box. Cys113 arrives as
+a **reactive thiol**, which the covalent arms require.
+
+Re-running the pose-recovery benchmark on 82 crystal cases:
+
+| is *any* pose in the top-k within 2 Å | 6VAJ | **3IKD** |
+|---|---:|---:|
+| top-1 — *what the pipeline carries* | 6.1% | **18.3%** |
+| **best-of-9 — *the ceiling*** | 15.9% | **41.5%** |
+| **random pick of the nine — *the floor*** | 5.3% | **19.8%** |
+
+**The right pose is in the ensemble 2.6× more often — and the score is
+indistinguishable from a coin flip at picking it.** Sampling works; selection is
+the bottleneck. That is the finding the ranking design is built on.
+
+*Confounded: 6VAJ was water-stripped and `reduce`-protonated, 3IKD keeps its
+waters and the chemist's protonation, so part of the gain may be solvation rather
+than conformer. The separating control has not been run.*
+
+### How candidates are ranked
+
+**On whether a molecule can orient to form the bond, not on how good the bond
+would be.** Covalent inhibition is recognition then chemistry; the chemistry rate
+belongs to the warhead *class*, so the molecule-to-molecule variation is almost
+entirely in the recognition step. The docking score, covalent docking and
+MM-GBSA are all excluded — each either measures the wrong thing or assumes the
+bond already exists. Full reasoning, the pipeline, and how it fails:
+**[`docs/ranking_rationale.md`](docs/ranking_rationale.md)**.
 
 ## The four approaches
 
