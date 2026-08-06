@@ -104,7 +104,10 @@ OUT = sout.Topic("blacksmith", "bpmd")
 CONV = sout.Topic("blacksmith", "bpmd_convergence")
 
 WORK = Path("/data/lab_vm/modifiable/inhibition/bpmd_3ikd")
-POSES = enp.POSES
+# The CURRENT pose set. `export_nac_poses` versions these (nac_poses/vN) because
+# the directory lives under append_only and a re-run must not overwrite, so this
+# resolves the newest rather than naming a fixed path.
+POSES = enp.poses_dir()
 
 # The receptor as the chemist prepared it — the same file the docking that
 # produced these poses used, so the pose and the protein are in one frame (D0059).
