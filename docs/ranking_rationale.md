@@ -257,6 +257,33 @@ All three correlations are null and *negative* in sign — if anything larger
 molecules score slightly lower, the opposite of the failure mode. Size-matching
 the negatives leaves the result essentially unchanged (0.812 vs 0.822).
 
+### Was one draw of 30 negatives lucky? No — it was conservative
+
+The headline rested on a single draw of 30 warhead-matched inactives from a pool
+of 642. `scripts/nac_robustness.py` re-drew **300 per class with a different
+seed**, split them into **ten disjoint subsets of 30**, and scored each — ten
+independent answers to "what would we have concluded from a different 30", rather
+than a bootstrap resampling the one pool we happened to have.
+
+| class | full-pool AUC (300 neg) | ten disjoint draws of 30 | verdict |
+|---|---|---|---|
+| **chloroacetamide** | **0.908** [0.857, 0.954] | 0.846 – 0.974, median 0.914 | **robust** |
+| **naphthoquinone / Michael** | **0.734** [0.593, 0.839] | 0.679 – 0.875, median 0.742 | **robust** |
+| snar_chloroazine | 0.451 [0.151, 0.758] | 0.375 – 0.525 | **fragile — no signal** |
+
+**Every disjoint draw of both validated classes clears chance.** The
+chloroacetamide worst case (0.846) sits *above* the original point estimate of
+0.822, so the first draw was mildly unlucky rather than fortunate.
+
+SNAr straddles 0.5 in every single draw. That settles it as **no signal**, not
+merely underpowered — a stronger and more useful statement than n = 2 allowed.
+
+*Caveat: 11 of 915 molecules (1.2%) failed to prepare, all of them negatives —
+nine where meeko's reactive-SMARTS match did not reproduce after fragment
+stripping. The reasons are unrelated to what they would have scored, but dropping
+negatives can only help an AUC, so the asymmetry is recorded rather than
+buried.*
+
 ### Confidence ledger — what is established, and what is not
 
 *Asked directly by @tt8804, 2026-08-06: "are we confident in the current rank
@@ -265,7 +292,7 @@ claims sit at different confidence levels and should not be quoted as one.*
 
 | # | claim | status |
 |---|---|---|
-| **1** | **The measurement.** Enrichment separates crystallographic Cys113 binders from warhead-matched measured inactives. | **Supported.** 2 of 3 mechanisms, AUC 0.822 / 0.800, pooled 0.722. Replicates across 4 docking seeds. Not molecular size (ρ = −0.09; size-matched AUC 0.812). Not the docking score (max \|ρ\| = 0.255 against every prior scorer). |
+| **1** | **The measurement.** Enrichment separates crystallographic Cys113 binders from warhead-matched measured inactives. | **Supported, and now robust to the negative draw.** On a 10× larger, independently-seeded negative pool: chloroacetamide **AUC 0.908** [0.857, 0.954], Michael **0.734** [0.593, 0.839]. **Ten disjoint draws of 30 all clear chance** (0.846–0.974 and 0.679–0.875). Replicates across 4 docking seeds. Not molecular size (ρ = −0.09; size-matched AUC 0.812). Not the docking score (max \|ρ\| = 0.255). |
 | **2** | **The interpretation.** It measures *Cys113 recognition*, rather than generic warhead exposure. | **UNTESTED.** Everything was measured at one site, so both readings fit. The Cys57 decoy control decides it. If positives enrich equally at both sites, this interpretation is withdrawn — the AUCs would stand but would not mean what §"The one sentence" says. |
 | **3** | **The application.** The ranking can order 5,769 candidates. | **Insufficient as built.** 95% CI ≈ 1.12× at 200 runs: the leader is separated, but 1,239 of 1,806 molecules have an interval reaching the top-25 band. Supports "these ~300 deserve a closer look", not "these are the top 25". `--refine-top` addresses it. |
 
