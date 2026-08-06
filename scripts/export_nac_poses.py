@@ -59,7 +59,24 @@ import nac_rank as nr                            # noqa: E402
 log = logging.getLogger("nac-poses")
 
 DATA = Path("/data/lab_vm/append_only/inhibition")
-POSES = DATA / "00_outputs" / "blacksmith" / "nac_poses"
+# VERSIONED, because this lives under append_only and a re-run must not
+# overwrite. The first run of this script wrote one pose per file and the second
+# overwrote them with ten — a rule violation the hooks could not catch, since a
+# Python write is not a CC tool call.
+POSES_ROOT = DATA / "00_outputs" / "blacksmith" / "nac_poses"
+
+
+def poses_dir(create: bool = False) -> Path:
+    """The newest pose set, or the next one when writing."""
+    existing = sorted((d for d in POSES_ROOT.glob("v*") if d.is_dir()),
+                      key=lambda d: int(d.name[1:]))
+    if create:
+        nxt = POSES_ROOT / f"v{(int(existing[-1].name[1:]) + 1) if existing else 1}"
+        nxt.mkdir(parents=True, exist_ok=True)
+        return nxt
+    if existing:
+        return existing[-1]
+    return POSES_ROOT          # legacy flat layout
 FRAMES = {"T_3": ("03_t3_reinvent", "D3"), "T_4": ("04_t4_combinatorial", "D4")}
 
 
@@ -74,7 +91,7 @@ def next_version(subdir: str, stem: str) -> int:
 
 
 def export_one(cand: ns.Candidate, rec_dir: Path, nrun: int, gpu: str,
-               top_n: int = 10) -> dict:
+               top_n: int = 10, out_dir: Path | None = None) -> dict:
     """Re-dock under the scoring protocol and write the TOP-N poses.
 
     ALL TOP-N, NOT JUST THE BEST. Two reasons, and the first is the panel's
@@ -93,6 +110,8 @@ def export_one(cand: ns.Candidate, rec_dir: Path, nrun: int, gpu: str,
     from meeko import PDBQTMolecule, RDKitMolCreate
     from rdkit import Chem
 
+    out_dir = out_dir or poses_dir(create=False)
+    out_dir.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="nacpose_"))
     try:
         best = None
@@ -139,8 +158,7 @@ def export_one(cand: ns.Candidate, rec_dir: Path, nrun: int, gpu: str,
                          key=lambda i: energies[i])
         order = (viable_i + other_i)[:top_n]
 
-        POSES.mkdir(parents=True, exist_ok=True)
-        out = POSES / f"{cand.ident}.sdf"
+        out = out_dir / f"{cand.ident}.sdf"
         w = Chem.SDWriter(str(out))
         for rank, i in enumerate(order, 1):
             one = Chem.Mol(mol)
@@ -221,9 +239,21 @@ def main() -> None:
                      "viable" if r.get("nac_pose_viable") else r["status"])
 
         poses = pd.DataFrame(rows)
+        # IDEMPOTENT MERGE. Re-running this script reads the LATEST frame, which
+        # already carries nac_pose_* from the previous run — pandas then suffixes
+        # both copies to _x/_y and `nac_pose_path` ceases to exist. The GUI's
+        # check is correct and reports "no poses exported" while 25 poses sit on
+        # disk. Stale columns are dropped before the merge so a re-run replaces
+        # rather than duplicates.
+        stale = [c for c in df.columns
+                 if c.startswith(("nac_pose_", "nac_consensus", "nac_n_"))]
+        if stale:
+            log.info("  dropping %d stale pose columns before merge", len(stale))
+            df = df.drop(columns=stale)
         merged = df.merge(poses.drop(columns=["status"]), how="left",
                           left_on=df.candidate_id.astype(str), right_on="ident")
         merged = merged.drop(columns=[c for c in ("key_0", "ident") if c in merged])
+        assert "nac_pose_path" in merged.columns, "merge lost nac_pose_path"
         dest = DATA / subdir / f"{stem}_{next_version(subdir, stem)}.parquet"
         merged.to_parquet(dest, index=False)
         ok = int(poses.nac_pose_path.notna().sum())
