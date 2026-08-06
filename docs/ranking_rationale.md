@@ -219,6 +219,24 @@ in a 387,000-compound qHTS, plus a cephalosporin whose warhead match is spurious
 Validating a geometric criterion against compounds that hit everything would
 confirm nothing.
 
+### The obvious confound: is this just measuring molecular size?
+
+A small, floppy molecule might reach a near-attack geometry trivially, which
+would make the whole result an artefact of the positives being smaller. Tested,
+and it is not:
+
+| | |
+|---|---|
+| enrichment vs heavy-atom count | ρ = **−0.09** (p = 0.36) |
+| enrichment vs molecular weight | ρ = −0.07 (p = 0.48) |
+| enrichment vs rotatable bonds | ρ = −0.14 (p = 0.17) |
+| positives vs negatives: HAC / MW / RotB | p = 0.97 / 0.33 / 0.64 — indistinguishable |
+| chloroacetamide, negatives restricted to the positives' size range (n = 21) | **AUC 0.812, p = 0.0040** |
+
+All three correlations are null and *negative* in sign — if anything larger
+molecules score slightly lower, the opposite of the failure mode. Size-matching
+the negatives leaves the result essentially unchanged (0.812 vs 0.822).
+
 ## What is still open
 
 - **Stage 4 is unbuilt.** Nothing yet ranks *among* the molecules that pass the
