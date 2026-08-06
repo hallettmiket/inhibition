@@ -91,6 +91,10 @@ JUNCTION_FRCMOD = _REPO_ROOT / "data" / "params" / "cys_gaff2_junction_5.frcmod"
 
 COVALENT_RESNUM = "113"          # Cys113, in the ORIGINAL PDB numbering
 COVALENT_RESNAME = "CYS"
+
+# Crystallographic solvent. Must be separated from the protein by a TER, or
+# tleap cannot type the C-terminal residue — see `emit` in prepare_receptor.
+SOLVENT_RESNAMES = frozenset({"HOH", "WAT", "TIP", "TP3", "SOL", "DOD"})
 LIGAND_RESNAME = "LIG"
 
 PROTEIN_FF = "leaprc.protein.ff19SB"
@@ -253,10 +257,21 @@ def prepare_receptor(workdir: Path, receptor_pdb: Path | None = None
     target = targets[0]
 
     def emit(covalent: bool) -> str:
-        out = []
+        out, prev_was_protein = [], False
         for l in lines:
             key = (l[21], l[22:27])
             resname, atom = l[17:20], l[12:16].strip()
+            # TER BETWEEN THE PROTEIN AND ANY CRYSTALLOGRAPHIC SOLVENT.
+            # Without it tleap reads protein-then-water as ONE unit, so the last
+            # amino acid is not the unit's final residue, never receives the
+            # C-terminal template, and its OXT ends up untyped:
+            #     FATAL: Atom .R<GLU 113>.A<OXT 16> does not have a type
+            # 6VAJ was water-stripped, so a single trailing TER sufficed. 3IKD
+            # keeps its 7 waters (D0059) and this was inherited unchecked --
+            # the same shape as every other defect on this branch.
+            if resname in SOLVENT_RESNAMES and prev_was_protein:
+                out.append("TER")
+            prev_was_protein = resname not in SOLVENT_RESNAMES
             if resname in ("HIS", "HIE", "HID", "HIP"):
                 l = l[:17] + his[key] + l[20:]
             elif covalent and key == target:
