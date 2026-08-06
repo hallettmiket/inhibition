@@ -1,5 +1,18 @@
 # Ranking rationale
 
+> **⚠ READ THIS FIRST — 2026-08-06.** The premise below ("rank on orientation,
+> **not** on affinity") rested on five measurements showing the docking score
+> carries no signal. **Four of those five were made on 6VAJ, the receptor D0059
+> replaced, and none was re-run afterwards.** On the corrected 3IKD receptor,
+> plain docking separates crystallographic Cys113 binders from measured inactives
+> at **AUC 0.783** (chloroacetamide **0.900**) — **better than the geometric
+> criterion this document specifies** (0.672 at convergence). See **D0069**, and
+> **D0068** for why the geometric metric does not converge. The geometry still
+> carries real and largely independent signal (ρ = 0.21 with the energy), and
+> combining them beats either. What is withdrawn is the licence to discard
+> affinity, not the geometry itself.
+
+
 *Agreed with @tt8804, 2026-08-05. This is the reasoning behind how candidates are
 ordered, and the measurements that force it. Read it before proposing a scoring
 function.*
