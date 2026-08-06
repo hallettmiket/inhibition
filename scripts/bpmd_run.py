@@ -54,11 +54,20 @@ status. A silently missing replicate would shrink `n_replicas` and narrow the
 reported spread, i.e. it would make the answer look MORE certain for having gone
 wrong -- the precise inversion this project keeps catching.
 
+WHICH ENV, BECAUSE ONLY ONE OF THEM WORKS. This driver spans two stacks that
+live in different environments: meeko + AutoDock (to build a pose that has not
+been exported) and parmed + the Amber/GROMACS binaries (to build and run the
+system). `dwi_cheminf`'s meeko is broken (`import meeko` -> no module named
+`gemmi`) and `dwi_amber_md` has no meeko at all. **`~/.micromamba/envs/dwi_reactive`
+is the one env that carries both**, and it is already `nac_screen.RX_ENV`. The
+GROMACS and Amber executables are invoked by absolute path, so the running
+interpreter does not need them.
+
 FAIR USE. One GPU, and not 0 or 4 (other people's work). Launch long runs under
 `nice -n 19` in tmux:
 
-    tmux new -s bpmd -d 'nice -n 19 /data/lab_vm/envs/dwi_amber_md/bin/python \\
-        scripts/bpmd_run.py --convergence --gpu 2 2>&1 | tee /tmp/bpmd.log'
+    tmux new -s bpmd -d '~/.micromamba/envs/dwi_reactive/bin/python \\
+        scripts/bpmd_run.py --convergence --gpu 2 2>&1 | tee bpmd.log'
 """
 
 from __future__ import annotations
@@ -873,15 +882,30 @@ def choose_convergence_pose(by_id: dict[str, ns.Candidate]) -> ns.Candidate:
     positive is therefore re-docked here under the same protocol rather than
     quietly substituting a generated molecule for a known active.
 
-    Restricted to the two VALIDATED mechanism classes: chloroacetamide
-    (`sn2_displacement`) and `michael_addition` are the classes whose near-attack
-    criterion carries measured discrimination (D0065, and D0068's caveat). SNAr
-    does not, and a convergence test resting on a class whose geometry we cannot
-    yet score would confound two questions.
+    RESTRICTED TO CHLOROACETAMIDE, and for a measured reason. It is the one
+    warhead class whose near-attack criterion still discriminates once the
+    docking search has converged: AUC 0.756 (p = 0.016) at 2,000 runs, against
+    Michael's 0.750 (p = 0.065, not significant) and SNAr's 0.575 (n.s.) — D0068,
+    on the same 75 molecules. It also survived ten disjoint draws of negatives at
+    0.908 (`nac_robustness`). Resting a convergence test on a class whose
+    geometry we cannot reliably score would confound two questions at once.
+
+    A NOTE ON THE IDENT, because it reads wrong at a glance. The first
+    chloroacetamide positive by ident is `xtal:6VAJ:QT7`, and D0059 invalidated
+    **6VAJ as a receptor**. This uses QT7 as a MOLECULE — a ligand observed
+    covalently bonded to Cys113 — and docks it into 3IKD like everything else on
+    this branch. Nothing about the 6VAJ structure enters the calculation.
+
+    Deterministic by ident so a re-run picks the same molecule. If its pose fails
+    to set up (the driver refuses a pose that is not in the pocket once Cys113 is
+    back in its crystallographic rotamer), that is recorded as a failure and the
+    next one is chosen by hand with `--pose`, rather than the code quietly
+    walking down the list until something works.
     """
-    validated = {"sn2_displacement", "michael_addition"}
-    xtal = sorted(c for i, c in by_id.items() if i.startswith("xtal:")
-                  and c.mechanism in validated)
+    validated = {"sn2_displacement"}
+    xtal = sorted((c for i, c in by_id.items()
+                   if i.startswith("xtal:") and c.mechanism in validated),
+                  key=lambda c: c.ident)
     if not xtal:
         raise BPMDRunError(
             "no crystallographic positive in a validated mechanism class; pass "
