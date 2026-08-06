@@ -217,7 +217,8 @@ def production_mdp(ps: float, seed: int = BASE_SEED) -> str:
 
 
 def _stage(wd: Path, name: str, mdp: str, start_gro: str, start_cpt: str | None,
-           gpu_id: int | None, threads: int) -> StageResult:
+           gpu_id: int | None, threads: int,
+           plumed: str | None = None) -> StageResult:
     import time
     (wd / f"{name}.mdp").write_text(mdp, encoding="utf-8")
     grompp = [_bin(GMX_ENV, "gmx"), "grompp", "-f", f"{name}.mdp",
@@ -232,6 +233,14 @@ def _stage(wd: Path, name: str, mdp: str, start_gro: str, start_cpt: str | None,
              "-ntmpi", "1", "-ntomp", str(threads)]
     if gpu_id is not None:
         mdrun += ["-gpu_id", str(gpu_id)]
+    if plumed:
+        # Metadynamics. The file is written by `shared.bpmd.plumed_input`, which
+        # refuses 0-based atom indices -- PLUMED's are 1-based, and an off-by-one
+        # biases a NEIGHBOURING atom while the run completes normally and reports
+        # a perfectly plausible stability.
+        pf = wd / "plumed.dat"
+        pf.write_text(plumed, encoding="utf-8")
+        mdrun += ["-plumed", pf.name]
     try:
         _run(mdrun, wd, f"mdrun_{name}.log")
     except GromacsError:
@@ -266,7 +275,8 @@ def _stage(wd: Path, name: str, mdp: str, start_gro: str, start_cpt: str | None,
 
 def run_pipeline(src: Path, wd: Path, gpu_id: int | None = None,
                  threads: int = 8, production_ps: float = PRODUCTION_PS,
-                 replicate: int = 1, candidate_id: str | None = None) -> dict:
+                 replicate: int = 1, candidate_id: str | None = None,
+                 plumed: str | None = None) -> dict:
     """Solvate once, then run ONE replicate from that shared system.
 
     Layout: solvation and minimisation live in `wd`; each replicate gets
@@ -316,8 +326,11 @@ def run_pipeline(src: Path, wd: Path, gpu_id: int | None = None,
                          threads))
     stages.append(_stage(rep, "npt", npt_mdp(seed), "nvt.gro", "nvt.cpt",
                          gpu_id, threads))
+    # PLUMED is applied to PRODUCTION ONLY. Biasing equilibration would push the
+    # ligand before the system has settled, so the "escape" being measured would
+    # partly be the box relaxing rather than the pose failing.
     stages.append(_stage(rep, "prod", production_mdp(production_ps, seed),
-                         "npt.gro", "npt.cpt", gpu_id, threads))
+                         "npt.gro", "npt.cpt", gpu_id, threads, plumed=plumed))
 
     traj = rep / "prod.xtc"
     if not traj.is_file() or traj.stat().st_size == 0:
@@ -333,6 +346,7 @@ def run_pipeline(src: Path, wd: Path, gpu_id: int | None = None,
         "water_model": "TIP3P",
         "explicit_solvent": True,
         "gromacs": "2026.3 CUDA (dwi_gromacs_cuda)",
+        "plumed": bool(plumed),
         "stages": {s.name: {"seconds": s.seconds, "ns_per_day": s.ns_per_day}
                    for s in stages},
         "trajectory": str(traj),
