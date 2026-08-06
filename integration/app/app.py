@@ -1662,6 +1662,9 @@ def panel_nac_ranking() -> None:
     on screen are the confusion this project keeps paying for.
     """
     st.header("Near-attack ranking — can the molecule present its warhead?")
+    # Declares this panel's relationship to the chemist's filter BEFORE any
+    # candidate is shown. Silence is how the original bug read to the user.
+    curation_header("Near-attack ranking")
     st.caption("Covalent arms only (T₃, T₄). T₁ and T₂ carry no warhead, so the "
                "question is undefined for them rather than false — they are not "
                "ranked last, they are absent (D0043).")
@@ -1698,6 +1701,15 @@ def panel_nac_ranking() -> None:
             continue
         scored = df.dropna(subset=["nac_enrichment"])
         st.caption(f"`{fname}` — {len(scored)} of {len(df)} scored")
+        # Filtered like any candidate list. The enrichment values are NOT
+        # recomputed on the subset: each is a per-molecule measurement against an
+        # isotropic baseline, not a rank within the displayed set, so it means
+        # the same thing whoever else is on screen.
+        scored, _rules = curated(scored, "Near-attack ranking",
+                                 label=D.display_name(key))
+        if scored.empty:
+            st.info("no candidates survive the current curation filter")
+            continue
 
         top = scored.nlargest(25, "nac_enrichment").copy()
         top["enrichment"] = [f"{r.nac_enrichment:.2f}× [{r.nac_enrichment_lo:.2f}, "

@@ -239,6 +239,17 @@ PANEL_SCOPE: tuple[Scope, ...] = (
           "current constraint' — a different and much weaker claim. The "
           "per-seed medians and pool sizes must describe what CReM actually "
           "generated, for the same reason a rank denominator must."),
+    Scope("Near-attack ranking", True,
+          "A candidate list, so the chemist's constraints apply for the same "
+          "reason they do on Shortlists — a molecule that has been ruled out "
+          "should not be offered at the top of a second ranking as though it "
+          "were still in contention. The panel's own caveats are about how much "
+          "the ORDER can be trusted (the score does not converge, D0068); "
+          "curation is about which molecules belong in the list at all, and the "
+          "two are independent. The enrichment values are NOT recomputed on the "
+          "filtered subset: each is a per-molecule measurement against an "
+          "isotropic baseline, not a rank within the displayed set, so it means "
+          "the same thing whoever else is on screen."),
     Scope("Candidate dossier", True,
           "A view of one shortlisted candidate. A molecule the chemist has "
           "ruled out should not be offered for inspection as though it were "
