@@ -107,3 +107,61 @@ the *conclusion* it supported was never revisited.
 This is the project's signature defect operating on a belief rather than a value:
 carried forward by inheritance rather than by identity, populated and plausible,
 and wrong.
+
+---
+
+# Correction, 2026-08-06 — the receptor was NOT the explanation
+
+The gate was then re-run properly, with the project's own
+`shared.enrichment_gate` grading it, against the **property-matched decoy set the
+gate specifies** rather than the warhead-matched HTS inactives used above.
+
+| actives | decoys | ROC-AUC | 95% CI | EF1% | BEDROC | chemotypes | **verdict** |
+|---|---|---|---|---|---|---|---|
+| 17 crystallographic | 257 property-matched | **0.618** | [0.473, 0.754] | 0.0 | 0.180 | 6 | **WEAK** |
+| 5 anchors (config-specified) | 257 | 0.642 | [0.273, 0.984] | 17.5 | 0.465 | 3 | UNDERPOWERED |
+
+**D0041 measured 0.599 on 6VAJ against the same style of decoy. 3IKD gives
+0.618.** That is not a restoration; it is the same answer. **The receptor was not
+what made docking enrichment fail**, and the claim above that it was is
+withdrawn.
+
+## Why the two numbers differ, and it is not size
+
+The 0.783 above and the 0.618 here use different negatives, and size does not
+explain the gap:
+
+| | actives HAC | decoys HAC | AUC |
+|---|---|---|---|
+| warhead-matched **measured** inactives | 22 | 22 (p = 0.87) | **0.783** |
+| property-matched ChEMBL decoys | 22 | 26 (p = 0.10) | 0.618 |
+| the same, restricted to nearest-size decoys | 22 | 24 | 0.671 |
+
+Docking energy is strongly size-driven here (ρ = +0.55 to +0.64 with heavy-atom
+count), and the *property-matched* set is the one that is size-mismatched — its
+decoys are **larger**, which on this score is an advantage. Size-matching lifts it
+only to 0.671. The gap is the **decoy source**, not the property matching.
+
+That distinction has a name in this project already: D0041's own recorded
+weakness is that its negatives were *assumed* inactive, and
+`ingest_measured_inactives` exists to fix exactly that. Assumed-inactive ChEMBL
+compounds may contain real binders; the HTS inactives were measured against Pin1.
+
+## What survives, precisely
+
+- **Docking enrichment on 3IKD against property-matched decoys is WEAK** — CI
+  includes 0.5, EF1% = 0.0. D0041's verdict is reproduced, not overturned.
+- **On the measured-inactive set, the energy (0.783) still beats the geometry
+  (0.672)** — same molecules, same runs, so that comparison stands.
+- **The framework's premise is therefore not simply wrong, but it is not safe
+  either.** Whether affinity carries signal depends on which negatives you ask
+  about, and the two available answers differ by 0.16 AUC.
+
+## What this record got wrong, and why
+
+It reasoned from one comparison to a general claim about the receptor. The
+measured-inactive result was real and reproducible, and the inference "therefore
+docking works on 3IKD, therefore the premise was a 6VAJ artefact" outran it —
+the gate had not been run when that was written. **Run the gate before
+generalising from an ad-hoc comparison** is the lesson, and it is the same
+lesson D0045 records in a different costume.
