@@ -219,6 +219,26 @@ in a 387,000-compound qHTS, plus a cephalosporin whose warhead match is spurious
 Validating a geometric criterion against compounds that hit everything would
 confirm nothing.
 
+### Is enrichment just the docking score in new clothes?
+
+No. Measured on 3,602 T_3 candidates carrying both, Spearman ρ against everything
+the previous pipeline computed:
+
+| against | ρ |
+|---|---|
+| Vina `affinity_kcal` | **+0.155** |
+| GNINA `cnn_affinity` | **−0.239** |
+| GNINA `cnn_score` | −0.020 |
+| `size_decorrelated_score` | −0.075 |
+| SAscore | +0.055 |
+
+**Max |ρ| = 0.255 — at most ~6% shared variance.** And the *signs* are the
+interesting part: on both affinity predictors, higher enrichment goes with
+slightly **worse** predicted binding. A molecule that presents its warhead well
+is not the same molecule as one that binds tightly, which is precisely what this
+framework asserts and what the docking score's five failures (D0041, D0046,
+D0036, D0038/D0044, D0061) would predict.
+
 ### The obvious confound: is this just measuring molecular size?
 
 A small, floppy molecule might reach a near-attack geometry trivially, which
