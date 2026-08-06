@@ -257,6 +257,36 @@ All three correlations are null and *negative* in sign — if anything larger
 molecules score slightly lower, the opposite of the failure mode. Size-matching
 the negatives leaves the result essentially unchanged (0.812 vs 0.822).
 
+### Confidence ledger — what is established, and what is not
+
+*Asked directly by @tt8804, 2026-08-06: "are we confident in the current rank
+build schema?" Kept here rather than in a thread so it stays current. Three
+claims sit at different confidence levels and should not be quoted as one.*
+
+| # | claim | status |
+|---|---|---|
+| **1** | **The measurement.** Enrichment separates crystallographic Cys113 binders from warhead-matched measured inactives. | **Supported.** 2 of 3 mechanisms, AUC 0.822 / 0.800, pooled 0.722. Replicates across 4 docking seeds. Not molecular size (ρ = −0.09; size-matched AUC 0.812). Not the docking score (max \|ρ\| = 0.255 against every prior scorer). |
+| **2** | **The interpretation.** It measures *Cys113 recognition*, rather than generic warhead exposure. | **UNTESTED.** Everything was measured at one site, so both readings fit. The Cys57 decoy control decides it. If positives enrich equally at both sites, this interpretation is withdrawn — the AUCs would stand but would not mean what §"The one sentence" says. |
+| **3** | **The application.** The ranking can order 5,769 candidates. | **Insufficient as built.** 95% CI ≈ 1.12× at 200 runs: the leader is separated, but 1,239 of 1,806 molecules have an interval reaching the top-25 band. Supports "these ~300 deserve a closer look", not "these are the top 25". `--refine-top` addresses it. |
+
+**Structural limits that no amount of compute removes:**
+
+- **15 positives.** Enough for "clearly works" or "clearly does not"; not for a
+  marginal claim. Stated before the measurement, and unchanged by it.
+- **The negatives are HTS inactives** — weak evidence per compound, since
+  single-concentration inactivity has many causes besides failing to bind.
+- **One draw of 30 negatives** underpins the headline; the robustness run tests
+  exactly that and is pending.
+- **SNAr cannot be validated at all** (n = 2). Issue #12 §A's chemotype shortage
+  arriving as a hard statistical wall rather than a projection.
+
+**The honest summary.** This is the best-supported ranking the project has
+produced and the first thing to separate actives from inactives after five levels
+of theory failed — and "best so far" is not "trustworthy enough to commit
+synthesis to". The gap between them is claims 2 and 3, plus #12 §D3: measured
+actives and inactives are the binding constraint, and no computational control
+substitutes for them.
+
 ## What is still open
 
 - **Stage 4 is unbuilt.** Nothing yet ranks *among* the molecules that pass the
