@@ -163,10 +163,21 @@ def score_one(c: ns.Candidate, rec_dir: Path, nrun: int, gpu: str) -> dict:
         shutil.rmtree(work, ignore_errors=True)
 
 
-def run_shard(shard: int, n_shards: int, nrun: int, gpu: str, chunk: int) -> None:
+def run_shard(shard: int, n_shards: int, nrun: int, gpu: str, chunk: int,
+              redo_classes: list[str] | None = None) -> None:
     rec = ns.build_reactive_receptor(ns.RX_RECEPTOR)
     cands = [c for i, c in enumerate(load_candidates()) if i % n_shards == shard]
-    done = already_done()
+    if redo_classes:
+        # Deliberate re-measurement after a criterion correction. The done-set is
+        # ignored ON PURPOSE for these classes; the new rows supersede the old by
+        # version, and the old ones stay on disk because append_only forbids
+        # rewriting them.
+        cands = [c for c in cands if c.warhead_class in redo_classes]
+        log.info("REDO of %s: %d candidates, ignoring the done-set",
+                 redo_classes, len(cands))
+        done = set()
+    else:
+        done = already_done()
     todo = [c for c in cands if c.ident not in done]
     log.info("shard %d/%d: %d assigned, %d already done, %d to do",
              shard, n_shards, len(cands), len(cands) - len(todo), len(todo))
@@ -255,12 +266,32 @@ def _ids_in(d: Path, pattern: str) -> set[str]:
     return ids
 
 
+def _chunk_files(d: Path, pattern: str) -> list[str]:
+    """Chunk files in VERSION order, not lexical order.
+
+    `nac_rank_s0_10.csv` sorts before `nac_rank_s0_2.csv` lexically, which would
+    make "newest" wrong in exactly the case that matters.
+    """
+    def key(f: str) -> tuple[int, int]:
+        m = re.search(r"_s(\d+)_(\d+)\.csv$", f)
+        return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    return sorted(glob.glob(str(d / pattern)), key=key)
+
+
 def load_scored() -> pd.DataFrame:
-    fs = sorted(glob.glob(str(OUT.dir / "nac_rank_s*.csv")))
+    """All scored candidates, with the NEWEST measurement of each winning.
+
+    keep="last" rather than "first", because a candidate may be deliberately
+    re-scored after a criterion is corrected — the BDHI classes were, when
+    `sn2_ring_opening` was found to be applying sp3 backside geometry to an sp2
+    carbon (D0067). Append-only forbids editing the superseded rows, so the
+    convention is the project's usual one: the highest version wins.
+    """
+    fs = _chunk_files(OUT.dir, "nac_rank_s*.csv")
     if not fs:
         return pd.DataFrame()
     df = pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)
-    return df.drop_duplicates("ident", keep="first")
+    return df.drop_duplicates("ident", keep="last")
 
 
 def report() -> None:
@@ -313,6 +344,9 @@ def main() -> None:
     ap.add_argument("--chunk", type=int, default=100)
     ap.add_argument("--report", action="store_true",
                     help="summarise what has actually landed, and exit")
+    ap.add_argument("--redo-classes", nargs="*", default=None, metavar="CLASS",
+                    help="re-score these warhead classes even if already done "
+                         "(after a criterion correction); newest version wins")
     ap.add_argument("--refine-top", type=int, default=None, metavar="N",
                     help="re-score the top N of an existing screen at --nrun "
                          "(use a high --nrun; writes to the nac_refine topic)")
@@ -326,7 +360,8 @@ def main() -> None:
         refine(args.refine_top, args.nrun, args.shard, args.n_shards,
                args.gpu, args.chunk)
         return
-    run_shard(args.shard, args.n_shards, args.nrun, args.gpu, args.chunk)
+    run_shard(args.shard, args.n_shards, args.nrun, args.gpu, args.chunk,
+              args.redo_classes)
 
 
 if __name__ == "__main__":

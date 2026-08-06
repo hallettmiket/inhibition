@@ -102,11 +102,36 @@ PERPENDICULAR_MAX_OFF_NORMAL = 30.0
 # same generosity the SN2 window is given (180 deg ideal, 150 deg accepted).
 APPROACH_WINDOW = (85.0, 125.0)
 
+# WHAT DECIDES THE GEOMETRY IS THE HYBRIDISATION OF THE ATTACKED ATOM, not the
+# name of the mechanism. Backside attack anti to the leaving group is the sp3
+# story; at an sp2 centre the three substituents are coplanar and the nucleophile
+# approaches perpendicular to that plane, through a tetrahedral intermediate.
+#
+# CORRECTED 2026-08-06. `sn2_ring_opening` was mapped to the backside geometry on
+# the strength of its name. Its only members are bdhi_c4 and bdhi_c5 --
+# 3-bromo-4,5-dihydroisoxazoles -- whose attacked carbon is the C of a C=N and
+# is therefore **sp2** (RDKit: hybridisation SP2, degree 3). A thiolate does not
+# displace bromide there by backside attack; it adds perpendicular to the C=N
+# plane and bromide leaves, which is addition-elimination.
+#
+# The measurement that exposed it: across 374 BDHI candidates the median
+# enrichment was 0.00x with median S-C-Br angles of 91.8 and 110.5 degrees --
+# i.e. almost exactly perpendicular. The sampling was finding the RIGHT geometry
+# and the criterion was scoring it as dead, which would have ranked both classes
+# last for being measured with the wrong window.
+#
+# This is a defect fix, not a tuning: applying sp3 geometry to an sp2 centre is
+# wrong independent of what the data shows, and it leaves the two VALIDATED
+# classes (chloroacetamide, michael_addition) untouched.
+#
+# A genuinely sp3 ring-opening -- an epoxide or aziridine -- would need its own
+# mechanism label, because it would want the backside geometry this entry no
+# longer provides.
 MECHANISMS = {
-    "sn2_displacement": "anti_to_leaving_group",
-    "sn2_ring_opening": "anti_to_leaving_group",
-    "michael_addition": "perpendicular_to_plane",
-    "snar_displacement": "perpendicular_to_plane",
+    "sn2_displacement": "anti_to_leaving_group",     # sp3 carbon
+    "sn2_ring_opening": "perpendicular_to_plane",    # BDHI: sp2 C of a C=N
+    "michael_addition": "perpendicular_to_plane",    # sp2 beta carbon
+    "snar_displacement": "perpendicular_to_plane",   # sp2 aromatic ipso carbon
 }
 
 

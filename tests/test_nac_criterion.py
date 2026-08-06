@@ -75,9 +75,30 @@ def test_sn2_too_far_is_rejected():
     assert not nac.measure("sn2_displacement", coords, sg).viable
 
 
-def test_sn2_ring_opening_uses_the_same_geometry():
-    coords, sg = sn2_coords(175.0)
-    assert nac.measure("sn2_ring_opening", coords, sg).viable
+def test_sn2_ring_opening_is_perpendicular_because_its_carbon_is_sp2():
+    """`sn2_ring_opening` does NOT get the backside geometry, despite the name.
+
+    Its only members are the 3-bromo-4,5-dihydroisoxazoles, whose attacked
+    carbon is the C of a C=N — sp2, not sp3. A thiolate adds perpendicular to
+    that plane and bromide leaves; it does not attack from behind. Mapping it to
+    backside geometry scored 374 real candidates at a median of 0.00x while
+    their measured S-C-Br angles sat at 91.8 and 110.5 degrees, i.e. almost
+    exactly perpendicular — the search was finding the right chemistry and the
+    criterion was calling it dead.
+    """
+    perp, sg_perp = planar_coords(10.0)
+    r = nac.measure("sn2_ring_opening", perp, sg_perp)
+    assert r.viable, "perpendicular approach to an sp2 centre must pass"
+    assert r.angle_kind == "off-normal", "must use the sp2 criterion, not the sp3 one"
+
+    # In-plane approach — what a backside criterion would have rewarded — is dead.
+    in_plane, sg_flat = planar_coords(90.0)
+    assert not nac.measure("sn2_ring_opening", in_plane, sg_flat).viable
+
+    # And it now REQUIRES the third atom, because a plane needs three points.
+    # The class's SMARTS [CX3]([Br])=[NX2] supplies exactly C, Br and N.
+    with pytest.raises(nac.NACError, match="three atoms"):
+        nac.measure("sn2_ring_opening", *sn2_coords(175.0))
 
 
 # --------------------------------------------------------------------------
