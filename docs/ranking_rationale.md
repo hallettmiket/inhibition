@@ -186,20 +186,30 @@ to Cys113** (verified against `_struct_conn`; issue #12 §A). Negatives are
 warhead-matched molecules **measured** inactive in AID 504891, shuffled rather
 than taken in file order.
 
-| class | mechanism | positives | negatives | AUC | p |
-|---|---|---|---|---|---|
-| **chloroacetamide** | SN2 | 9 | 30 | **0.872** | **0.0004** |
-| snar_chloroazine | SNAr | 2 | 30 | 0.317 | 0.81 |
+| class | mechanism | positives | negatives | pos enrich | neg enrich | AUC | p |
+|---|---|---|---|---|---|---|---|
+| **chloroacetamide** | SN2 | 9 | 30 | **2.39×** | 0.82× | **0.822** | **0.0020** |
+| **naphthoquinone_c2** | Michael | 4 | 30 | **2.39×** | 1.01× | **0.800** | **0.0288** |
+| snar_chloroazine | SNAr | 2 | 30 | 2.66× | 2.39× | 0.558 | 0.41 |
+| **pooled on enrichment** | — | 15 | 90 | **2.39×** | 1.14× | **0.722** | **0.0031** |
 
-Chloroacetamide positives enrich **2.39×** over chance against **0.82×** for
-negatives; 8 of 9 beat ≥73% of same-class negatives. **This is the first
-measurement in the project that separates actives from inactives** — against five
-levels of theory that did not (D0041, D0046, D0036, D0038/D0044, D0057, D0061).
+**Two independent mechanisms separate.** This is the first measurement in the
+project that distinguishes actives from inactives at all — against five levels of
+theory that did not (D0041, D0046, D0036, D0038/D0044, D0057, D0061). Pooling is
+legitimate here *only* because `enrichment()` has divided each mechanism's own
+baseline out; the raw fractions are not comparable and pooling them gives
+AUC ≈ 0.5, which is an artefact of the windows rather than a result.
 
-It is also one class of two, and chloroacetamide is where the literature already
-converged (#12 §A). The SNAr result is not a failure of the idea so much as a
-failure of the *window*: negatives score 57% median against a 29.3% baseline, and
-a criterion two thirds of random molecules pass is not a gate.
+**It replicates.** AutoDock-GPU reseeds every run, so each screen is an
+independent measurement. Four runs of the chloroacetamide arm gave AUC **0.872,
+0.881, 0.852, 0.822** (mean 0.857). Quote the spread, not a single run.
+
+**SNAr does not separate, and cannot be settled here.** Only two SNAr ligands
+have ever been crystallised at Cys113, so n = 2 is underpowered by construction —
+which is exactly issue #12 §A's finding of 3 verified chemotypes against a
+statistical floor of 6. Its negatives also enrich 2.39× over chance on their own,
+suggesting the pocket steers most chloroazines into perpendicular approach
+regardless of whether they bind.
 
 **AID 504891's 34 actives were rejected as positives.** Read as chemistry rather
 than as labels, the 11 warhead-bearing ones are frequent hitters — two
@@ -211,13 +221,18 @@ confirm nothing.
 
 ## What is still open
 
-- **Tighten the SNAr/Michael window**, then re-measure. It is pre-registered, so
-  it is changed once, on stated stereoelectronic grounds, and never tuned against
-  the positives.
-- **Symmetric warheads are skipped** — a molecule whose reactive SMARTS matches
-  twice (fumarate/maleate esters read the alkene from both carbonyls) is dropped
-  rather than docked once per reactive centre. This currently removes the whole
-  Michael class from validation.
-- **Stage 4 is unbuilt.** Nothing yet ranks *among* the molecules that pass.
+- **Stage 4 is unbuilt.** Nothing yet ranks *among* the molecules that pass the
+  gate. This is now the main gap.
+- **SNAr is underpowered, not disproven.** n = 2 cannot settle it; it needs
+  either more solved SNAr structures or an orthogonal source of positives.
+- **The negatives are HTS inactives**, which is weak evidence per molecule. The
+  result rests on 15 crystallographic positives against 90 of them; it would be
+  stronger against measured *non-covalent* binders, which would test recognition
+  rather than warhead presence.
 - **The pocket basis is still 6VAJ's** (D0062), unused by this criterion but
   wrong for anything contact-profile based.
+
+*Closed since the first draft of this section: the perpendicular window was
+completed with the Burgi-Dunitz constraint (once, on stereoelectronic grounds);
+symmetric warheads are now docked once per reactive centre, restoring the whole
+Michael class to validation.*

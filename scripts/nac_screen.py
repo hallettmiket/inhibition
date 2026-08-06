@@ -274,10 +274,32 @@ def measure_dlg(dlg: Path, cand: Candidate) -> list[nac.NACResult]:
         if np.linalg.norm(pos[idx] - rx) > 0.05:
             raise ValueError(f"{cand.ident}: cannot locate the docked reactive atom")
         hits = [m for m in matches if m[0] == idx]
-        if len(hits) != 1:
-            raise ValueError(f"{cand.ident}: {len(hits)} matches centre on the "
-                             f"docked reactive atom, need exactly 1")
+        if not hits:
+            raise ValueError(f"{cand.ident}: no SMARTS match centres on the "
+                             f"docked reactive atom")
+        # SEVERAL MATCHES MAY SHARE ONE REACTIVE ATOM, and that is not ambiguity.
+        # A chloroazine's ipso carbon sits between two ring nitrogens, so
+        # `[c]([Cl])[n]` matches twice with the same attacked atom and a
+        # different nitrogen. Both triples are coplanar with the ring, so they
+        # define the SAME plane and the same criterion; only the reactive atom
+        # has to be unambiguous, and it is, because the docking output named it.
+        # Refusing these cost both SNAr positives on the previous run.
+        # Verified, not assumed: the planes must actually be parallel. If a
+        # molecule ever presents two genuinely different planes at one reactive
+        # atom, the criterion means two different things and picking either
+        # would be arbitrary.
         match = hits[0]
+        if len(hits) > 1:
+            normals = []
+            for h in hits:
+                a, b = pos[h[1]] - pos[h[0]], pos[h[2]] - pos[h[0]]
+                n = np.cross(a, b)
+                if np.linalg.norm(n) > 1e-6:
+                    normals.append(n / np.linalg.norm(n))
+            for other in normals[1:]:
+                if abs(float(normals[0] @ other)) < 0.98:      # ~11 degrees
+                    raise ValueError(f"{cand.ident}: matches at one reactive atom "
+                                     f"define non-parallel planes")
     return nac.measure_poses(mol, match, cand.mechanism, sg_position(dlg))
 
 
