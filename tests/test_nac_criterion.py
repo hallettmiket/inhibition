@@ -84,26 +84,31 @@ def test_sn2_ring_opening_uses_the_same_geometry():
 # Michael / SNAr — approach along the normal to an sp2 plane
 # --------------------------------------------------------------------------
 
-def planar_coords(off_normal_deg: float, dist: float = 3.5, flip: bool = False):
+def planar_coords(off_normal_deg: float, dist: float = 3.5, flip: bool = False,
+                  toward: bool = False):
     """Beta-C at the origin with its two partners in the xy-plane.
 
-    The plane normal is +z, so `off_normal_deg` is measured from +z.
+    The plane normal is +z, so `off_normal_deg` is measured from +z. The tilt is
+    AWAY from `p1` by default, which is the Burgi-Dunitz direction — the
+    nucleophile leans away from the adjacent substituent, giving an approach
+    angle of 90 + off_normal. `toward=True` tilts the wrong way, which is the
+    case the second constraint exists to reject.
     """
     centre = np.zeros(3)
     p1 = np.array([1.33, 0.0, 0.0])
     p2 = np.array([-0.75, 1.30, 0.0])
     t = np.radians(off_normal_deg)
-    v = np.array([np.sin(t), 0.0, np.cos(t)])
+    v = np.array([np.sin(t) * (1 if toward else -1), 0.0, np.cos(t)])
     if flip:
         v[2] *= -1
     return np.vstack([centre, p1, p2]), centre + dist * v
 
 
 @pytest.mark.parametrize("off,expect", [
-    (0.0, True),      # straight down the normal
-    (30.0, True),     # a realistic Burgi-Dunitz-like trajectory
-    (45.0, True),     # the pre-registered edge
-    (46.0, False),
+    (0.0, True),      # straight down the normal; approach 90 deg
+    (17.0, True),     # the Burgi-Dunitz ideal: approach 107 deg
+    (30.0, True),     # the pre-registered edge
+    (31.0, False),    # just outside the off-normal cone
     (90.0, False),    # in the plane of the alkene — no orbital overlap
 ])
 def test_michael_off_normal_window(off, expect):
@@ -112,6 +117,38 @@ def test_michael_off_normal_window(off, expect):
     assert r.viable is expect
     assert r.angle == pytest.approx(off, abs=0.1)
     assert r.angle_kind == "off-normal"
+
+
+def test_burgi_dunitz_ideal_is_measured_as_such():
+    """The 107 deg approach must fall inside the window, not merely near it."""
+    coords, sg = planar_coords(17.0)
+    r = nac.measure("michael_addition", coords, sg)
+    assert r.approach_angle == pytest.approx(107.0, abs=0.5)
+    assert r.viable
+
+
+def test_perpendicular_but_tilted_the_wrong_way_is_rejected():
+    """The constraint that off-normal alone could not express.
+
+    Tilting TOWARD the adjacent substituent is as far out of the plane as
+    tilting away from it, so the off-normal test cannot tell them apart — but
+    only one is a Burgi-Dunitz trajectory. Without this, a criterion that is
+    geometrically perpendicular admits chemically wrong approaches, which is
+    why HTS negatives cleared the old window 57% of the time.
+    """
+    away, sg_away = planar_coords(25.0)
+    toward, sg_toward = planar_coords(25.0, toward=True)
+    r_away = nac.measure("michael_addition", away, sg_away)
+    r_toward = nac.measure("michael_addition", toward, sg_toward)
+    assert r_away.angle == pytest.approx(r_toward.angle, abs=0.1), \
+        "off-normal cannot distinguish these — that is the point"
+    assert r_away.viable and not r_toward.viable
+
+
+def test_sn2_carries_no_approach_angle():
+    """None, not 0.0 — an unmeasured quantity must not read as a measured zero."""
+    r = nac.measure("sn2_displacement", *sn2_coords(180.0))
+    assert r.approach_angle is None
 
 
 def test_either_face_of_the_plane_is_equally_valid():
@@ -188,24 +225,39 @@ def test_viable_fraction_refuses_an_empty_ensemble():
 # the isotropic baseline — what makes mechanisms comparable
 # --------------------------------------------------------------------------
 
-def test_isotropic_null_matches_the_solid_angle():
-    """Checked against the closed form, not against the implementation."""
+def test_sn2_null_matches_the_closed_form():
+    """A single ideal direction, so a single cone — checked against the algebra."""
     assert nac.isotropic_null("sn2_displacement") == pytest.approx(
         (1 - np.cos(np.radians(30.0))) / 2, abs=1e-9)
-    assert nac.isotropic_null("michael_addition") == pytest.approx(
-        1 - np.cos(np.radians(45.0)), abs=1e-9)
 
 
-def test_perpendicular_window_is_far_more_permissive_than_sn2():
-    """The confound this baseline exists to remove.
+def test_perpendicular_null_is_bounded_by_the_cone_it_lives_inside():
+    """The quadrature has no closed form, so it is bracketed instead.
 
-    Warhead-matched HTS inactives scored 3-19% viable under SN2 and 71-81%
-    under Michael on the same receptor. Most of that gap is the window, not the
-    molecules — so a raw viable fraction must never be compared across
-    mechanisms.
+    The criterion is the INTERSECTION of an off-normal cone with a
+    Burgi-Dunitz window, so its measure must be strictly less than the cone's
+    alone — and non-zero, since the ideal trajectory satisfies both.
+    """
+    cone = 1 - np.cos(np.radians(nac.PERPENDICULAR_MAX_OFF_NORMAL))
+    null = nac.isotropic_null("michael_addition")
+    assert 0 < null < cone, f"{null:.4f} should sit strictly inside {cone:.4f}"
+
+
+def test_the_two_mechanisms_are_now_comparably_selective():
+    """The confound this baseline exists to remove, and the fix for it.
+
+    MEASURED with the incomplete criterion: warhead-matched HTS inactives
+    scored 3-19% viable under SN2 and 71-81% under Michael on the same
+    receptor, because the perpendicular window was 4.4x wider by solid angle
+    alone. Adding the missing Burgi-Dunitz constraint brings the two windows to
+    within ~1.2x of each other.
+
+    `enrichment()` divides the baseline out either way — this asserts that the
+    criteria are now of comparable STRINGENCY, so the raw fractions are not
+    wildly misleading to a reader who skips it.
     """
     ratio = nac.isotropic_null("michael_addition") / nac.isotropic_null("sn2_displacement")
-    assert ratio > 4, f"expected the perpendicular window to be much wider, got {ratio:.1f}x"
+    assert 0.5 < ratio < 2.0, f"windows differ in selectivity by {ratio:.1f}x"
 
 
 def test_enrichment_is_one_when_the_molecule_does_no_better_than_chance():

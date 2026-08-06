@@ -135,8 +135,8 @@ def build_reactive_receptor(dest: Path) -> Path:
     return dest
 
 
-def prepare_ligand(cand: Candidate, path: Path) -> None:
-    """Write a reactive PDBQT, with the warhead atom retyped.
+def prepare_ligand(cand: Candidate, path: Path) -> list[Path]:
+    """Write one reactive PDBQT PER REACTIVE CENTRE, with the warhead atom retyped.
 
     Raises on failure rather than writing an untyped ligand: a ligand silently
     prepared WITHOUT reactive types docks fine and lands nowhere near the
@@ -151,34 +151,50 @@ def prepare_ligand(cand: Candidate, path: Path) -> None:
     mol = largest_fragment(cand.smiles)
     if mol is None:
         raise ValueError(f"unparseable SMILES for {cand.ident}")
-    n_match = len(mol.GetSubstructMatches(Chem.MolFromSmarts(cand.reactive_smarts)))
-    if n_match != 1:
-        raise ValueError(f"{cand.ident}: {n_match} reactive-SMARTS matches, need exactly 1")
 
     mol = Chem.AddHs(mol)
     if AllChem.EmbedMolecule(mol, randomSeed=0xC0FFEE) != 0:
         raise ValueError(f"{cand.ident}: could not embed a 3D conformer")
     AllChem.MMFFOptimizeMolecule(mol)
 
-    txt, ok, err = PDBQTWriterLegacy.write_string(
-        MoleculePreparation(reactive_smarts=cand.reactive_smarts,
-                            reactive_smarts_idx=0)(mol)[0])
-    if not ok:
-        raise ValueError(f"{cand.ident}: PDBQT write failed: {err}")
+    # ONE SETUP PER REACTIVE CENTRE. meeko returns a setup for every match of
+    # the reactive SMARTS, and taking [0] silently picks one -- a value chosen
+    # by default rather than by identity, the defect this project keeps
+    # rediscovering. A fumarate has two genuinely distinct electrophilic
+    # carbons and needs only one of them to work, so each is docked and the
+    # molecule takes the best. Previously a second match was refused outright,
+    # which dropped every symmetric Michael acceptor: 4 crystallographic
+    # positives, the whole class, removed from validation by a guard.
+    setups = MoleculePreparation(reactive_smarts=cand.reactive_smarts,
+                                 reactive_smarts_idx=0)(mol)
+    if not setups:
+        raise ValueError(f"{cand.ident}: reactive SMARTS did not match")
 
-    # Confirm reactive typing actually happened, by DIFFING against a plain
-    # preparation of the same molecule. Never by looking for a named type:
-    # meeko derives the reactive type from the BASE type, so an aromatic carbon
-    # becomes "A1" and an aliphatic one "C1". Hardcoding "C1" silently rejected
-    # every SNAr ligand -- 30 negatives and 2 crystallographic positives, a
-    # whole warhead class deleted by a check rather than by meeko.
-    plain, ok2, _ = PDBQTWriterLegacy.write_string(MoleculePreparation()(mol)[0])
-    if ok2 and _atom_types(txt) == _atom_types(plain):
+    plain, ok_plain, _ = PDBQTWriterLegacy.write_string(MoleculePreparation()(mol)[0])
+    out = []
+    for i, setup in enumerate(setups):
+        txt, ok, err = PDBQTWriterLegacy.write_string(setup)
+        if not ok:
+            log.debug("%s centre %d: PDBQT write failed: %s", cand.ident, i, err)
+            continue
+        # Confirm reactive typing actually happened, by DIFFING against a plain
+        # preparation. Never by looking for a named type: meeko derives it from
+        # the BASE type, so an aromatic carbon becomes "A1" and an aliphatic one
+        # "C1". Hardcoding "C1" silently rejected every SNAr ligand -- 30
+        # negatives and 2 positives, a whole warhead class deleted by my check
+        # rather than by meeko.
+        if ok_plain and _atom_types(txt) == _atom_types(plain):
+            continue
+        dest = path.with_name(f"{path.stem}_{i}{path.suffix}")
+        dest.write_text(txt)
+        out.append(dest)
+    if not out:
         raise ValueError(f"{cand.ident}: reactive typing had no effect")
-    path.write_text(txt)
+    return out
 
 
 def dock(lig: Path, rec_dir: Path, work: Path, nrun: int, gpu: str) -> Path:
+    work.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpu)
     subprocess.run(
         [str(AUTODOCK), "-C", "1", "--import_dpf", "rec.reactive_config",
@@ -204,6 +220,26 @@ def sg_position(dlg: Path) -> np.ndarray:
     raise ValueError(f"no flexible Cys SG in {dlg}")
 
 
+def _reactive_xyz(dlg: Path) -> np.ndarray:
+    """Coordinates of the retyped reactive atom, from the first docked pose.
+
+    meeko gives the reactive atom an order-1 derivative type — the base type
+    with `1` appended, so `C` becomes `C1` and aromatic `A` becomes `A1`. That
+    suffix is read rather than any particular type being looked for, since
+    hardcoding one deleted a whole warhead class once already.
+    """
+    for ln in dlg.read_text(errors="replace").splitlines():
+        if "DOCKED: ATOM" not in ln and "DOCKED: HETATM" not in ln:
+            continue
+        rec = ln.split("DOCKED: ", 1)[1]
+        if rec[17:20].strip() == "CYS":            # the flexible sidechain
+            continue
+        t = rec[77:79].strip()
+        if len(t) == 2 and t[1] == "1":
+            return np.array([float(rec[30:38]), float(rec[38:46]), float(rec[46:54])])
+    raise ValueError(f"no reactive-typed ligand atom in {dlg.name}")
+
+
 def measure_dlg(dlg: Path, cand: Candidate) -> list[nac.NACResult]:
     """Rebuild the ligand from the docking output and score every pose.
 
@@ -219,22 +255,59 @@ def measure_dlg(dlg: Path, cand: Candidate) -> list[nac.NACResult]:
     if not mols:
         raise ValueError(f"{cand.ident}: nothing rebuilt from {dlg.name}")
     mol = mols[0]
+
     matches = mol.GetSubstructMatches(Chem.MolFromSmarts(cand.reactive_smarts))
-    if len(matches) != 1:
-        raise ValueError(f"{cand.ident}: {len(matches)} matches on the rebuilt mol")
-    return nac.measure_poses(mol, matches[0], cand.mechanism, sg_position(dlg))
+    if not matches:
+        raise ValueError(f"{cand.ident}: reactive SMARTS does not match the rebuilt mol")
+    if len(matches) == 1:
+        match = matches[0]
+    else:
+        # Several reactive centres exist, and exactly ONE of them was docked.
+        # Ask the docking output which, rather than assuming the first: the
+        # reactive atom is the one meeko retyped to an order-1 derivative type,
+        # and it is located by COORDINATE against pose 0. Coordinates are the
+        # same numbers in both files, so this is an identity match — not a
+        # positional one, which is what would silently pick the wrong carbon.
+        rx = _reactive_xyz(dlg)
+        pos = mol.GetConformer(0).GetPositions()
+        idx = int(np.argmin(np.linalg.norm(pos - rx, axis=1)))
+        if np.linalg.norm(pos[idx] - rx) > 0.05:
+            raise ValueError(f"{cand.ident}: cannot locate the docked reactive atom")
+        hits = [m for m in matches if m[0] == idx]
+        if len(hits) != 1:
+            raise ValueError(f"{cand.ident}: {len(hits)} matches centre on the "
+                             f"docked reactive atom, need exactly 1")
+        match = hits[0]
+    return nac.measure_poses(mol, match, cand.mechanism, sg_position(dlg))
 
 
 # --------------------------------------------------------------------------
 
-def screen(cands: list[Candidate], rec_dir: Path, nrun: int, gpu: str) -> pd.DataFrame:
-    rows = []
+def screen(cands: list[Candidate], rec_dir: Path, nrun: int, gpu: str
+           ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Per-molecule summary, and EVERY POSE's raw geometry.
+
+    The per-pose frame is the point. `shared/nac_criterion.py` promises that a
+    window can be redrawn without re-docking, and that promise is only real if
+    the angles survive the run — a summary keeping just the median cannot
+    support a different window, and re-docking to try one invites tuning the
+    window against the answer.
+    """
+    rows, poses = [], []
     for i, c in enumerate(cands, 1):
         work = Path(tempfile.mkdtemp(prefix="nac_"))
         try:
-            lig = work / "lig.pdbqt"
-            prepare_ligand(c, lig)
-            res = measure_dlg(dock(lig, rec_dir, work, nrun, gpu), c)
+            # Each reactive centre is docked separately; the molecule scores as
+            # its BEST centre, because it only needs one of them to react.
+            per_centre = []
+            for j, lig in enumerate(prepare_ligand(c, work / "lig.pdbqt")):
+                dlg = dock(lig, rec_dir, work / f"c{j}", nrun, gpu)
+                per_centre.append(measure_dlg(dlg, c))
+            res = max(per_centre, key=nac.viable_fraction)
+            poses.extend({"ident": c.ident, "label": c.label,
+                          "warhead_class": c.warhead_class, "mechanism": c.mechanism,
+                          "pose": k, "angle": r.angle, "distance": r.distance}
+                         for k, r in enumerate(res))
             angles = np.array([r.angle for r in res])
             dists = np.array([r.distance for r in res])
             rows.append({
@@ -259,7 +332,7 @@ def screen(cands: list[Candidate], rec_dir: Path, nrun: int, gpu: str) -> pd.Dat
                          "error": str(exc)[:200], "smiles": c.smiles})
         finally:
             shutil.rmtree(work, ignore_errors=True)
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows), pd.DataFrame(poses)
 
 
 def report(df: pd.DataFrame) -> None:
@@ -338,7 +411,7 @@ def crystal_positives(meta: dict, classes: list[str] | None) -> list[Candidate]:
             if classes and cid not in classes:
                 continue
             p = Chem.MolFromSmarts(smarts)
-            if p is not None and len(m.GetSubstructMatches(p)) == 1:
+            if p is not None and m.HasSubstructMatch(p):
                 out.append(Candidate(f"xtal:{r.pdb_id}:{r.comp_id}", r.smiles,
                                      cid, mech, smarts, "positive"))
                 break
@@ -372,7 +445,7 @@ def load_candidates(n_neg: int, classes: list[str] | None) -> list[Candidate]:
             if taken >= per:
                 break
             m = largest_fragment(r.canonical_smiles)
-            if m is None or len(m.GetSubstructMatches(p)) != 1:
+            if m is None or not m.HasSubstructMatch(p):
                 continue
             neg.append(Candidate(f"inactive:{int(r.PUBCHEM_CID)}", r.canonical_smiles,
                                  cid, mech, smarts, "negative"))
@@ -397,11 +470,14 @@ def main() -> None:
     cands = load_candidates(args.n_neg, args.classes)
     if not cands:
         raise SystemExit("no candidates")
-    df = screen(cands, rec, args.nrun, args.gpu)
+    df, poses = screen(cands, rec, args.nrun, args.gpu)
     report(df)
     dest = OUT.write("nac_screen", ".csv")
     df.to_csv(dest, index=False)
-    print(f"\nwritten -> {dest}")
+    pdest = OUT.write("nac_poses", ".csv")
+    poses.to_csv(pdest, index=False)
+    print(f"\nwritten -> {dest}\n         -> {pdest}  ({len(poses)} poses, "
+          f"so a window can be redrawn without re-docking)")
 
 
 if __name__ == "__main__":

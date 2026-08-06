@@ -81,9 +81,26 @@ SN2_ANGLE_MIN = 150.0
 
 # Conjugate addition and SNAr both proceed by attack roughly along the normal to
 # a planar sp2 system -- the alkene plane for Michael, the ring plane for SNAr.
-# 45 deg off-normal is generous; true Burgi-Dunitz-like trajectories are nearer
-# 15-30 deg.
-PERPENDICULAR_MAX_OFF_NORMAL = 45.0
+#
+# REVISED 2026-08-05, ONCE, because the criterion was INCOMPLETE rather than
+# because a threshold needed moving. Off-normal alone constrains how far the
+# nucleophile sits out of the sp2 plane and says nothing about its angle to the
+# bond axis within that cone, so a trajectory could be perfectly perpendicular
+# and still arrive at a chemically wrong approach angle. Both constraints are
+# needed; adding the missing one is a correction, not a tuning.
+#
+# Measured consequence of the incomplete version: warhead-matched HTS negatives
+# cleared it 57% of the time against a 29.3% chance baseline. A window that two
+# thirds of random molecules pass is not a gate.
+PERPENDICULAR_MAX_OFF_NORMAL = 30.0
+
+# The Burgi-Dunitz constraint. Nucleophilic addition to an sp2 carbon approaches
+# at ~107 deg to the bond axis, not at 90 deg -- the nucleophile tilts AWAY from
+# the adjacent substituent. For SNAr the ipso carbon becomes sp3 in the
+# Meisenheimer complex, so its Nu-C-LG angle travels from ~90 deg at contact
+# toward ~109 deg; one window spans both. Widened by +/-20 deg, which is the
+# same generosity the SN2 window is given (180 deg ideal, 150 deg accepted).
+APPROACH_WINDOW = (85.0, 125.0)
 
 MECHANISMS = {
     "sn2_displacement": "anti_to_leaving_group",
@@ -91,6 +108,14 @@ MECHANISMS = {
     "michael_addition": "perpendicular_to_plane",
     "snar_displacement": "perpendicular_to_plane",
 }
+
+
+# Windows are chemical statements, not bit patterns. arccos returns
+# 30.000000000000004 for a geometry built to be exactly 30 degrees, so a pose
+# sitting precisely ON a pre-registered boundary would be rejected by which side
+# of the last ulp the arithmetic happened to land. Compared with this tolerance
+# so the boundary behaves the same for every mechanism.
+_TOL = 1e-9
 
 
 class NACError(ValueError):
@@ -112,10 +137,16 @@ class NACResult:
     angle_kind: str
     mechanism: str
     viable: bool
+    # Populated only for the perpendicular mechanisms, where viability needs a
+    # second, independent constraint. None for SN2, where `angle` is the whole
+    # criterion — not 0.0, which would read as a measured 0 degrees.
+    approach_angle: float | None = None
 
     def __str__(self) -> str:  # pragma: no cover - display only
+        extra = ("" if self.approach_angle is None
+                 else f", approach={self.approach_angle:.1f} deg")
         return (f"{self.mechanism}: d={self.distance:.2f} A, "
-                f"{self.angle_kind}={self.angle:.1f} deg, "
+                f"{self.angle_kind}={self.angle:.1f} deg{extra}, "
                 f"{'VIABLE' if self.viable else 'not viable'}")
 
 
@@ -181,20 +212,24 @@ def measure(mechanism: str, coords: np.ndarray, sg: np.ndarray) -> NACResult:
     kind = MECHANISMS[mechanism]
     target = coords[0]
     dist = float(np.linalg.norm(sg - target))
-    in_range = NAC_DIST_MIN <= dist <= NAC_DIST_MAX
+    in_range = (NAC_DIST_MIN - _TOL) <= dist <= (NAC_DIST_MAX + _TOL)
 
     if kind == "anti_to_leaving_group":
         if len(coords) < 2:
             raise NACError(f"{mechanism} needs the leaving-group atom")
         angle = _angle(sg, target, coords[1])
-        viable = in_range and angle >= SN2_ANGLE_MIN
+        viable = in_range and angle >= SN2_ANGLE_MIN - _TOL
         return NACResult(dist, angle, "S-C-LG", mechanism, viable)
 
     if len(coords) < 3:
         raise NACError(f"{mechanism} needs three atoms to define the plane")
     angle = _off_normal(sg, target, coords[1], coords[2])
-    viable = in_range and angle <= PERPENDICULAR_MAX_OFF_NORMAL
-    return NACResult(dist, angle, "off-normal", mechanism, viable)
+    approach = _angle(sg, target, coords[1])
+    lo, hi = APPROACH_WINDOW
+    viable = (in_range
+              and angle <= PERPENDICULAR_MAX_OFF_NORMAL + _TOL
+              and (lo - _TOL) <= approach <= (hi + _TOL))
+    return NACResult(dist, angle, "off-normal", mechanism, viable, approach)
 
 
 def measure_poses(mol, smarts_match: tuple[int, ...], mechanism: str,
@@ -237,10 +272,33 @@ def isotropic_null(mechanism: str) -> float:
     if mechanism not in MECHANISMS:
         raise NACError(f"unknown mechanism {mechanism!r}")
     if MECHANISMS[mechanism] == "anti_to_leaving_group":
+        # A single ideal direction (anti to the leaving group), so a single cone.
         half = np.radians(180.0 - SN2_ANGLE_MIN)
         return float((1.0 - np.cos(half)) / 2.0)
-    # both faces of the sp2 plane are usable, so two cones
-    return float(1.0 - np.cos(np.radians(PERPENDICULAR_MAX_OFF_NORMAL)))
+
+    # The perpendicular criterion is the INTERSECTION of two constraints -- an
+    # off-normal cone and a Burgi-Dunitz window about the bond axis -- and has
+    # no tidy closed form, so it is integrated on a deterministic grid. NOT
+    # sampled: this is the denominator every enrichment is quoted against, and
+    # a random baseline would put noise in it.
+    #
+    # For any planar sp2 centre the axis lies IN the plane, i.e. perpendicular
+    # to the normal, so the two constraints sit at a fixed 90 degrees to each
+    # other and the result is a property of the windows alone -- independent of
+    # which molecule is being scored.
+    n = np.array([0.0, 0.0, 1.0])          # plane normal
+    axis = np.array([1.0, 0.0, 0.0])       # toward the adjacent substituent
+    cos_t = np.linspace(-1.0, 1.0, 2001)   # uniform in cos(theta) => equal-area
+    phi = np.linspace(0.0, 2.0 * np.pi, 4001)[:-1]
+    ct, ph = np.meshgrid(cos_t, phi, indexing="ij")
+    st = np.sqrt(np.clip(1.0 - ct ** 2, 0.0, None))
+    v = np.stack([st * np.cos(ph), st * np.sin(ph), ct], axis=-1)
+
+    off = np.degrees(np.arccos(np.clip(np.abs(v @ n), 0.0, 1.0)))
+    approach = np.degrees(np.arccos(np.clip(v @ axis, -1.0, 1.0)))
+    lo, hi = APPROACH_WINDOW
+    ok = (off <= PERPENDICULAR_MAX_OFF_NORMAL) & (approach >= lo) & (approach <= hi)
+    return float(ok.mean())
 
 
 def enrichment(results: list[NACResult]) -> float:
