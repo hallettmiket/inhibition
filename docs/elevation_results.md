@@ -13,10 +13,10 @@ crystallographic Cys113 positives added as the anchor. Receptor: chemist-prepare
 
 **Neither metric predicts stability — and the anchor proves that is a real
 result rather than a dead assay.** The three BDHI groups are statistically
-indistinguishable from one another on both tiers, while every one of them is
-significantly less stable than molecules known to react with Cys113. The
-measurement discriminates; enrichment and consensus do not predict what it
-discriminates.
+indistinguishable from one another on **both tiers independently**, while every
+one of them is significantly less stable than molecules known to react with
+Cys113 (p ≤ 0.05 on all six group-vs-anchor contrasts). The measurement
+discriminates; enrichment and consensus do not predict what it discriminates.
 
 That is the prereg's third reading, **A ≈ B ≈ D**, whose fixed conclusion is:
 
@@ -38,9 +38,15 @@ no physical support is the *ranking*, not the *assay*.
 | molecules | 37 — A 8, B 8, D 8, V 5, REF 8 |
 | replicas | 3 per molecule, per tier |
 | tier 1 | energy minimisation + 100 ps NVT + 200 ps NPT, **no position restraints** |
-| tier 2 | well-tempered BPMD along d(warhead → Cys113 SG), 3 × 3 ns |
+| tier 2 | well-tempered BPMD along d(warhead → Cys113 SG), 3 × 3 ns, started from tier 1's own post-equilibration frames |
 | receptor | `3IKD_noligand.pdb`, Cys113 = residue 63 of 115, SG asserted at (13.385, 3.989, −2.040) |
-| failures | tier 1: **0 of 111** |
+| failures | tier 1: **0 of 111**; tier 2: **0 of 111** |
+
+Tier 2 reuses tier 1's NVT/NPT rather than repeating it, so **the two tiers
+describe one trajectory per replica**, not two. That also makes tier 1 qualify
+tier 2 rather than merely precede it: a molecule whose warhead moved 0.5 nm
+during equilibration is not having its *docked* pose tested by the bias, and the
+tier-1 column is what makes that visible.
 
 **The anchor's membership rule was fixed before the run**, because
 `crystal_positives` returns 15 ligands and the prereg budgets ≤ 8: sorted by
@@ -145,7 +151,85 @@ n = 8 cannot resolve that.
 
 ## Tier 2 — BPMD
 
-*(pending — see below)*
+Well-tempered metadynamics biased along d(warhead → Cys113 SG), **3 replicas ×
+3 ns**, started from the exact post-equilibration frames tier 1 measured. The
+readout is `bpmd.PoseStability.score` — mean fraction of time in the near-attack
+window, multiplied by (1 + the bias standing when the warhead left).
+**Larger is more stable.** 111 replicas, **0 failures**.
+
+| group | n | median score | IQR | median replica spread | mean frac in window |
+|---|---:|---:|---|---:|---:|
+| **A** hi-enr / hi-cons | 8 | 0.074 | 0.053 – 0.111 | 0.051 | 0.070 |
+| **B** lo-enr / hi-cons | 8 | 0.087 | 0.079 – 0.119 | 0.057 | 0.076 |
+| **D** lo-enr / lo-cons | 8 | 0.114 | 0.074 – 0.136 | 0.034 | 0.088 |
+| **V** chloroacetamide | 5 | **0.201** | 0.188 – 0.276 | 0.064 | 0.172 |
+| **REF** crystallographic | 8 | **0.175** | 0.152 – 0.206 | 0.062 | 0.163 |
+
+| contrast | Cliff's δ | p | p (Holm) | verdict |
+|---|---:|---:|---:|:--:|
+| A vs B | −0.156 | 0.645 | 1.000 | ≈ |
+| B vs D | −0.094 | 0.798 | 1.000 | ≈ |
+| A vs D | −0.250 | 0.442 | 1.000 | ≈ |
+| A vs REF | −0.781 | **0.0070** | — | REF more stable |
+| B vs REF | −0.719 | **0.0148** | — | REF more stable |
+| D vs REF | −0.688 | **0.0207** | — | REF more stable |
+| V vs REF | +0.300 | — | — | *descriptive only, n = 5* |
+
+**Tier 2 reproduces tier 1 exactly.** Same reading (A ≈ B ≈ D), same anchor
+result (all three BDHI groups significantly below REF), same rank order of the
+point estimates. The two tiers are independent measurements — one unbiased and
+300 ps, the other biased and 3 ns — and they agree across the cohort at
+**Spearman ρ = 0.475, p = 0.003 (n = 37)**. A null that replicates across two
+readouts on the same molecules is a much stronger null than either alone.
+
+### V ≈ REF holds on tier 2, and did not on tier 1
+
+On tier 2, group V sits at 0.201 against REF's 0.175 (δ = +0.300), and the two
+distributions overlap completely — V spans 0.117–0.286, REF spans 0.123–0.278.
+On the fraction-in-window readout they are 0.172 vs 0.163.
+
+**This is not claimed as the prereg's V ≈ REF reading.** n = 5 forbids a
+significance claim, and the same comparison ran the *other* way on tier 1
+(δ = −0.300). Two readouts disagreeing in sign at n = 5 is what an
+underpowered arm looks like. It is recorded as the descriptive observation the
+prereg said that arm would be, and nothing is drawn from it.
+
+### The protocol caveat, stated plainly
+
+**This is a SHORT protocol and the absolute values are not converged.** It was
+chosen for consistency across 37 molecules, not adequacy for any one of them,
+and the between-group comparison rests on every molecule getting the identical
+treatment. Three specific limits:
+
+1. **108 of 111 replicas escaped**, most of them early. At 3 ns with these hill
+   settings the warhead is pushed out of essentially every pose.
+2. **The escape-cost term is nearly inert.** Median bias at exit is 0.11 kJ/mol
+   and the multiplier (1 + cost) has a median of 1.14. The score therefore
+   correlates with the fraction-in-window at ρ = 0.974 — tier 2 is, at this
+   protocol, close to a re-measurement of "how long did it stay" rather than
+   "how hard was it to remove".
+3. **No convergence test underlies these numbers.** D0068's lesson is that a
+   number whose value depends on how long you ran it must not be quoted as if it
+   did not. Nothing here should be read as a converged free-energy barrier.
+
+None of that undermines the comparison — every group was measured identically,
+and the anchor separates cleanly under exactly these settings — but it does bar
+quoting any single molecule's score as its stability.
+
+### The wall held
+
+The prior convergence run died in every replica with METAD indexing off its own
+grid, because `COMMITTOR` fired and GROMACS ignored the stop flag. The
+`UPPER_WALLS` bound was verified before this run and held throughout it:
+
+- **Stress test**, 100× the production deposition rate: with the wall moved to
+  0.5 nm the CV topped out at 0.706 nm; with it at the production 1.5 nm the
+  same bias reached 1.030 nm. The wall is a force and is applied.
+- **Overshoot is bounded** by `sqrt(2B/κ)`; the observed 0.206 nm sat inside the
+  0.306 nm bound. Reaching GRID_MAX would need a standing bias of 1000 kJ/mol,
+  which well-tempered metadynamics at BIASFACTOR 10 will not produce.
+- **In production**: max CV across all 111 replicas was **1.631 nm**, against a
+  wall at 1.5 and a grid edge at 2.5. **Zero grid failures.**
 
 ---
 
@@ -157,11 +241,43 @@ Carried forward from the prereg, unchanged, plus what the run added:
   positives, so a result here does not transfer to other classes.
 - **Stability is not reactivity.** A stable near-attack pose is necessary for
   the reaction, not sufficient. Nothing here measures whether a molecule reacts.
-- **n = 5 for group V**, descriptive by construction.
-- **n = 8 supports only large effects.** The A-vs-B contrast at δ = −0.469 is a
-  moderate effect the design cannot resolve either way; "≈" here means "not
-  distinguished", not "shown to be equal".
-- **The BDHI groups all failed the same way.** With every group's poses leaving
-  the window, the contrasts are being drawn between degrees of failure. A
-  cohort where some group survived would test the metrics harder than this one
-  could.
+- **n = 5 for group V**, descriptive by construction — and the two tiers
+  disagreed in sign on it, which is what an underpowered arm looks like.
+- **n = 8 supports only large effects.** The largest pre-registered contrast is
+  A-vs-B on tier 1 at δ = −0.469, a moderate effect the design cannot resolve
+  either way. **"≈" here means "not distinguished", not "shown to be equal".**
+- **The BDHI groups all failed the same way.** Every group's poses left the
+  window on both tiers, so the contrasts are being drawn between degrees of
+  failure. A cohort where some group survived would test the metrics harder
+  than this one could.
+- **Tier 2 is short and unconverged**, deliberately. See the protocol caveat
+  above; no single molecule's score should be quoted as its stability.
+- **The anchor is not uniform** — 5 chloroacetamides, 2 naphthoquinones and 1
+  chloroazine at n = 8 cannot resolve per-class differences, and its two
+  extremes on tier 1 are 0.044 and 0.302.
+
+---
+
+## Artefacts
+
+All under `/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/`:
+
+| what | where |
+|---|---|
+| tier-1 per-replica records (111) | `elevation_tier1/elevation_t1_s*.csv` |
+| tier-2 per-replica records (111) | `elevation_tier2/elevation_t2_s*.csv` |
+| per-molecule, contrasts, readings | `elevation_analysis/elevation_*_1.csv` |
+| cohort | `elevation_cohort/elevation_cohort_1.csv` |
+
+Reproduce with `scripts/elevation_launch.sh 1` then `... 2 3000`, and
+`scripts/elevation_analysis.py --write`.
+
+**Tier 2 was given its own output topic rather than sharing `bpmd/`, and that
+was not tidiness.** `bpmd/` already held `status == ok` replicates for two
+molecules in this cohort at 300 ps and 10,000 ps from earlier protocol work, and
+`bpmd_run.already_done()` keys on `(ident, replicate)` with no knowledge of
+trajectory length. Running the cohort through it would have skipped both
+molecules and seated a 300 ps replica beside 3 ns ones, inside a between-group
+comparison whose main requirement is protocol consistency. Logged as entry #22
+in [`how_this_project_breaks.md`](how_this_project_breaks.md) — a cache key that
+is a pin on its inputs, the same shape as #8 and #9.

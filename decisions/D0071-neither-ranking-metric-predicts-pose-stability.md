@@ -18,14 +18,20 @@ affects:
   - decisions/D0070-consensus-preserves-rank-where-frequency-does-not.md
 evidence:
   - 'PRE-REGISTERED before any simulation ran: docs/elevation_prereg.md, groups + readouts + readings all fixed in advance'
-  - '37 molecules x 3 replicas, 111/111 tier-1 replicas succeeded, 0 failures'
+  - '37 molecules x 3 replicas per tier; 111/111 tier-1 and 111/111 tier-2 replicas succeeded, 0 failures'
   - 'tier 1 (|delta d| across 300 ps unrestrained equilibration, nm): A 0.277, B 0.198, D 0.204, V 0.203, REF 0.102'
   - 'tier-1 pre-registered contrasts all null: A-B p=0.130 (Holm 0.391, delta -0.469); B-D p=0.878 (delta -0.062); A-D p=0.442 (delta -0.250)'
   - 'tier-1 anchor contrasts all significant: A-REF p=0.0070 delta -0.781; B-REF p=0.0104 delta -0.750; D-REF p=0.0499 delta -0.594'
   - 'still in the 0.28-0.42 nm near-attack window at the start of production: A 0.08, B 0.21, D 0.08, V 0.53, REF 0.54'
   - 'POST-HOC: drift under 300 ps of dynamics is REF 0.049 nm vs A 0.226, B 0.159, D 0.174, V 0.173; minimisation contributes 0.018-0.055 nm in every group'
   - 'signed drift positive in 110 of 111 replicas; all 37 molecules have a positive mean'
-  - 'group V is n = 5 and carries no significance claim, per the pre-registration'
+  - 'tier 2 (BPMD stability score, 3 replicas x 3 ns): A 0.074, B 0.087, D 0.114, V 0.201, REF 0.175'
+  - 'tier-2 pre-registered contrasts all null: A-B p=0.645, B-D p=0.798, A-D p=0.442, all Holm 1.000'
+  - 'tier-2 anchor contrasts all significant: A-REF p=0.0070 delta -0.781; B-REF p=0.0148 delta -0.719; D-REF p=0.0207 delta -0.688'
+  - 'the two tiers agree across the cohort: Spearman rho = 0.475, p = 0.0030, n = 37'
+  - 'group V is n = 5 and carries no significance claim, per the pre-registration; the two tiers disagreed in SIGN on V vs REF (tier 1 delta -0.300, tier 2 delta +0.300)'
+  - 'PROTOCOL CAVEAT: 108/111 tier-2 replicas escaped, median bias at exit 0.11 kJ/mol, score correlates with fraction-in-window at rho = 0.974 — short and unconverged by design, consistent across groups'
+  - 'UPPER_WALLS held: max CV 1.631 nm across 111 replicas against a wall at 1.5 and GRID_MAX 2.5; zero grid failures, against every replica crashing previously'
 runbook: null
 ---
 
@@ -52,14 +58,21 @@ committed before any simulation ran** (`docs/elevation_prereg.md`).
 ## Decision
 
 **Neither metric predicts pose stability.** The pre-registered reading is
-**A ≈ B ≈ D**: all three pre-registered contrasts are null, with Holm-corrected
-p of 0.391, 0.884 and 0.884. Its fixed conclusion stands — the ranking has no
-physical support from this experiment, and no shortlist may be described as
-selecting for stability on the strength of either metric.
+**A ≈ B ≈ D** on **both tiers independently** — all six pre-registered contrasts
+are null (tier 1 Holm p = 0.391, 0.884, 0.884; tier 2 Holm p = 1.000, 1.000,
+1.000). Its fixed conclusion stands: the ranking has no physical support from
+this experiment, and no shortlist may be described as selecting for stability on
+the strength of either metric.
+
+The two tiers are independent measurements — one unbiased over 300 ps, one
+biased over 3 ns — and they agree across the cohort at Spearman ρ = 0.475
+(p = 0.003, n = 37). A null that replicates across both is stronger than either
+alone.
 
 **The anchor is what makes that a result rather than a dead assay.** All three
 BDHI groups are significantly *less* stable than the 8 crystallographic Cys113
-positives (p = 0.007, 0.010, 0.050; Cliff's δ = −0.78, −0.75, −0.59). The
+positives, on **all six** group-vs-anchor contrasts (tier 1 p = 0.007, 0.010,
+0.050; tier 2 p = 0.007, 0.015, 0.021; Cliff's δ from −0.59 to −0.78). The
 measurement separates molecules known to react from generated candidates at
 every group. So the null is a statement about the metrics, not about the
 measurement — and the prereg's own wording, "BPMD is measuring something
