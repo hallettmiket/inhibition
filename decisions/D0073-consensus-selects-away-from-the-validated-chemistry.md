@@ -2,11 +2,12 @@
 id: D0073
 title: Consensus does not enrich for validated mechanisms — it depletes them, and the best-validated class has the worst pass rate
 date: 2026-08-06
-status: proposed
+status: accepted
 approach: shared
-decided_by: null
+decided_by: '@tt8804'
 review_requested_from: '@tt8804'
 origin: adversary
+resolution: docs/class_stratification.md
 supersedes: []
 superseded_by: null
 affects:
@@ -123,3 +124,31 @@ enrichment is not, and that is a real property. But it does mean:
 - Does the chloroacetamide arm survive at all if only 5 molecules clear the bar,
   and does that argue for generating a more rigid chloroacetamide series rather
   than lowering the bar?
+
+---
+
+## Resolution — @tt8804, 2026-08-07
+
+**Accepted, and already controlled: ranking and selection are stratified by
+warhead class, so the depletion cannot reach the elevated set.**
+
+`rank_v2.py` ranks *within* class and `select_elevate.py` takes the top *n per
+class*, so a molecule competes only against others carrying the same warhead.
+BDHI's higher scores buy it position among BDHIs and nothing against
+acrylamides; the mechanism mix of the elevated set is fixed by `--per-class`,
+not by the score. A composition effect of any size therefore cannot change what
+gets elevated.
+
+Full write-up, including why T₄ being class-balanced by construction is the
+design rather than a defect: **`docs/class_stratification.md`**.
+
+**Left open there, not here:** *why* the unvalidated chemistry scores higher —
+whether BDHI genuinely forms better near-attack geometry, or whether
+`anchor_quality` is partly measuring conformational rigidity under another name.
+There is no measured activity for BDHI to distinguish these, which is why
+stratification rather than re-weighting is the response.
+
+**Re-measure when #23 lands.** #30 has since shown the top-10-by-energy window
+these scores read contains the crystal pose only 33.3% of the time. The class
+comparison should be repeated on a mode-diverse window before anything is
+re-weighted on it.
