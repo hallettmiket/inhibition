@@ -17,49 +17,75 @@ interactors**, and **a review of pose-generation options**.
 
 ---
 
-## 1. What just landed, because it changes the recommendation
+## 1. What just landed — and a claim withdrawn
 
-**Tier 2 completed while this was being written — 111/111 replicas — and the
-pre-registration's fifth reading fired.**
+**Tier 2 completed while this was being written — 111/111 replicas, 0 failures.**
 
-Occupancy of the near-attack window under metadynamic bias:
+### 1.1 The core null holds, on both tiers independently
 
-| group | n | median frac-in-window | vs REF |
-|---|---:|---:|---|
-| A · hi-enr / hi-cons BDHI | 8 | 0.070 | δ −0.812, **p = 0.0047** |
-| B · lo-enr / hi-cons BDHI | 8 | 0.076 | δ −0.750, **p = 0.0104** |
-| D · lo-enr / lo-cons BDHI | 8 | 0.088 | δ −0.688, **p = 0.0207** |
-| **V · chloroacetamide, hi-cons** | 5 | **0.172** | δ +0.200, p = 0.62 — **not distinguished** |
-| **REF · crystallographic** | 8 | **0.163** | — |
+| contrast | tier 1 δ / p(Holm) | tier 2 δ / p(Holm) |
+|---|---|---|
+| A vs B | −0.469 / 0.391 | −0.156 / 1.000 |
+| B vs D | −0.062 / 0.884 | −0.094 / 1.000 |
+| A vs D | −0.250 / 0.884 | −0.250 / 1.000 |
+| **A vs REF** | −0.781 / **0.0070** | −0.781 / **0.0070** |
+| **B vs REF** | −0.750 / **0.0104** | −0.719 / **0.0148** |
+| **D vs REF** | −0.594 / **0.0499** | −0.688 / **0.0207** |
 
-The prereg fixed this reading in advance:
+Two independent physics readouts, same answer: **neither ranking metric predicts
+stability, and the anchor separates from every candidate group on both.** The
+tiers agree at Spearman ρ = 0.475, p = 0.003 (n = 37).
 
-> **V ≈ REF** → *Consensus-selection inside the validated class finds molecules
-> that behave like known binders — the strongest available result, and the one
-> that would justify a synthesis shortlist.*
+### 1.2 V ≈ REF was claimed prematurely, and is withdrawn
 
-**V and REF sit together at ~0.17 while all three BDHI groups sit at 0.07–0.09**,
-and the BDHI–REF separations are significant on all three. Tier 1 pointed the
-same way on a different readout (still-in-window at start of production: V 0.53,
-REF 0.54, BDHI 0.08–0.21). Two independent readouts, same answer.
+An earlier draft of this document, and a summary sent to @tt8804, said the
+prereg's fifth reading (**V ≈ REF**) had fired on the strength of tier-2
+occupancy — V 0.172 vs REF 0.163, not distinguished. **That was an overreach and
+does not survive checking the other readout.**
 
-Per the prereg, **no significance is claimed from n = 5** — V ≈ REF is a
-descriptive equivalence, not a demonstrated one. But it is the reading the
-experiment was built to be able to see, and it fired.
+| readout | V | REF | δ (+ = V more stable) | p |
+|---|---:|---:|---:|---:|
+| **tier 1 \|Δd\|** — the *pre-registered primary* | 0.203 | 0.102 | **−0.300** | 0.435 |
+| tier 2 frac-in-window | 0.172 | 0.163 | **+0.200** | 0.622 |
+| tier 1 still-in-window at production start | 0.53 | 0.54 | ~0 | — |
 
-**This reframes D0073.** That record showed consensus *depletes* validated
-chemistry — only 5 chloroacetamides survive the pool. What tier 2 adds is that
-**those five behave like crystallographic binders.** The depletion is a problem
-of *quantity, not quality*. That flips the conclusion from "consensus is
-selecting the wrong chemistry" to "consensus is selecting correctly and the
-validated-class supply is too thin", which is a chemistry-generation problem, not
-a ranking problem.
+**The two tiers disagree in sign on the same comparison.** On the readout the
+pre-registration actually named, V is *worse* than REF, not equivalent to it.
 
-`bias_at_exit_kj` separated nothing (all p ≥ 0.08). **Occupancy is the
-discriminating tier-2 readout; the escape cost is not.** Worth knowing before
-anyone builds a score on the wrong half of BPMD's output.
+Three separate reasons the claim cannot stand:
 
----
+1. **Failing to distinguish is not equivalence.** At n = 5 vs n = 8 the test has
+   almost no power; a non-significant p is the expected outcome whether or not
+   the groups differ. Demonstrating equivalence requires an equivalence test
+   against a pre-specified margin, which was never specified.
+2. **The prereg forbids it explicitly** — *"no significance claim will be made
+   from n = 5"*. That constraint binds the favourable reading exactly as much as
+   the unfavourable ones.
+3. **The supporting readouts were selected after seeing them.** Tier-2 occupancy
+   and still-in-window both favour V; the pre-registered primary does not.
+   Choosing the two that agree is the failure the pre-registration exists to
+   prevent.
+
+**What can honestly be said:** V is not *distinguished* from REF on two of three
+readouts and is worse on the third, at a sample size that cannot resolve any of
+them. That is weaker than "behaves like known binders", and it is not a basis for
+a synthesis shortlist.
+
+**Consequence for D0073.** The reframing built on this — *"the depletion is a
+problem of quantity, not quality"* — is withdrawn with it. D0073 stands as
+written: consensus depletes validated chemistry, and whether the survivors are
+nonetheless good is **not established**. Testing that properly needs more
+chloroacetamides through the suite, not a re-reading of five.
+
+### 1.3 Two protocol facts worth carrying forward
+
+- **`bias_at_exit` separated nothing** (all p ≥ 0.08) and tracks occupancy at
+  ρ = 0.974, so the escape-cost term is nearly inert at 3 ns. Occupancy is the
+  discriminating tier-2 readout. Do not build a score on the escape cost.
+- **Tier 2 is short and unconverged by design** — 108/111 replicas escaped,
+  median bias at exit 0.11 kJ/mol. The comparison rests on every molecule
+  receiving the identical protocol, not on any single molecule's score being its
+  stability.
 
 ## 2. Anchoring, generalised
 

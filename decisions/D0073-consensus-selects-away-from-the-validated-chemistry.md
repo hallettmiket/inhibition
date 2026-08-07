@@ -6,7 +6,7 @@ status: proposed
 approach: shared
 decided_by: null
 review_requested_from: '@tt8804'
-origin: analysis
+origin: adversary
 supersedes: []
 superseded_by: null
 affects:
