@@ -217,10 +217,14 @@ positives**.
    (`docs/versioning.md`).
 2. **Does the geometric criterion beat plain docking energy at all?** D0069 says
    not on 3IKD. If it does not, the honest move is to say so.
-3. **What does the shortlist get built on?** On current evidence: the validated
-   warhead class, plus consensus, plus a drug-likeness floor — *not* enrichment.
-   The pool is **397 single-mode molecules**, of which only 5 are
-   chloroacetamide, 245 acrylamide, 62 BDHI.
+3. **What does the shortlist get built on?** The pool is **397 single-mode
+   molecules**. Validation attaches to the *mechanism*, not the class name, so
+   **309 of 397 (78%) sit in a mechanism that cleared validation** — Michael
+   addition 293 (acrylamide 245, naphthoquinone 48) and SN2 displacement 16.
+   **But see D0073**: consensus *depletes* validated chemistry relative to the
+   library (90.3% → 77.8%, OR 0.34), and the best-validated class has the worst
+   pass rate. "Consensus plus the validated class" are pulling against each
+   other, and the conflict is larger than it looked.
 4. **What would validate BDHI?** It is the largest well-aligned non-acrylamide
    group and it has zero positives. Nothing in 2.x can rank it honestly.
 
