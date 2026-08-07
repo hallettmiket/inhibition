@@ -9,36 +9,42 @@ each with their own **approach**. The pipeline code lives here; the generic
 machinery for *describing* choreographies belongs in the murmurent repo.
 
 <!-- release-block:start -->
-## Release 2.1.0 “Bornite” — closed
+## Release 2.2.0 “Chalcopyrite” — in progress
 
-> **Branch** `release/2.1.0-bornite` · **status** closed, superseded by
-> [2.2.0 “Chalcopyrite”](https://github.com/hallettmiket/inhibition/tree/release/2.2.0-chalcopyrite)
+> **Branch** `release/2.2.0-chalcopyrite` · **status** active development
 >
 > | | |
 > |---|---|
-> | **Outline / architecture** | [`docs/framework_2.1.0.md`](docs/framework_2.1.0.md) — the four stages, and why each choice was made |
-> | **Retrospective** | **[`docs/retrospective_2.1.0.md`](docs/retrospective_2.1.0.md)** — what worked, what broke, and the finding that ended the release |
-> | **Predecessor** | [`docs/recap_2.0.0.md`](docs/recap_2.0.0.md) |
+> | **Outline** | **[`docs/outline_2.2.0.md`](docs/outline_2.2.0.md)** — pose splitting, the score, tooling, and what would make this release a failure |
+> | **Retrospective of 2.1.0** | **[`docs/retrospective_2.1.0.md`](docs/retrospective_2.1.0.md)** — read this before adding code. Nine defects, all one mistake |
+> | **Inherited architecture** | [`docs/framework_2.1.0.md`](docs/framework_2.1.0.md) — the stages that carry forward |
 > | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) |
 
-**What it was.** The ranking rework. The screen re-ran across all 5,769
-candidates *persisting its working* — per-pose geometry, gnina scores and the
-poses themselves. Consensus became a quota **within warhead class** rather than a
-library-wide bar (D0073). Ranking molecules and ranking *a molecule's own poses*
-were separated into different stages, the second using BPMD. Known binders went
-through the identical criterion, and Sulfopin and ATRA through 100 ns MD.
+**The thesis.** 2.1.0 asked *"how good is this molecule's pose?"* of a molecule
+that does not have **a** pose. It has a distribution of them, often several
+distinct binding modes, and every score so far flattened that into one number —
+either by averaging over an arbitrary window or by measuring how much the poses
+agree, which penalises exactly the molecules that have a real second mode.
 
-**How it ended.** Its own instruments indicted its score. The pose window it
-ranks on is ordered by **docking energy, which carries no information about
-reaction geometry** — ρ = +0.009 across 115,300 poses — and **Sulfopin, which has
-a crystallographic Cys113 adduct, scores 0.000**. The structure carries forward;
-the score does not. Recorded as
-[issue #23](https://github.com/hallettmiket/inhibition/issues/23) and in the
-retrospective above.
+**Pose splitting** gives each molecule a ranked set of binding-mode hypotheses
+instead of one scalar. Clustering keys on the reactive atom and approach vector,
+never on whole-molecule RMSD (D0062) and **never on docking energy**
+([#23](https://github.com/hallettmiket/inhibition/issues/23)); mode count is
+measured rather than parameterised.
 
-**Two numbers from this release worth keeping:** docking finds a sub-2 Å pose for
-a Pin1 crystal ligand **41.5%** of the time and puts it first **18.3%** of the
-time. Almost everything 2.1.0 built sits in that gap.
+**Alongside it:** the primary score moves to conditional enrichment, which uses
+no ordering and so cannot inherit a bad one; PoseBusters becomes a validity gate;
+`mmgbsa.RECEPTOR_PDB` stops defaulting to 6VAJ; and a chain stage that produces
+no output stops the run instead of logging a non-zero exit and continuing.
+
+**Steps 1–3 need no new simulation** — they run on the poses 2.1.0 persisted.
+That is the dividend that made the previous release worth running even though its
+score did not survive.
+
+> **Before any score ranks anything: test it against Sulfopin.** Any candidate
+> score that gives the parent compound a zero is wrong. That check costs an
+> afternoon, and not doing it in 2.1.0 is the most avoidable thing in the
+> retrospective.
 <!-- release-block:end -->
 
 > ### New here? Read these two first
