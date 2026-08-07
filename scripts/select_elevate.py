@@ -179,7 +179,10 @@ def _pose_fields(rank: int, r, sdf: Path) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("--tier", default="T4", choices=("T3", "T4"))
+    ap.add_argument("--tier", default="both", choices=("T3", "T4", "both"),
+                    help="'both' writes ONE queue. Writing a queue per tier and "
+                         "letting downstream take the newest is how an empty T3 "
+                         "queue stranded 17 good T4 molecules overnight.")
     ap.add_argument("--per-class", type=int, default=2)
     ap.add_argument("--classes", nargs="*", default=None,
                     help="restrict to these warhead classes")
@@ -191,12 +194,21 @@ def main() -> None:
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    fs = sorted(glob.glob(str(RANK / f"rank_v2_{args.tier}_*.csv")),
-                key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
-    if not fs:
-        raise SystemExit(f"no ranking for {args.tier} under {RANK}")
-    df = pd.read_csv(fs[-1])
-    log.info("ranking %s (%d rows)", Path(fs[-1]).name, len(df))
+    tiers = ["T3", "T4"] if args.tier == "both" else [args.tier]
+    frames = []
+    for t in tiers:
+        fs = sorted(glob.glob(str(RANK / f"rank_v2_{t}_*.csv")),
+                    key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
+        if not fs:
+            log.warning("no ranking for %s under %s", t, RANK)
+            continue
+        d = pd.read_csv(fs[-1])
+        d["tier"] = t
+        frames.append(d)
+        log.info("ranking %s (%d rows)", Path(fs[-1]).name, len(d))
+    if not frames:
+        raise SystemExit(f"no ranking for {tiers} under {RANK}")
+    df = pd.concat(frames, ignore_index=True)
 
     surv = df[df.passes & df.class_rank.notna()].copy()
     if args.classes:
@@ -209,7 +221,7 @@ def main() -> None:
     log.info("Cys113 SG at %s (from the receptor the MD will use)", np.round(sg, 3))
 
     rows = []
-    for cls, g in surv.groupby("warhead_class"):
+    for (tier, cls), g in surv.groupby(["tier", "warhead_class"]):
         for r in g.nsmallest(args.per_class, "class_rank").itertuples():
             rec = {"ident": r.ident, "warhead_class": cls,
                    "mechanism": mech.get(cls), "class_rank": int(r.class_rank),
