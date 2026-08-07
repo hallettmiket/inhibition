@@ -88,11 +88,11 @@ molecule ─┬─ mode A   n=64   anchor 0.71   viable 0.55   ← elevate
   `KEEP_TOP`-survival from 46.7% → 40.0% and top-10 from 33.3% → 26.7%. If mode
   *membership* is that unstable, mode-level scores inherit the instability. The
   stability check is therefore not optional garnish — it is the acceptance test.
-- **The 150° SN2 threshold interacts with clustering.** Sulfopin's crystal mode
-  peaks at 146.4°, so a hard cut calls the crystallographic mode of a nanomolar
-  inhibitor dead by 3.6°. If viability is a *per-mode* property, one threshold
-  decision now silently kills whole modes. Prefer a graded angular term inside
-  the mode score over a binary gate on its members.
+- **The 150° SN2 threshold interacts with clustering — settled in §3.1.** Sulfopin's
+  crystal mode peaks at 146.4°, so a hard cut calls the crystallographic mode of a
+  nanomolar inhibitor dead by 3.6°. If viability were a per-mode gate, one
+  unjustified number would silently kill whole modes. **The angular criterion
+  therefore becomes a graded term inside the mode score and gates nothing.**
 - **What happens when a molecule has one mode?** Most will. The output shape must
   not privilege multi-mode molecules, or ranking acquires a bias toward
   promiscuous binders — the exact failure mode consensus had, inverted.
@@ -230,18 +230,58 @@ already running.
 
 ---
 
-## 3. What I need from you
+## 3. Decisions — @tt8804, 2026-08-07
 
-1. **Does the re-dock go now or after the MD verdict?** It is ~3 GPU-hours and
-   the bornite runs are using 5 cards. My inclination is after, so we are not
-   competing for GPUs and so the verdict is not delayed.
-2. **The 150° SN2 threshold.** A chemist's call, and it now has teeth: it decides
-   whether whole modes are viable, and it currently calls Sulfopin's
-   crystallographic mode dead by 3.6°.
-3. **N-activated acrylamides — 97% of T₃** (D0066), still no ruling. If they are
-   not credible, T₃ is 97% noise and the re-dock should skip it.
-4. **FEP licensing** — a governance decision, not a technical one (see
-   `outline_2.2.0.md` §3.1, corrected).
+**The re-dock does not increase sampling.** Worth stating plainly because it is
+easy to read the plan as proposing more work: production *already* runs
+`--nrun 200`. The change is that we stop deleting 180 of the 200 results. Same
+docking, different write.
+
+```
+today:     generate 200 → sort by energy → keep 20 → delete 180 → score the 20
+proposed:  generate 200 → keep all 200's geometry → split into modes → score each
+```
+
+| # | question | ruling |
+|---|---|---|
+| 1 | re-dock now or after the MD verdict | **after** — the bornite runs hold 5 cards and a 3 GPU-hour job is not worth delaying the verdict for |
+| 2 | the 150° SN2 threshold | **not escalating — too in the weeds.** Resolved in design instead: see below |
+| 3 | N-activated acrylamides, 97% of T₃ | **irrelevant — T₃ stays in the re-dock.** Question dropped |
+| 4 | FEP licensing | **not now.** Nothing found yet that justifies FEP. Stays in the plan as a terminal, optional step; revisit when there is a molecule worth it |
+
+### 3.1 The 150° threshold, resolved in design rather than escalated
+
+Since this is not a question to put to a chemist mid-build, it is settled by
+**not making it a decision at all**: the angular criterion becomes a **graded term
+inside the mode score**, never a binary gate on a mode's members.
+
+The reason is that a hard cut has to be *exactly* right or it silently destroys
+information, and we already know it is not exactly right — it calls Sulfopin's
+crystallographically-confirmed mode dead by 3.6°. A graded term degrades smoothly
+instead: a 146° pose scores slightly below a 155° pose rather than scoring zero.
+Nothing is thrown away on the strength of a number nobody has justified.
+
+The binary `viable` flag stays in the output for continuity with every earlier
+measurement, but it **stops gating anything**.
+
+### 3.2 Is 200 runs the right number? — being tested, not assumed
+
+Your question about pose counts exposed one nobody had asked: **200 is inherited,
+not justified.** D0068 requires every number to carry the parameter that defines
+it, and this one does not.
+
+#30 makes it directly testable, so it is running: the same 15 ground-truth
+molecules at `--nrun 2000`. The readout is whether containment rises above the
+93.3% measured at 200.
+
+| observation | conclusion |
+|---|---|
+| containment materially above 93.3% | 200 under-samples; the re-dock uses more runs, and the cost estimate rises with it |
+| containment ≈ 93.3% | 200 is sufficient and now **justified rather than inherited**; re-dock proceeds at 200, ~3 GPU-h |
+| mode structure changes with sampling depth | more serious than either — "mode" would be partly a sampling artefact, and §1.2's stability test has to cover sampling depth as well as re-runs |
+
+Answering this **before** the re-dock costs under an hour on one card and stops us
+committing 5,765 molecules to an unjustified parameter.
 
 ---
 

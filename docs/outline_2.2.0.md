@@ -195,7 +195,7 @@ Two things to get right, both learned the hard way here:
 18.3% to 26.8% on this receptor, and it scores every retained pose in the screen.
 Standing filter, no further decision needed.
 
-**FEP** stays where #26 puts it — an optional terminal step before synthesis, on
+**FEP** — @tt8804 2026-08-07: not now, nothing found yet that justifies it; stays in the plan. It sits where #26 puts it — an optional terminal step before synthesis, on
 a handful of molecules. The licence question in §3.1 decides *how*, and the
 Boltz-2 result may decide *which*.
 
