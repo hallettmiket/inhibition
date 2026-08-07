@@ -406,6 +406,15 @@ def main() -> None:
             WEIGHTS[c] * ragg[c].fillna(0.0) for c in WEIGHTS)
         ragg["reference_name"] = ragg.ident.str.replace("^ref_", "", regex=True) \
                                           .str.split("__").str[0]
+        # Carry the SMILES and the provenance across. Without smiles the GUI can
+        # draw a candidate's structure and not a reference's, which makes the one
+        # comparison the panel exists for the one thing it cannot show.
+        ref_csv = pd.read_csv(REPO / "data/reference/pin1_reference_binders_4.csv")
+        meta = ref_csv.set_index("name")
+        for col in ("canonical_smiles", "potency", "tier", "citation", "pdb"):
+            if col in meta.columns:
+                ragg[col if col != "canonical_smiles" else "smiles"] = \
+                    ragg.reference_name.map(meta[col])
         dest = OUT.write(f"rank_v2_REF_{args.score}", ".csv")
         ragg.to_csv(dest, index=False)
         log.info("references: %d scored -> %s", len(ragg), Path(dest).name)
