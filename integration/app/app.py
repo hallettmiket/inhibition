@@ -2053,15 +2053,24 @@ has not been run on these.
                 if "rank" in show.columns:
                     show["rank"] = show["rank"].astype("Int64")
 
-                ev = st.dataframe(
-                    show.style.format({c: "{:.3f}" for c in numeric}),
-                    width="stretch", hide_index=True,
+                # column_config, NOT a Styler. st.dataframe row selection is
+                # silently inert when handed a Styler -- the table renders and
+                # looks fine, and no row is ever selectable. Formatting has to
+                # go through column_config for on_select to work at all.
+                st.dataframe(
+                    show, width="stretch", hide_index=True,
                     on_select="rerun", selection_mode="single-row",
-                    key=f"nac2_tbl_{key}_{cls}")
+                    key=f"nac2_tbl_{key}_{cls}",
+                    column_config={c: st.column_config.NumberColumn(format="%.3f")
+                                   for c in numeric})
+                ev = st.session_state.get(f"nac2_tbl_{key}_{cls}")
                 # The selection is POSITIONAL into the frame just rendered, so it
                 # is resolved against that same frame immediately -- carrying an
                 # index across a re-sort is how a click lands on another molecule.
-                rows = getattr(getattr(ev, "selection", None), "rows", None) or []
+                sel = (ev or {}).get("selection", {}) if isinstance(ev, dict) \
+                    else getattr(ev, "selection", None)
+                rows = (sel or {}).get("rows", []) if isinstance(sel, dict) \
+                    else (getattr(sel, "rows", None) or [])
                 if rows:
                     picked = str(show.iloc[rows[0]]["candidate_id"])
                     if picked != st.session_state.get(state_key):
