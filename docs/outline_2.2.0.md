@@ -98,18 +98,117 @@ compound a zero is wrong, and that check costs an afternoon. Not doing it in
 
 ---
 
-## 3. Tooling upgrades
+## 3. Tooling — the four in issue #26, assessed
+
+Availability checked first, because a tool we cannot run is not a decision.
+**Neither Desmond nor Boltz-2/AF3 is installed here.** AlphaFold3 *is* reachable
+in this lab: @emucaki runs it containerised on A100s for `sh2_domains`
+(`/app/alphafold`, `/alphafold3_venv` in the job logs), so weights and a working
+image exist under DeepMind's terms of use.
+
+### 3.1 Desmond — recommend against, and the reason is your own FEP plan
+
+| | |
+|---|---|
+| **Licence** | free for academics, **but the academic licence excludes free-energy calculations** |
+| **Force field** | fixed OPLS in the academic build |
+| **Our stack** | GAFF2/AM1-BCC + ff19SB, a hand-built covalent junction (`cys_gaff2_junction_5.frcmod`), PLUMED-driven BPMD |
+
+Three problems, in descending order:
+
+1. **It blocks the thing you want it for.** FEP is a free-energy calculation and
+   the free academic licence does not permit them. Desmond + FEP means
+   Schrödinger FEP+ commercially. So "upgrade MD to Desmond" and "do FEP before
+   synthesis" do not compose on an academic licence — that has to be a purchase
+   decision, not a tooling one.
+2. **The covalent junction would have to be rebuilt in OPLS.** D0030 and the
+   `junction_5` work exist because parameterising a Cys–warhead bond is
+   failure-prone; redoing it in a force field we do not control, to gain what
+   GROMACS already does, is cost without a measured benefit.
+3. **BPMD is PLUMED-on-GROMACS.** Pose ranking — the stage that just proved it
+   changes which pose gets elevated — would need reimplementing.
+
+**What Desmond is actually good at is analysis and presentation**, which is the
+one place we already solved the problem (`shared/report_theme.py`). If the appeal
+is the reporting rather than the engine, that is worth saying out loud, because it
+is a much cheaper thing to want.
+
+**Recommendation:** stay on GROMACS. Revisit only if a licence covering FEP+ is
+bought, in which case Desmond comes with it and the question answers itself.
+
+### 3.2 Boltz-2 / AlphaFold3 — recommend testing, for a reason neither of us stated
+
+The interesting property is not accuracy. It is that **Boltz-2 never sees our
+docking poses.**
+
+Every signal we have tested — docking energy, enrichment, consensus,
+top-N viability, anchor quality — is computed from the same AutoDock pose set, so
+they inherit the same failure modes and correlate with each other for reasons
+that have nothing to do with the molecule (#23). A co-folding model builds the
+complex from sequence and ligand alone. Whatever it says is **orthogonal**, and
+orthogonal is precisely what a 300-molecule triage is missing.
+
+Two distinct uses, worth separating:
+
+**(a) Pose recheck / MD preparation** — what #26 asks for. Both models emit
+per-prediction confidence (pLDDT, interface PAE, ipTM) usable as a filter, and
+prospectively they reproduce >50% of novel-ligand poses under 2 Å. But note the
+caveat from the 2.1.0 work: **Boltz-2's affinity head is largely pose-independent**,
+so it is a weaker instrument for pose-level questions than its headline numbers
+suggest. Use the *structure* and its confidence, not the affinity, for anything
+about a pose.
+
+**(b) MD-priority triage** — not in #26, and possibly the bigger prize. Interface
+PAE is a **forward pass, seconds per complex**, against ~1 GPU-hour for BPMD. If
+it predicts 100 ns residence even moderately, it triages 300+ molecules for
+roughly the cost of one BPMD run.
+
+**Boltz-2 also bears on the FEP question directly:** it is reported to approach
+FEP accuracy while running ~1000× faster. That does not replace FEP before
+synthesis, but it plausibly *triages* which molecules deserve one.
+
+### 3.3 The test, which is cheap and uses molecules whose answers we know
+
+Same design as `docs/prereg_md_priority.md`. Run Boltz-2 (or the lab's AF3
+container) on the nine molecules whose 100 ns outcome we either have or will have
+within a day:
+
+- **Sulfopin** and **ATRA** — both held 100 ns
+- **`t4_72f5671e89cb`** — left at 54 ns
+- **the six MD-priority molecules** — outcomes landing now
+
+Then ask whether interface confidence separates held from left. Nine points, four
+of them with known answers today. **If it does, it is the cheapest filter
+available by three orders of magnitude. If it does not, we have spent an
+afternoon.**
+
+Two things to get right, both learned the hard way here:
+
+- **Predict before looking.** Pre-register as with the BPMD test.
+- **The covalent question is not asked.** Co-folding models do not model the
+  Cys113 bond, so this can only ever be about whether the molecule sits in the
+  pocket — never about whether it reacts.
+
+### 3.4 gnina and FEP — settled and deferred
+
+**gnina** is adopted and running: CNN rescoring lifted top-1 pose accuracy from
+18.3% to 26.8% on this receptor, and it scores every retained pose in the screen.
+Standing filter, no further decision needed.
+
+**FEP** stays where #26 puts it — an optional terminal step before synthesis, on
+a handful of molecules. The licence question in §3.1 decides *how*, and the
+Boltz-2 result may decide *which*.
+
+### 3.5 Carried-forward fixes, unchanged
 
 | | why |
 |---|---|
-| **PoseBusters as a validity gate** | installed and still unused. A reproducibly-invalid pose is *reproducible*, so it inflates agreement and would survive mode-splitting as a confident cluster. Must gate **before** clustering |
-| **`mmgbsa.RECEPTOR_PDB` required, not defaulted** | still defaults to **6VAJ** and every covalent path takes it. The last inherited default of its kind |
-| **Chain fails on a failed stage** | the overnight run logged `exit 1` twice and carried on, producing zero elevation from a good ranking. A stage with no output must stop the chain |
-| **Flexible Cys113 sidechain in docking** | the anchor distance is measured to one arbitrary rotamer of the residue the whole criterion is about |
+| **PoseBusters as a validity gate** | installed and unused. A reproducibly-invalid pose is *reproducible*, so it survives mode-splitting as a confident cluster. Must gate **before** clustering |
+| **`mmgbsa.RECEPTOR_PDB` required, not defaulted** | still defaults to **6VAJ** and every covalent path takes it |
+| **Chain fails on a failed stage** | the overnight run logged `exit 1` twice and carried on, producing zero elevation from a good ranking |
+| **`charge_ph74` vs `canonical_smiles`** | disagree in 33% of T₄ (#28). Feeds antechamber `-nc`, so a wrong value parameterises the wrong species silently |
+| **Flexible Cys113 sidechain** | the anchor distance is measured to one arbitrary rotamer of the residue the criterion is about |
 | **Covalent MD** | topology built and verified since 2.0.0; never run |
-| **Report/GUI on one path** | the house style exists (`shared/report_theme.py`); the GUI and the reports should not diverge again |
-
----
 
 ## 4. Order of work
 
