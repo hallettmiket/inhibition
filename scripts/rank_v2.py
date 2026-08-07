@@ -70,6 +70,10 @@ log = logging.getLogger("rank-v2")
 OUT = sout.Topic("blacksmith", "rank_v2")
 DATA = Path("/data/lab_vm/append_only/inhibition")
 V2 = DATA / "00_outputs/blacksmith/nac_v2"
+#: 2.2.0 writes one row per BINDING MODE to its own topic. Selected with
+#: --topic; the two must never be pooled, since their idents differ (`x` vs
+#: `x_m0`) so a dedup would not collapse them.
+V3 = DATA / "00_outputs/blacksmith/nac_v3"
 POSES = DATA / "00_outputs/blacksmith/nac_v2_poses"
 
 TOP_N = 10
@@ -95,8 +99,11 @@ def load_references() -> tuple[pd.DataFrame, pd.DataFrame]:
     return agg, poses
 
 
+SRC = V2          # rebound by --topic
+
+
 def _shards(pattern: str) -> pd.DataFrame:
-    fs = sorted(glob.glob(str(V2 / pattern)))
+    fs = sorted(glob.glob(str(SRC / pattern)))
     if not fs:
         return pd.DataFrame()
     return pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)
@@ -105,7 +112,7 @@ def _shards(pattern: str) -> pd.DataFrame:
 def load_v2() -> tuple[pd.DataFrame, pd.DataFrame]:
     agg = _shards("agg_s*_*.csv")
     if agg.empty:
-        raise SystemExit(f"no v2 aggregates under {V2}")
+        raise SystemExit(f"no aggregates under {SRC}")
     agg = agg.drop_duplicates("ident", keep="last")
     poses = _shards("poses_s*_*.csv")
     if not poses.empty:
@@ -303,9 +310,14 @@ def main() -> None:
                     choices=("consensus_gnina", "consensus_autodock"))
     ap.add_argument("--quota", type=float, default=DEFAULT_QUOTA)
     ap.add_argument("--floor", type=float, default=CONSENSUS_FLOOR)
+    ap.add_argument("--topic", choices=("nac_v2", "nac_v3"), default="nac_v2",
+                    help="nac_v3 = 2.2.0 per-mode rows at nrun=500")
     ap.add_argument("--top", type=int, default=10)
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    global SRC
+    SRC = V3 if args.topic == "nac_v3" else V2
+    log.info("reading %s", SRC)
 
     agg, poses = load_v2()
     ok = agg[agg.status == "ok"].copy()
@@ -313,7 +325,15 @@ def main() -> None:
 
     ok["enrichment_joint"] = ok.enrichment
     ok["enrichment_conditional"] = ok.apply(conditional_enrichment, axis=1)
-    ok["frac_in_range"] = ok.n_in_range / ok.n_poses
+    # PER-MODE ROWS DIVIDE BY THE MODE, NOT THE MOLECULE.
+    #
+    # On a 2.2.0 row `n_in_range` counts poses that are in range AND in this
+    # mode, while `n_poses` is everything the molecule produced -- so the ratio
+    # would be neither fraction, and would shrink simply because a molecule had
+    # more modes. 2.1.0 rows have no `n_poses_mode` and fall back to `n_poses`,
+    # which is correct for them.
+    denom = (ok.n_poses_mode if "n_poses_mode" in ok.columns else ok.n_poses)
+    ok["frac_in_range"] = ok.n_in_range / denom.replace(0, np.nan)
 
     wh = pd.read_csv(REPO / "data/reference/warhead_classes_10.csv")
     smarts = dict(zip(wh.class_id, wh.reactive_atom_smarts))
