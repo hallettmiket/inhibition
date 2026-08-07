@@ -77,6 +77,24 @@ DEFAULT_QUOTA = 0.20
 CONSENSUS_FLOOR = 0.50
 
 
+def load_references() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Reference molecules' aggregates and poses, from the same v2 topic.
+
+    Kept OUT of `load_v2` deliberately. References are a yardstick, not
+    competitors: @tt8804 ruled the known Pin1 binders too few and too poor to
+    decide which chemistry to pursue, so they must never enter a per-class quota
+    or take a rank slot from a candidate. They are scored by the SAME functions
+    so the comparison is like-for-like, and reported separately.
+    """
+    agg = _shards("agg_ref_*.csv")
+    poses = _shards("poses_ref_*.csv")
+    if not agg.empty:
+        agg = agg[agg.status == "ok"].drop_duplicates("ident")
+    if not poses.empty:
+        poses = poses.drop_duplicates(["ident", "energy_rank"], keep="last")
+    return agg, poses
+
+
 def _shards(pattern: str) -> pd.DataFrame:
     fs = sorted(glob.glob(str(V2 / pattern)))
     if not fs:
@@ -368,6 +386,29 @@ def main() -> None:
         r = spearmanr(mc.consensus_autodock, mc.consensus_gnina)
         log.info("consensus autodock vs gnina ordering: rho %+.3f (n=%d)",
                  r.statistic, len(mc))
+
+    # references, through the identical scoring functions
+    ragg, rposes = load_references()
+    if not ragg.empty:
+        ragg["enrichment_joint"] = ragg.enrichment
+        ragg["enrichment_conditional"] = ragg.apply(conditional_enrichment, axis=1)
+        ragg["frac_in_range"] = ragg.n_in_range / ragg.n_poses
+        if not rposes.empty:
+            ragg = ragg.merge(topn_viable(rposes), on="ident", how="left")
+            ragg = ragg.merge(composite(rposes), on="ident", how="left")
+            rc = consensus_both(ragg, rposes, smarts)
+            if not rc.empty:
+                ragg = ragg.merge(rc, on="ident", how="left")
+        for c in WEIGHTS:
+            if c not in ragg.columns:
+                ragg[c] = np.nan
+        ragg["weighted_score"] = sum(
+            WEIGHTS[c] * ragg[c].fillna(0.0) for c in WEIGHTS)
+        ragg["reference_name"] = ragg.ident.str.replace("^ref_", "", regex=True) \
+                                          .str.split("__").str[0]
+        dest = OUT.write(f"rank_v2_REF_{args.score}", ".csv")
+        ragg.to_csv(dest, index=False)
+        log.info("references: %d scored -> %s", len(ragg), Path(dest).name)
 
     for tier in ("T3", "T4"):
         g = ok[ok.tier == tier]

@@ -1866,6 +1866,50 @@ and every raw angle is retained so a window can be redrawn without re-docking.*
                    "same gate at 200 runs. A candidate above that range is not "
                    "thereby better than a known binder — see the intervals.")
 
+def _reference_scores():
+    """Reference molecules on the SAME measurement as the candidates.
+
+    Loaded separately and never merged into a ranked list. @tt8804 ruled the
+    known Pin1 binders too few and too poor to decide which chemistry to pursue,
+    so they are a YARDSTICK -- what does the incumbent score -- and must not take
+    a rank slot from a candidate or enter a per-class quota.
+    """
+    import glob as _glob
+    fs = _glob.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
+                    "rank_v2/rank_v2_REF_*_*.csv")
+    if not fs:
+        return None
+    f = max(fs, key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+    try:
+        return pd.read_csv(f), Path(f).name
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
+def _reference_md():
+    """100 ns outcomes for any reference that has been through elevation."""
+    import glob as _glob
+    rows = []
+    for f in _glob.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
+                        "md_residence/md_residence_ref_*.csv"):
+        try:
+            d = pd.read_csv(f)
+        except Exception:                              # noqa: BLE001
+            continue
+        for r in d.itertuples():
+            if getattr(r, "status", "") != "ok":
+                continue
+            rows.append({
+                "reference_name": getattr(r, "reference_name", "?"),
+                "ns": getattr(r, "ns_analysed", float("nan")),
+                "rmsd_mean": getattr(r, "explicit_ligand_rmsd_nm_mean", float("nan")),
+                "rmsd_max": getattr(r, "explicit_ligand_rmsd_nm_max", float("nan")),
+                "engaged": getattr(r, "explicit_frac_frames_engaged", float("nan")),
+                "potency": getattr(r, "reference_potency", ""),
+            })
+    return pd.DataFrame(rows).drop_duplicates("reference_name") if rows else None
+
+
 def panel_nac2_ranking() -> None:
     """The 2.1.0 ranking — per warhead class, on the weighted anchoring score.
 
@@ -1903,6 +1947,55 @@ def panel_nac2_ranking() -> None:
 2.0.0 metrics on a pre-registered cohort and found they did not. The same test
 has not been run on these.
 """)
+
+    # --- the yardstick, before any candidate --------------------------------
+    ref = _reference_scores()
+    if ref is not None:
+        rdf, rname = ref
+        with st.expander("**Known Pin1 binders on this same measurement** — the "
+                         "yardstick, not a validation set", expanded=True):
+            st.caption(
+                "Scored by the identical functions as the candidates below, so "
+                "the numbers are comparable. **Nothing in the pipeline is "
+                "calibrated against them** — @tt8804's ruling is that 15 "
+                "crystallographic depositions are too few and too poor to decide "
+                "which chemistry to pursue. They are here so a candidate's score "
+                "can be read next to what the incumbent actually does. "
+                "**Sulfopin is the parent.**")
+            cols = [c for c in ("reference_name", "warhead_class", "weighted_score",
+                                "anchor_quality", "topn_viable_frac",
+                                "enrichment_joint", "consensus_gnina")
+                    if c in rdf.columns]
+            show = rdf[cols].rename(columns={
+                "reference_name": "molecule", "weighted_score": "weighted",
+                "anchor_quality": "anchor", "topn_viable_frac": "top-10 viable",
+                "enrichment_joint": "enrich (2.0.0)", "consensus_gnina": "consensus"})
+            num = [c for c in ("weighted", "anchor", "top-10 viable",
+                               "enrich (2.0.0)", "consensus") if c in show.columns]
+            st.dataframe(show.sort_values("weighted", ascending=False)
+                         .style.format({c: "{:.3f}" for c in num}),
+                         width="stretch", hide_index=True)
+            st.caption(f"`{rname}`. A molecule matching several warhead SMARTS is "
+                       "scored under each and listed once per class — that is a "
+                       "property of the criterion, not a duplicate.")
+
+            md = _reference_md()
+            if md is not None and len(md):
+                st.markdown("**Through the 100 ns elevation leg**")
+                mshow = md.rename(columns={
+                    "reference_name": "molecule", "ns": "ns",
+                    "rmsd_mean": "RMSD mean (nm)", "rmsd_max": "RMSD max (nm)",
+                    "engaged": "frames engaged"})
+                st.dataframe(mshow.style.format({
+                    "ns": "{:.0f}", "RMSD mean (nm)": "{:.3f}",
+                    "RMSD max (nm)": "{:.3f}", "frames engaged": "{:.2f}"}),
+                    width="stretch", hide_index=True)
+                st.caption(
+                    "Both stay bound for the full 100 ns — max RMSD under 0.72 nm "
+                    "against a 1.0 nm bound threshold. Verified independently by "
+                    "ligand-COM-to-Cys113-SG distance, which never exceeds 1 nm in "
+                    "10,001 frames. ATRA ran as the NEUTRAL acid, so it is not the "
+                    "species that binds at pH 7.4.")
 
     for key in ("t3", "t4"):
         df, fname = D.load_frame(key)
@@ -2225,6 +2318,50 @@ and every raw angle is retained so a window can be redrawn without re-docking.*
                    "same gate at 200 runs. A candidate above that range is not "
                    "thereby better than a known binder — see the intervals.")
 
+def _reference_scores():
+    """Reference molecules on the SAME measurement as the candidates.
+
+    Loaded separately and never merged into a ranked list. @tt8804 ruled the
+    known Pin1 binders too few and too poor to decide which chemistry to pursue,
+    so they are a YARDSTICK -- what does the incumbent score -- and must not take
+    a rank slot from a candidate or enter a per-class quota.
+    """
+    import glob as _glob
+    fs = _glob.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
+                    "rank_v2/rank_v2_REF_*_*.csv")
+    if not fs:
+        return None
+    f = max(fs, key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+    try:
+        return pd.read_csv(f), Path(f).name
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
+def _reference_md():
+    """100 ns outcomes for any reference that has been through elevation."""
+    import glob as _glob
+    rows = []
+    for f in _glob.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
+                        "md_residence/md_residence_ref_*.csv"):
+        try:
+            d = pd.read_csv(f)
+        except Exception:                              # noqa: BLE001
+            continue
+        for r in d.itertuples():
+            if getattr(r, "status", "") != "ok":
+                continue
+            rows.append({
+                "reference_name": getattr(r, "reference_name", "?"),
+                "ns": getattr(r, "ns_analysed", float("nan")),
+                "rmsd_mean": getattr(r, "explicit_ligand_rmsd_nm_mean", float("nan")),
+                "rmsd_max": getattr(r, "explicit_ligand_rmsd_nm_max", float("nan")),
+                "engaged": getattr(r, "explicit_frac_frames_engaged", float("nan")),
+                "potency": getattr(r, "reference_potency", ""),
+            })
+    return pd.DataFrame(rows).drop_duplicates("reference_name") if rows else None
+
+
 def panel_nac2_ranking() -> None:
     """The 2.1.0 ranking — per warhead class, on the weighted anchoring score.
 
@@ -2262,6 +2399,55 @@ def panel_nac2_ranking() -> None:
 2.0.0 metrics on a pre-registered cohort and found they did not. The same test
 has not been run on these.
 """)
+
+    # --- the yardstick, before any candidate --------------------------------
+    ref = _reference_scores()
+    if ref is not None:
+        rdf, rname = ref
+        with st.expander("**Known Pin1 binders on this same measurement** — the "
+                         "yardstick, not a validation set", expanded=True):
+            st.caption(
+                "Scored by the identical functions as the candidates below, so "
+                "the numbers are comparable. **Nothing in the pipeline is "
+                "calibrated against them** — @tt8804's ruling is that 15 "
+                "crystallographic depositions are too few and too poor to decide "
+                "which chemistry to pursue. They are here so a candidate's score "
+                "can be read next to what the incumbent actually does. "
+                "**Sulfopin is the parent.**")
+            cols = [c for c in ("reference_name", "warhead_class", "weighted_score",
+                                "anchor_quality", "topn_viable_frac",
+                                "enrichment_joint", "consensus_gnina")
+                    if c in rdf.columns]
+            show = rdf[cols].rename(columns={
+                "reference_name": "molecule", "weighted_score": "weighted",
+                "anchor_quality": "anchor", "topn_viable_frac": "top-10 viable",
+                "enrichment_joint": "enrich (2.0.0)", "consensus_gnina": "consensus"})
+            num = [c for c in ("weighted", "anchor", "top-10 viable",
+                               "enrich (2.0.0)", "consensus") if c in show.columns]
+            st.dataframe(show.sort_values("weighted", ascending=False)
+                         .style.format({c: "{:.3f}" for c in num}),
+                         width="stretch", hide_index=True)
+            st.caption(f"`{rname}`. A molecule matching several warhead SMARTS is "
+                       "scored under each and listed once per class — that is a "
+                       "property of the criterion, not a duplicate.")
+
+            md = _reference_md()
+            if md is not None and len(md):
+                st.markdown("**Through the 100 ns elevation leg**")
+                mshow = md.rename(columns={
+                    "reference_name": "molecule", "ns": "ns",
+                    "rmsd_mean": "RMSD mean (nm)", "rmsd_max": "RMSD max (nm)",
+                    "engaged": "frames engaged"})
+                st.dataframe(mshow.style.format({
+                    "ns": "{:.0f}", "RMSD mean (nm)": "{:.3f}",
+                    "RMSD max (nm)": "{:.3f}", "frames engaged": "{:.2f}"}),
+                    width="stretch", hide_index=True)
+                st.caption(
+                    "Both stay bound for the full 100 ns — max RMSD under 0.72 nm "
+                    "against a 1.0 nm bound threshold. Verified independently by "
+                    "ligand-COM-to-Cys113-SG distance, which never exceeds 1 nm in "
+                    "10,001 frames. ATRA ran as the NEUTRAL acid, so it is not the "
+                    "species that binds at pH 7.4.")
 
     for key in ("t3", "t4"):
         df, fname = D.load_frame(key)
