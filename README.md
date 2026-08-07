@@ -8,6 +8,40 @@ This is a murmurent **choreography**: a problem statement many people attack,
 each with their own **approach**. The pipeline code lives here; the generic
 machinery for *describing* choreographies belongs in the murmurent repo.
 
+<!-- release-block:start -->
+## Release 2.0.0 “Azurite” — superseded
+
+> **Branch** `release/2.0.0-azurite` · **tag** `v2.0.0` · **status** superseded by
+> [2.1.0 “Bornite”](https://github.com/hallettmiket/inhibition/tree/release/2.1.0-bornite),
+> then [2.2.0 “Chalcopyrite”](https://github.com/hallettmiket/inhibition/tree/release/2.2.0-chalcopyrite)
+>
+> | | |
+> |---|---|
+> | **Outline / retrospective** | **[`docs/recap_2.0.0.md`](docs/recap_2.0.0.md)** — what was built, what it proved, what it disproved, and what carried forward |
+> | **Elevation protocol** | [`docs/elevation_example.md`](docs/elevation_example.md) |
+> | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) |
+
+**MAJOR — every 1.0.0 number is invalid.** D0059 replaced the receptor with the
+chemist-prepared 3IKD, and 6VAJ and 3IKD place the pocket **48.6 Å apart**, so
+prior values measure the wrong site.
+
+**What it was.** The 3IKD receptor and the geometric near-attack ranking, end to
+end: a mechanism-specific criterion validated against crystallographic Cys113
+binders (chloroacetamide AUC 0.908), the full 5,769-candidate screen, the
+pre-registered elevation suite, and the first complete molecular workup.
+
+**Its headline result is a negative one, and that is the point of the release.**
+**D0071:** neither of its two ranking metrics predicts whether a docked pose
+survives physics — established on a pre-registered cohort whose crystallographic
+anchor separates at p = 0.007, so the assay demonstrably works and it is the
+*ranking* that lacks support.
+
+**The most reusable thing here is §3 of the recap:** every significant defect in
+this release was one mistake — *a value taken by position, name, label or
+inheritance rather than by identity*. That list has kept growing since, and it is
+the single best predictor of where the next bug will be.
+<!-- release-block:end -->
+
 > ### New here? Read these two first
 >
 > 1. **[`docs/state_of_the_project.md`](docs/state_of_the_project.md)** — what
