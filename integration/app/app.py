@@ -1985,10 +1985,20 @@ def panel_nac2_ranking() -> None:
             "D0071 tested the 2.0.0 metrics and found they did not; these have "
             "not been tested.")
 
+    hcol, _ = st.columns([1, 3])
+    box_h = hcol.slider("table pane height (px)", 400, 1400, 820, 20,
+                        key="nac2_boxh",
+                        help="The tables scroll inside their own pane so the "
+                             "viewer stays put. Raise this on a tall screen.")
+
     left, right = st.columns([3, 2], gap="medium")
     picked = None
 
-    with left:
+    # The tables live in a FIXED-HEIGHT scrolling pane so the left side scrolls
+    # independently of the viewer. Without it the whole page scrolls as one and
+    # the viewer -- the thing you are comparing against -- slides off screen the
+    # moment you go looking for a row further down a class.
+    with left.container(height=box_h):
         rdf, rname = _ref_table()
         if rdf is not None:
             with st.expander("**Known Pin1 binders** — same measurement, not a "
@@ -2074,6 +2084,13 @@ def panel_nac2_ranking() -> None:
     cur = st.session_state.get(_SEL)
 
     with right:
+        # Sticky, so the viewer holds its position if the page itself scrolls
+        # (the height slider can be set taller than the window).
+        st.markdown(
+            "<style>div[data-testid='stVerticalBlock'] "
+            "div[data-testid='stVerticalBlock']:has(#nac2-viewer-anchor) "
+            "{position:sticky; top:0.5rem;}</style>"
+            "<span id='nac2-viewer-anchor'></span>", unsafe_allow_html=True)
         st.markdown("### Viewer")
         if not cur:
             st.info("Click any row on the left — candidate or reference — and its "
