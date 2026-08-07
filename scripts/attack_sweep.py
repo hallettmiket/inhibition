@@ -64,6 +64,11 @@ from shared import outputs as sout                  # noqa: E402
 
 log = logging.getLogger("attack-sweep")
 MD = Path("/data/lab_vm/modifiable/inhibition/md_residence_3ikd")
+#: The sweep writes to its OWN root. The workdir is <root>/<candidate>/md/rep1
+#: regardless of tag, so a 10 ns sweep and a later 100 ns run of the same
+#: molecule would otherwise collide -- and the 100 ns run would find a finished
+#: 10 ns prod.xtc sitting there and skip itself.
+SWEEP_ROOT = Path("/data/lab_vm/modifiable/inhibition/attack_sweep_10ns")
 POSES = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
 OUT = sout.Topic("blacksmith", "attack_sweep")
 PY = Path.home() / ".micromamba/envs/dwi_reactive/bin/python"
@@ -111,14 +116,15 @@ def geometry_stats(dist: np.ndarray, angle: np.ndarray, kind: str) -> dict:
 def run_sweep(cand: str, pose: Path, pose_rank: int, gpu: int,
               ps: float, net_charge: int | None) -> Path | None:
     """10 ns of MD through the production script, so the physics is identical."""
-    rep = MD / cand / "md" / "rep1"
+    rep = SWEEP_ROOT / cand / "md" / "rep1"
     if (rep / "prod.xtc").is_file():
         log.info("%s: trajectory already present, not re-running", cand)
         return rep
     cmd = [str(PY), str(REPO / "scripts/md_residence_3ikd.py"),
            "--candidate", cand, "--pose", str(pose),
            "--pose-rank", str(pose_rank), "--production-ps", str(int(ps)),
-           "--gpu", str(gpu), "--keep", "--tag", "sweep"]
+           "--gpu", str(gpu), "--keep", "--tag", "sweep",
+           "--work-root", str(SWEEP_ROOT)]
     if net_charge is not None:
         cmd += ["--net-charge", str(net_charge)]
     log.info("%s: %.0f ps sweep on GPU %d", cand, ps, gpu)

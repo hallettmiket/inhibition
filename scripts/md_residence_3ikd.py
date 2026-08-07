@@ -446,6 +446,15 @@ def main() -> None:
     ap.add_argument("--shard", type=int, default=0)
     ap.add_argument("--n-shards", type=int, default=1)
     ap.add_argument("--keep", action="store_true", help="keep MD workdirs")
+    # THE SWEEP AND THE FULL RUN MUST NOT SHARE A DIRECTORY.
+    #
+    # The workdir is <root>/<candidate>/md/rep1 regardless of --tag, so a 10 ns
+    # sweep and a 100 ns run of the SAME molecule would land on top of each
+    # other -- and the second would find a prod.xtc already there. `work_root`
+    # existed in run_one and was never exposed, so there was no way to say it.
+    ap.add_argument("--work-root", default=None,
+                    help="override the MD working root (keeps a 10 ns sweep and "
+                         "a 100 ns run of the same molecule apart)")
     ap.add_argument("--candidate", help="run ONE named candidate instead of the "
                                         "validation set")
     ap.add_argument("--pose", help="start from this saved pose (SDF or PDBQT) "
@@ -472,7 +481,8 @@ def main() -> None:
         row = run_one(args.candidate, smiles, "candidate",
                       production_ps=args.production_ps, nrun=args.nrun,
                       gpu=args.gpu, keep=args.keep, pose=pose,
-                      pose_rank=args.pose_rank, net_charge=nc)
+                      pose_rank=args.pose_rank, net_charge=nc,
+                      work_root=Path(args.work_root) if args.work_root else None)
         df = pd.DataFrame([row])
         dest = OUT.write(f"md_residence_{args.tag or args.candidate}", ".csv")
         df.to_csv(dest, index=False)
