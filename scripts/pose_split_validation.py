@@ -104,6 +104,26 @@ def dlg_poses(dlg: Path) -> list[tuple[np.ndarray, np.ndarray]]:
     return out
 
 
+def ns_mode_features(ns, dlg, cand):
+    """Per-pose (reactive-atom xyz, warhead direction), via the screen's own
+    reactive-atom location. measure_dlg already resolves which reactive centre
+    was docked, by coordinate identity against the docking output; re-deriving
+    that here would be a second source of truth for the one thing the whole
+    criterion hangs on."""
+    from meeko import PDBQTMolecule, RDKitMolCreate
+    from rdkit import Chem
+    import shared.pose_modes as pm
+    pmol = PDBQTMolecule.from_file(str(dlg), is_dlg=True, skip_typing=True)
+    mol = [m for m in RDKitMolCreate.from_pdbqt_mol(pmol) if m is not None][0]
+    matches = mol.GetSubstructMatches(Chem.MolFromSmarts(cand.reactive_smarts))
+    if len(matches) > 1:
+        rx = ns._reactive_xyz(dlg)
+        pos = mol.GetConformer(0).GetPositions()
+        idx = int(np.argmin(np.linalg.norm(pos - rx, axis=1)))
+        matches = [m for m in matches if m[0] == idx] or matches
+    return pm.features(mol, matches[0])
+
+
 def crystal(ident: str, cdc) -> tuple[np.ndarray, np.ndarray]:
     return cdc.elems_pdb(REFS / f"{ident}_ref.pdb")
 
@@ -161,11 +181,12 @@ def main() -> None:
                 rmsds = np.array([cb.sym_rmsd(px, pe, cx, ce)
                                   for px, pe in poses[:n]])
                 meas = ns.measure_dlg(dlg, cand)
+                feat = ns_mode_features(ns, dlg, cand)
                 if best is None or np.nanmin(rmsds) < np.nanmin(best[0]):
-                    best = (rmsds, np.array(en[:n]), poses[:n], meas[:n])
+                    best = (rmsds, np.array(en[:n]), poses[:n], meas[:n], feat[:n])
             if best is None:
                 raise ValueError("no poses")
-            rmsds, en, poses, res = best
+            rmsds, en, poses, res, feat = best
             order = np.argsort(en)              # energy rank, as production does
 
             if args.dump_poses:
@@ -184,6 +205,9 @@ def main() -> None:
                 })
                 np.save(dd / f"{r.ident}_coords.npy",
                         np.stack([px for px, _ in poses[:len(rmsds)]]))
+                # reactive-atom position + warhead direction: what pose_modes
+                # clusters on, and the only thing it clusters on
+                np.save(dd / f"{r.ident}_modefeat.npy", feat[:len(rmsds)])
                 log.info("  dumped %d poses + coords for %s", len(per), r.ident)
                 per.to_csv(dd / f"{r.ident}_poses.csv", index=False)
             rec.update({
