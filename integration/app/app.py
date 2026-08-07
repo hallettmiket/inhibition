@@ -2102,15 +2102,24 @@ def panel_nac2_ranking() -> None:
                 st.caption(f"2D depiction unavailable: {exc}")
         pose = cur.get("pose")
         if isinstance(pose, str) and Path(pose).is_file():
+            # The SHARED viewer, not a bare pose_html call. It carries the mode
+            # controls -- best pose, pick one, OVERLAY ALL -- the labelled
+            # surface, the export and the control table, and calling pose_html
+            # directly threw all of that away. A one-pose viewer cannot answer
+            # "do these poses agree", which is the question the consensus column
+            # on the left is about.
+            #
+            # A minimal frame is built because render_pose_viewer reads only
+            # candidate_id and the pose column, and this way references and
+            # candidates take the identical path rather than two.
+            vframe = pd.DataFrame([{"candidate_id": cur["ident"],
+                                    "nac2_pose_path": pose}])
             try:
-                # The receptor is resolved FROM the pose column: nac2_pose_path is
-                # registered in p3d.RECEPTOR_FOR_POSE_COLUMN, whose fallback is
-                # 6VAJ -- an unregistered source draws every pose 48.6 A from the
-                # pocket and looks entirely correct doing it.
-                html = p3d.pose_html(Path(pose),
-                                     receptor=p3d.receptor_for("nac2_pose_path"),
-                                     height=430)
-                st.components.v1.html(html, height=450)
+                render_pose_viewer(
+                    cur["source"] if cur["source"] in ("t3", "t4") else "t4",
+                    cur["source"], vframe, vframe.iloc[0],
+                    key=f"nac2_one_{cur['ident']}",
+                    pose_column="nac2_pose_path", height=440)
             except Exception as exc:                   # noqa: BLE001
                 st.caption(f"pose viewer unavailable: {exc}")
         else:
