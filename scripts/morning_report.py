@@ -32,6 +32,7 @@ import argparse
 import base64
 import glob
 import io
+import json
 import logging
 import sys
 from pathlib import Path
@@ -161,6 +162,46 @@ def depict(smiles: str) -> str | None:
         return None
 
 
+MOVIES = Path("/tmp/claude-162950786/-home-UWO-twu383-repos-murmurent/"
+              "1df6f1f7-77e5-428c-9dcf-d73620df8e8f/scratchpad/movies")
+THREEDMOL = REPO / "scripts/.cache_3dmol-min.js"
+
+
+def movie_payload(ident: str) -> tuple[str, list] | None:
+    """Multi-model PDB for `ident` plus its per-frame ligand-to-Cys113 distance.
+
+    The distance is computed from the SAME coordinates the viewer renders, so
+    the number under the animation cannot disagree with the picture.
+    """
+    pdb = MOVIES / f"{ident}.pdb"
+    if not pdb.is_file():
+        return None
+    text = pdb.read_text()
+    frames, cur = [], []
+    for l in text.splitlines():
+        if l.startswith("MODEL"):
+            cur = []
+        elif l.startswith(("ATOM", "HETATM")):
+            cur.append((l[17:20].strip(), int(l[22:26]), l[12:16].strip(),
+                        float(l[30:38]), float(l[38:46]), float(l[46:54])))
+        elif l.startswith("ENDMDL"):
+            frames.append(cur)
+    if not frames:
+        return None
+    f0 = frames[0]
+    sg = next((i for i, a in enumerate(f0)
+               if a[0] == "CYS" and a[2] == "SG" and a[1] == 63), None)
+    if sg is None:
+        return None
+    dist = []
+    for f in frames:
+        s_xyz = np.array(f[sg][3:])
+        lig = np.array([a[3:] for a in f if a[0] == "MOL"])
+        dist.append(round(float(np.linalg.norm(lig.mean(0) - s_xyz)), 2)
+                    if len(lig) else float("nan"))
+    return text, dist
+
+
 def gate(md: dict, nac_frac: float | None) -> tuple[str, str]:
     if md.get("state") != "complete":
         return "pending", "trajectory not finished"
@@ -255,11 +296,106 @@ figure{margin:1rem 0}figure img{width:100%;height:auto;border-radius:4px}
 ul{padding-left:1.1rem}li{margin-bottom:.4rem}
 .foot{border-top:1px solid var(--rule);padding-top:1.2rem;margin-top:3rem;
  font-size:.79rem;color:var(--muted);font-family:var(--mono);line-height:1.7}
+.viewer{border:1px solid var(--rule);border-radius:6px;overflow:hidden;
+ background:var(--raise);margin:1rem 0}
+/* 3Dmol absolutely-positions its canvas inside the element it is given. Without
+   position:relative and a real height on THAT element, the canvas escapes its
+   box and lays itself over the page -- which is exactly what happened. */
+.glbox{position:relative;width:100%;height:420px;overflow:hidden}
+.glbox canvas{position:absolute;top:0;left:0}
+.vctl{display:flex;align-items:center;gap:.9rem;padding:.7rem 1rem;
+ border-top:1px solid var(--rule);flex-wrap:wrap}
+button.play{font-family:var(--mono);font-size:.78rem;background:var(--ink);
+ color:var(--paper);border:none;padding:.42rem .95rem;border-radius:4px;
+ cursor:pointer;min-width:78px}
+button.play:hover{opacity:.85}
+button.play:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.vctl input[type=range]{flex:1;min-width:150px;accent-color:var(--accent)}
+.readout{font-family:var(--mono);font-size:.77rem;color:var(--muted);white-space:nowrap}
+.readout b{color:var(--ink)}
+.legend{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:.75rem;color:var(--muted);
+ padding:.55rem 1rem;border-top:1px solid var(--rule);font-family:var(--mono)}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:.35rem;
+ vertical-align:middle}
 @media (max-width:640px){.wrap{padding:0 16px 70px}}
 """
 
 
-def build(rank, queue, prank, mds, refs, figs, meta) -> str:
+MOVIE_JS_TMPL = """
+<script>__THREEDMOL__</script>
+<script>
+// The UMD footer only guarantees the global as 3Dmol; $3Dmol is the conventional
+// alias and is not exported by every build. Bind whichever exists.
+const M3D = window.$3Dmol || window['3Dmol'];
+const VIEWERS = [];
+function mkViewer(k){
+  const el = document.getElementById('gl'+k);
+  const pdb = document.getElementById('pdb'+k);
+  if(!el || !pdb || !M3D) return null;
+  const v = M3D.createViewer(el, {backgroundAlpha: 0});
+  v.addModelsAsFrames(pdb.textContent, 'pdb');
+  const paint = () => {
+    v.setStyle({}, {cartoon:{color:'#8a9099', opacity:0.55}});
+    v.setStyle({resn:'MOL'}, {stick:{radius:0.18, colorscheme:'yellowCarbon'}});
+    v.addStyle({resi:63, atom:'SG'}, {sphere:{radius:0.7, color:'#e8c14a'}});
+  };
+  // The surface is rebuilt every frame: the fold barely moves once fitted on
+  // backbone, but the sidechains lining the pocket do, and a still surface
+  // would quietly misreport the pocket the ligand is sitting in.
+  const surf = () => {
+    v.removeAllSurfaces();
+    v.addSurface(M3D.SurfaceType.VDW,
+      {opacity:0.62, colorscheme:{prop:'b', gradient:new M3D.Gradient.RWB(-1,1)}},
+      {resn:'MOL', invert:true});
+  };
+  const show = (i) => {
+    const r = v.setFrame(i);
+    const after = () => { paint(); surf(); v.render(); };
+    if (r && typeof r.then === 'function') r.then(after); else after();
+    document.querySelector('.tns[data-v="'+k+'"]').textContent = i;
+    const d = (window.MOVDATA[k]||[])[i];
+    document.querySelector('.dsg[data-v="'+k+'"]').textContent =
+      (d===undefined||d!==d) ? '—' : d.toFixed(1);
+    document.querySelector('input[data-v="'+k+'"]').value = i;
+  };
+  paint(); v.zoomTo({resn:'MOL'}); v.zoom(0.4); show(0);
+  return {v, show, frame:0, timer:null, n:(window.MOVDATA[k]||[]).length};
+}
+function boot(){
+  const n = (window.MOVDATA || []).length;
+  for (let k = 0; k < n; k++) {
+    const s = mkViewer(k); if(!s) { continue; } VIEWERS[k] = s;
+    const btn = document.querySelector('button.play[data-v="'+k+'"]');
+    const rng = document.querySelector('input[data-v="'+k+'"]');
+    const step = () => { s.frame = (s.frame+1) % s.n; s.show(s.frame);
+      if (s.timer) s.timer = setTimeout(step, 140); };
+    btn.addEventListener('click', () => {
+      if (s.timer) { clearTimeout(s.timer); s.timer=null; btn.innerHTML='&#9654; Play'; }
+      else { btn.innerHTML='&#10074;&#10074; Pause'; s.timer = setTimeout(step, 60); }
+    });
+    rng.addEventListener('input', e => {
+      if (s.timer) { clearTimeout(s.timer); s.timer=null; btn.innerHTML='&#9654; Play'; }
+      s.frame = +e.target.value; s.show(s.frame);
+    });
+  }
+}
+// Wait for LAYOUT, not just DOM. On DOMContentLoaded the .glbox can still
+// measure 0x0 while fonts and images settle, and 3Dmol caches that size --
+// which is why the second viewer came up blank while the first came up huge.
+function ready(){
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    boot();
+    VIEWERS.forEach(s => { if (s) { s.v.resize(); s.show(s.frame); } });
+  }));
+}
+if (document.readyState === 'complete') ready();
+else window.addEventListener('load', ready);
+window.addEventListener('resize', () => VIEWERS.forEach(s => { if (s) s.v.resize(); }));
+</script>
+"""
+
+
+def build(rank, queue, prank, mds, refs, figs, meta, movies) -> str:
     def gpill(v):
         cls = {"pass": "pass", "fail": "fail"}.get(v, "pend")
         return f'<span class="pill {cls}">{v.upper()}</span>'
@@ -334,6 +470,34 @@ def build(rank, queue, prank, mds, refs, figs, meta) -> str:
                          f"<th>enrich (2.0.0)</th><th>consensus</th><th>QED</th></tr></thead>"
                          f"<tbody>{rows}</tbody></table></div>")
 
+    movies_html = ""
+    for k, (name, pdb, dist) in enumerate(movies):
+        movies_html += f"""
+<h3>{name} — 100 ns, 1 ns per frame</h3>
+<div class="viewer" id="v{k}">
+  <div class="glbox" id="gl{k}"></div>
+  <div class="vctl">
+    <button class="play" type="button" data-v="{k}">&#9654; Play</button>
+    <input type="range" data-v="{k}" min="0" max="{len(dist)-1}" value="0" step="1"
+           aria-label="{name} trajectory frame">
+    <span class="readout"><b class="tns" data-v="{k}">0</b> ns &nbsp;·&nbsp;
+      ligand&nbsp;&rarr;&nbsp;Cys113 <b class="dsg" data-v="{k}">&mdash;</b>&nbsp;&#8491;</span>
+  </div>
+  <div class="legend">
+    <span><span class="sw" style="background:#2f6fb5"></span>basic</span>
+    <span><span class="sw" style="background:#efece7;outline:1px solid #b9b3aa"></span>neutral</span>
+    <span><span class="sw" style="background:#c0392b"></span>acidic</span>
+    <span><span class="sw" style="background:#e8c14a"></span>Cys113 SG</span>
+    <span>surface coloured by formal charge · fitted on backbone</span>
+  </div>
+</div>
+<script type="text/plain" id="pdb{k}">{pdb}</script>
+<script>window.MOVDATA=(window.MOVDATA||[]);window.MOVDATA[{k}]={json.dumps(dist)};</script>
+"""
+
+    movie_js = (MOVIE_JS_TMPL.replace("__THREEDMOL__", THREEDMOL.read_text())
+                if movies and THREEDMOL.is_file() else "")
+
     ref_rows = "".join(
         f"<tr class='ref'><td>{r.ident.replace('ref_','')}</td>"
         f"<td>{r.warhead_class}</td><td class='n'>{r.n_in_range}</td>"
@@ -384,6 +548,7 @@ def build(rank, queue, prank, mds, refs, figs, meta) -> str:
     Michael-acceptor classes are a conjugated polyene looking like an acceptor, not a
     claim that it alkylates Cys113.</p>
   </div>
+  {movies_html}
   <div class="callout warn">
     <div class="ctitle">Two caveats that travel with ATRA</div>
     <p><strong>Protonation.</strong> Run as the neutral acid, as the reference file
@@ -428,7 +593,8 @@ def build(rank, queue, prank, mds, refs, figs, meta) -> str:
     <code>docs/elevation_example.md</code>
   </div>
 </section>
-</div>"""
+</div>
+{movie_js}"""
 
 
 def main() -> None:
@@ -481,7 +647,13 @@ def main() -> None:
             "ranked": int(rank.passes.sum()) if "passes" in rank else 0,
             "queued": len(queue), "elevated": len(mds),
             "when": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")}
-    html = build(rank, queue, prank, mds, refs, figs, meta)
+    movies = []
+    for nm, disp in (("ref_Sulfopin", "Sulfopin"), ("ref_ATRA", "ATRA")):
+        mp = movie_payload(nm)
+        if mp:
+            movies.append((disp, mp[0], mp[1]))
+            log.info("movie: %s, %d frames", disp, len(mp[1]))
+    html = build(rank, queue, prank, mds, refs, figs, meta, movies)
     Path(args.out).write_text(html)
     log.info("wrote %s (%.1f KB) — %d elevated, %d ranked, %d screened",
              args.out, len(html) / 1e3, len(mds), meta["ranked"], screened)
