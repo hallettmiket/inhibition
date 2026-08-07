@@ -251,11 +251,23 @@ never sees our poses, so it is the only orthogonal signal we have.
 
 **Considerations.**
 
-- **It cannot model the covalent bond.** Every prediction is the *non-covalent*
-  pre-reaction complex. It can never speak to whether a molecule reacts. Hard
-  limit.
+- **Non-covalent is the right register, not a limitation — @tt8804, 2026-08-07.**
+  I repeatedly flagged "Boltz-2 cannot model the covalent bond" as though it were
+  a defect specific to co-folding. It is not, and singling it out was wrong.
+  **The entire pipeline through MD is non-covalent**: the docking is
+  reactive-*biased* (`rec.reactive_config`) but produces non-covalent poses, the
+  NAC criterion is a geometric proxy measured on those poses, and
+  `md_residence_3ikd` parameterises through `mmgbsa_noncovalent`. The covalent
+  topology has existed since 2.0.0 and has never been run. **Covalent chemistry
+  enters at FEP, on the few candidates that earn it.** Boltz-2 predicting the
+  pre-reaction complex is therefore predicting exactly the same thing every other
+  stage predicts — it is in register with the pipeline, not short of it.
+- **The inferential trap is real but general, and belongs to the whole funnel.**
+  "It binds, therefore it reacts" is unsupported — by co-folding, by our docking,
+  by the NAC geometry and by 100 ns residence alike. That caveat attaches to the
+  *stage*, not to any one tool, and it is discharged at FEP.
 - **Its affinity head is largely pose-independent** (established in 2.1.0). Use
-  structure and confidence; never affinity.
+  structure and confidence; never affinity. *This* is a Boltz-2-specific limit.
 - **The MSA cache is the premise, not an optimisation.** One MSA per construct
   makes a 300-molecule triage a forward pass each. Without it the cost argument
   collapses.

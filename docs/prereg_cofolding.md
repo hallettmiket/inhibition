@@ -121,10 +121,21 @@ the model reports). **Secondary:** complex pLDDT and interface PAE.
 
 ## What this cannot settle, whatever it returns
 
-- **Co-folding does not model the covalent bond.** Every prediction is of the
-  *non-covalent* pre-reaction complex. It can never speak to whether a molecule
-  reacts — only to whether it sits in the pocket. That is a hard limit, not a
-  caveat to be worked around.
+- ~~**Co-folding does not model the covalent bond.**~~ **Withdrawn as written —
+  @tt8804, 2026-08-07.** Listed here as a limit *specific to co-folding*. It is
+  not. **Every stage of this pipeline through MD is non-covalent**: the docking
+  is reactive-*biased* (`rec.reactive_config`) but yields non-covalent poses, the
+  NAC criterion is a geometric proxy computed on them, and `md_residence_3ikd`
+  parameterises through `mmgbsa_noncovalent` — the covalent topology has existed
+  since 2.0.0 and has never been run. Covalent chemistry enters at **FEP**, on
+  the few candidates that earn it. Co-folding predicting the pre-reaction complex
+  is therefore *in register* with everything around it, and flagging it here
+  implied a deficit that does not exist.
+
+  What survives is a **stage-level** caveat belonging to the whole funnel: "it
+  binds, therefore it reacts" is unsupported by co-folding, by our docking, by
+  the NAC geometry and by 100 ns residence alike. It is discharged at FEP, not by
+  any tool in this test.
 - **n = 10 held out** supports only large effects. A null means "not
   demonstrated at n = 10".
 - **T4 will have n ≤ 9** and mixes generated molecules with two references. No
