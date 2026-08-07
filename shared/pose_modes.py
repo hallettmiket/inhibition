@@ -199,9 +199,12 @@ def identity(feat: np.ndarray, labels: np.ndarray, mode: int) -> dict:
             "centroid_z": float(c[2]),
             "dir_x": float(d[0]), "dir_y": float(d[1]), "dir_z": float(d[2]),
             "spread_a": float(np.linalg.norm(m[:, :3] - c, axis=1).mean()),
-            # How tightly the mode agrees on orientation. A mode that is compact
-            # in space but incoherent in direction is not one binding mode.
-            "dir_coherence": float(nd / len(m))}
+            # How tightly the mode agrees on orientation: the resultant length
+            # of the mean of unit vectors, 1.0 = perfectly aligned, 0 = uniformly
+            # scattered. NOT divided by n -- `nd` is already the norm of a MEAN,
+            # so dividing again drove every mode to ~0.00 and made the field
+            # look measured while carrying nothing.
+            "dir_coherence": float(nd)}
 
 
 def match_modes(id_a: dict, id_b: dict, tol_a: float = 2.0,

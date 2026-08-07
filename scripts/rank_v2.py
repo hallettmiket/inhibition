@@ -188,38 +188,10 @@ def topn_viable(poses: pd.DataFrame, n: int = TOP_N) -> pd.DataFrame:
 WEIGHTS = {"anchor_quality": 0.5, "topn_viable_frac": 0.5}
 
 
-def anchor_quality(distance: float, angle: float, mechanism: str) -> float:
-    """Continuous 0-1 quality of ONE pose's anchoring geometry.
-
-    Enrichment asks a binary question -- is this pose inside the window -- and
-    then counts. That throws away most of what was measured: a pose at 3.5 A and
-    2 deg off ideal and a pose at 4.19 A and 29.9 deg both score 1, and a pose
-    at 4.21 A scores 0. The window is a decision boundary, not a measurement.
-
-    This is @tt8804's "enrichment modified with the concept of anchoring": score
-    HOW WELL the atom is anchored to the residue rather than whether it clears a
-    threshold. Distance and angle each contribute a factor that is 1.0 at the
-    ideal and decays smoothly, and they MULTIPLY -- a pose at perfect distance
-    and hopeless angle is not half-good, it is not reaction-competent, and a sum
-    would let one term hide the other.
-
-    Ideal geometry per mechanism, from the criterion's own constants:
-      SN2            180 deg (backside, anti to the leaving group)
-      perpendicular    0 deg off the sp2 plane normal
-    Distance ideal is the middle of the near-attack window.
-    """
-    if distance != distance or angle != angle:
-        return float("nan")
-    lo, hi = nac.NAC_DIST_MIN, nac.NAC_DIST_MAX
-    mid, half = (lo + hi) / 2.0, (hi - lo) / 2.0
-    d_term = max(0.0, 1.0 - abs(distance - mid) / (2.0 * half))
-
-    if nac.MECHANISMS.get(mechanism) == "anti_to_leaving_group":
-        ideal, tol = 180.0, 180.0 - nac.SN2_ANGLE_MIN     # 30 deg
-    else:
-        ideal, tol = 0.0, nac.PERPENDICULAR_MAX_OFF_NORMAL  # 30 deg
-    a_term = max(0.0, 1.0 - abs(angle - ideal) / (2.0 * tol))
-    return d_term * a_term
+#: Moved to `shared.nac_criterion` so `nac_screen_v2` can pick a mode's
+#: representative with the SAME function the ranking scores with. Re-exported
+#: here under its original name; every existing caller is unaffected.
+anchor_quality = nac.anchor_quality
 
 
 def composite(poses: pd.DataFrame, n: int = TOP_N) -> pd.DataFrame:

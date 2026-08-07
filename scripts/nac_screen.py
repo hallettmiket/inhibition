@@ -58,6 +58,7 @@ import pandas as pd
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+from shared import ionisation as ion          # noqa: E402
 from shared import nac_criterion as nac       # noqa: E402
 from shared import outputs as sout            # noqa: E402
 
@@ -149,9 +150,38 @@ def prepare_ligand(cand: Candidate, path: Path) -> list[Path]:
     from meeko import MoleculePreparation, PDBQTWriterLegacy
     RDLogger.DisableLog("rdApp.*")
 
-    mol = largest_fragment(cand.smiles)
+    # PROTONATE AT pH 7.4 BEFORE ANYTHING ELSE (D0074).
+    #
+    # The reactive path used to dock the SMILES as drawn while the non-covalent
+    # path ran `obabel -p 7.4`. The two arms therefore docked DIFFERENT SPECIES
+    # of the same molecule, and `charge_ph74` described only one of them --
+    # which is how three of five 100 ns launches came to be refused by
+    # md_residence's charge guard. It affects 594 of 1,782 T_4 molecules (33.3%)
+    # and 331 of 5,370 T_3.
+    #
+    # `ionisation.protonate` is the SAME obabel call the non-covalent arm makes,
+    # reused rather than reimplemented: a second protonation path is exactly how
+    # the two arms diverged in the first place.
+    smiles = cand.smiles
+    got = ion.protonate({cand.ident: smiles})
+    if cand.ident not in got:
+        # Never fall through to the unprotonated species silently. That is the
+        # defect D0074 exists to close, and it yields a perfectly healthy pose
+        # of the wrong molecule.
+        raise ValueError(f"{cand.ident}: obabel returned no pH 7.4 structure")
+    smiles = got[cand.ident]
+
+    mol = largest_fragment(smiles)
     if mol is None:
-        raise ValueError(f"unparseable SMILES for {cand.ident}")
+        raise ValueError(f"unparseable pH 7.4 SMILES for {cand.ident}: {smiles!r}")
+
+    # The warhead must survive protonation. It normally does -- warheads are not
+    # titratable -- but an imidazole becoming imidazolium changes how RDKit
+    # perceives the ring, and a SMARTS that quietly stopped matching would read
+    # as "this molecule has no reactive centre" rather than as an error.
+    if not mol.HasSubstructMatch(Chem.MolFromSmarts(cand.reactive_smarts)):
+        raise ValueError(f"{cand.ident}: reactive SMARTS no longer matches after "
+                         f"pH 7.4 protonation ({smiles!r})")
 
     mol = Chem.AddHs(mol)
     if AllChem.EmbedMolecule(mol, randomSeed=0xC0FFEE) != 0:
@@ -263,7 +293,19 @@ def _reactive_xyz(dlg: Path) -> np.ndarray:
 
 
 def measure_dlg(dlg: Path, cand: Candidate) -> list[nac.NACResult]:
-    """Rebuild the ligand from the docking output and score every pose.
+    """Rebuild the ligand from the docking output and score every pose."""
+    mol, match = rebuild_and_match(dlg, cand)
+    return nac.measure_poses(mol, match, cand.mechanism, sg_position(dlg))
+
+
+def rebuild_and_match(dlg: Path, cand: Candidate):
+    """(mol with every pose as a conformer, the reactive SMARTS match).
+
+    SPLIT OUT SO THERE IS ONE ANSWER TO "WHICH ATOM REACTED". `nac_criterion`
+    needs it to measure the approach and `pose_modes` needs it to cluster on the
+    reactive atom's position. Locating it twice is how those two would come to
+    disagree about the same pose -- and the NAC angle and the mode assignment
+    would then describe different atoms while both looking perfectly sensible.
 
     Rebuilding via meeko preserves atom ordering and bonding, so the SMARTS
     match addresses the same atoms the conformers hold. Reading coordinates by
@@ -322,7 +364,7 @@ def measure_dlg(dlg: Path, cand: Candidate) -> list[nac.NACResult]:
                 if abs(float(normals[0] @ other)) < 0.98:      # ~11 degrees
                     raise ValueError(f"{cand.ident}: matches at one reactive atom "
                                      f"define non-parallel planes")
-    return nac.measure_poses(mol, match, cand.mechanism, sg_position(dlg))
+    return mol, match
 
 
 # --------------------------------------------------------------------------
