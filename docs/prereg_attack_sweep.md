@@ -88,6 +88,69 @@ may not survive a cohort with more range.
 | **T3 separates cleanly** | Gate on starting geometry FIRST, for free, before any simulation |
 | **T4 diverge, visits wins** | Switch the observable to visits and re-derive every attack number on it |
 
+## The countervailing risk — @tt8804, and it changed the build
+
+> *"be careful that we are not prioritizing attack geometry over realistic poses.
+> we are going through a lot of trouble to translate consensus poses to more
+> supported ones using much larger tools than gnina."*
+
+The concern is that gating on attack geometry selects poses that *point the
+warhead well* rather than poses that are *where the molecule actually sits* —
+undoing the work Boltz-2 and mode consensus do.
+
+**Tested, and the answer is more specific than the worry.** Across the whole pose
+population, higher `anchor_quality` correlates with being **closer** to both
+references — median ρ = **−0.143** against Boltz-2's independent prediction and
+**−0.135** against the crystal, over 15 molecules (negative = closer). Anchoring
+is not systematically selecting unrealistic poses.
+
+**But its ARGMAX is.** Picking one pose out of the dominant mode:
+
+| rule | within 2 Å of crystal |
+|---|---:|
+| ceiling — best pose in the mode | 93.3% |
+| **medoid of the top-25% by anchoring** | **33.3%** |
+| medoid of the whole mode | 26.7% |
+| **argmax anchoring** | **6.7%** |
+
+The maximum of a noisy score is an outlier, typically a strained pose that
+happens to present the warhead. **Narrow on anchoring, then take a typical member
+of what survives** — that beats either alone, and it is now what the screen does.
+
+`n = 15`, so 33.3% against 26.7% is one molecule and the quartile width is
+untuned. What is *not* one molecule is 6.7% against 26.7%: **argmax is the thing
+to stop doing**, and it was what I had built.
+
+**The ordering the concern implies is now the architecture.** Realism first,
+attack geometry second, and never the reverse:
+
+```
+mode consensus          where the molecule actually sits        (93.3% at ceiling)
+   ↓
+Boltz-2 confirmation    independent structural support          (67% vs 27%)
+   ↓
+PoseBusters            physical validity, still unused
+   ↓
+attack geometry        RANKS what survives; never selects it
+```
+
+Attack geometry is the last term applied, never the first, and it ranks within a
+set already established as realistic. **T5 below tests that this ordering is the
+right one rather than assuming it.**
+
+### T5 — does the realism-first ordering beat attack-geometry-first?
+
+On the fresh cohort, rank the same molecules two ways: (a) realism gates then
+attack ranking, (b) attack ranking alone. **Readout:** which ordering better
+predicts 100 ns attack-readiness, and whether (b) elevates poses that PoseBusters
+or Boltz-2 disagree with.
+
+| observation | conclusion |
+|---|---|
+| (a) ≥ (b) | ordering confirmed; keep realism as a gate, attack as a rank |
+| (b) > (a) | the realism gates are costing us; re-examine what they reject |
+| (b) elevates PoseBusters failures | attack-geometry-first is selecting artefacts, exactly as @tt8804 warned |
+
 ## What this cannot settle
 
 - **n = 8–10.** Supports large effects only. A null means "not demonstrated at

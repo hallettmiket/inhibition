@@ -232,6 +232,7 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         # was and which put its use before its definition.
         anchor = np.array([nac.anchor_quality(r.distance, r.angle, cand.mechanism)
                            for r in res])
+        dmat = pmod.distances(feat)
 
         # ---- one aggregate row PER MODE -----------------------------------
         aggs = []
@@ -277,23 +278,42 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         # The pose most central to its own mode, not its lowest-energy member.
         POSE_DIR.mkdir(parents=True, exist_ok=True)
         sdf = POSE_DIR / f"{cand.ident}.sdf"
-        # THE REPRESENTATIVE IS THE MODE'S BEST-ANCHORED POSE, NOT ITS MEDOID.
+        # THE REPRESENTATIVE IS A TYPICAL POSE FROM THE WELL-ANCHORED QUARTILE,
+        # NOT THE BEST-ANCHORED ONE.
         #
-        # The medoid is the most typical member, which is not the same as the
-        # best one, and the difference is not small: on 6VAJ the medoid sits
-        # 3.30 A from the crystal pose while the mode contains one at 0.97 A.
-        # Elevating the medoid would hand MD a mediocre pose from the right
-        # mode and then blame the molecule.
+        # @tt8804 warned against prioritising attack geometry over realistic
+        # poses. Measured on 15 crystal complexes, picking one pose out of the
+        # dominant mode:
         #
-        # This is @tt8804's formulation exactly -- "rank the poses by how well
-        # anchored they are weighted by the consensus score of that pose":
-        # anchoring picks WITHIN a mode, consensus (mode population) weights
-        # BETWEEN modes. Energy appears in neither.
+        #     ceiling: best pose in the mode              93.3%
+        #     medoid of the top-25% by anchoring          33.3%   <- adopted
+        #     medoid of the whole mode                    26.7%
+        #     argmax anchoring                             6.7%   <- was here
+        #
+        # Anchoring is informative -- across the whole pose population it
+        # correlates with being CLOSER to both the crystal and Boltz-2's
+        # independent prediction (median rho -0.14 for each). Its ARGMAX is not:
+        # the maximum of a noisy score is an outlier, typically a strained pose
+        # that happens to point the warhead well. Narrowing on anchoring and then
+        # taking a TYPICAL member of what survives beats either alone.
+        #
+        # n = 15, so 33.3% against 26.7% is one molecule and the quartile width
+        # is not tuned. What is not one molecule is 6.7% against 26.7%: argmax is
+        # the thing to stop doing.
         reps = []
         for k in mode_ids:
             idx = np.flatnonzero(labels == k)
             a = anchor[idx]
-            reps.append(int(idx[0] if np.all(np.isnan(a)) else idx[np.nanargmax(a)]))
+            sub = dmat[np.ix_(idx, idx)]
+            if np.all(np.isnan(a)) or len(idx) < 4:
+                reps.append(int(idx[np.argmin(sub.mean(axis=1))]))
+                continue
+            keep = np.flatnonzero(a >= np.nanpercentile(a, 75))
+            if len(keep) < 2:
+                reps.append(int(idx[np.argmin(sub.mean(axis=1))]))
+                continue
+            s2 = sub[np.ix_(keep, keep)]
+            reps.append(int(idx[keep[np.argmin(s2.mean(axis=1))]]))
         if not sdf.exists():                       # append_only: never overwrite
             write_sdf(mol, reps, sdf, modes=mode_ids)
 
