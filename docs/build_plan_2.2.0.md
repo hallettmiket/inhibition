@@ -331,7 +331,66 @@ Nothing is thrown away on the strength of a number nobody has justified.
 The binary `viable` flag stays in the output for continuity with every earlier
 measurement, but it **stops gating anything**.
 
-### 3.2 Is 200 runs the right number? — being tested, not assumed
+### 3.2 How many poses for 95% coverage? — **answer: ~300. Recommend 500.**
+
+Measured, not assumed. All 15 ground-truth molecules were docked at `--nrun 2000`
+and every pose scored against its crystal structure, which gives each molecule's
+**hit rate** — the fraction of docking runs that land within 2 Å.
+
+| | hit rate | 1 correct pose every |
+|---|---:|---:|
+| 9INN (16 heavy atoms) | 22.30% | 4 runs |
+| 6VAJ / sulfopin (17) | 15.55% | 6 runs |
+| *median of the 15* | *5.70%* | *18 runs* |
+| 7F0M (31) | 1.70% | 59 runs |
+| 9INP (23) | 1.05% | 95 runs |
+
+**Difficulty is driven by molecular size, strongly and exponentially.**
+
+- ρ(heavy atoms, hit rate) = **−0.683**, p = 0.005
+- ρ(rotatable bonds, hit rate) = −0.587, p = 0.021
+- fit: **each additional heavy atom multiplies the hit rate by 0.883** — a 12%
+  penalty per atom, compounding
+- molecule-to-molecule spread at fixed size: ~1.9×
+
+**This is why the crystal benchmark cannot be read off directly.** Those 15 have a
+median of 22 heavy atoms. Our library is bigger: T₃ median 25, **T₄ median 28**,
+90th percentile 34. We sit at the hard end of the fitted range and partly beyond
+it.
+
+Runs needed so a molecule is covered 95% of the time (`n = ln0.05 / ln(1−p)`):
+
+| heavy atoms | predicted hit rate | n for 95% | n if unlucky (−1 sd) |
+|---:|---:|---:|---:|
+| 22 (benchmark median) | 5.79% | 50 | 95 |
+| 25 (T₃ median) | 3.99% | 73 | 139 |
+| **28 (T₄ median)** | **2.75%** | **107** | 202 |
+| 32 | 1.68% | 177 | 333 |
+| 35 | 1.16% | 258 | 484 |
+
+Covering **95% of the pool** means covering the 5th-percentile-hardest molecule,
+not the median: **T₃ needs 227 runs, T₄ needs 258.**
+
+**This agrees with what we observed directly.** Two independent 200-run dockings
+of the 15 both gave 93.3% — just under 95%, exactly where ~250–300 being the right
+number would put them.
+
+| | |
+|---|---|
+| **~300 runs** | the point estimate for 95% coverage of our library |
+| **500 runs — recommended** | margin for an extrapolation fitted on 15 molecules and pushed past its size range. ≈7.5 GPU-h for the library |
+| 2000 runs | reaches 100%, but 10× the cost for the last few percent |
+| 200 runs (today) | **marginally short**, and never justified — inherited |
+
+**Recommend 500.** The library is docked once; the difference between 300 and 500
+is ~3 GPU-hours, and discovering afterwards that 300 was short means docking it
+all again.
+
+**What more sampling does NOT fix.** At 2000 runs the crystal pose was present for
+every molecule — and the energy cut still discarded 60% of them. Sampling raises
+the ceiling; only the keep rule (§1.2) reaches it.
+
+### 3.3 Original convergence question — resolved by the above
 
 Your question about pose counts exposed one nobody had asked: **200 is inherited,
 not justified.** D0068 requires every number to carry the parameter that defines
