@@ -62,6 +62,8 @@ POSES = DATA / "00_outputs/blacksmith/nac_v2_poses"
 FRAMES = {"T3": ("03_t3_reinvent", "D3"), "T4": ("04_t4_combinatorial", "D4")}
 
 COLS = {
+    "weighted_score": "nac2_weighted_score",
+    "anchor_quality": "nac2_anchor_quality",
     "topn_viable_frac": "nac2_topn_viable_frac",
     "enrichment_conditional": "nac2_enrichment_cond",
     "enrichment_joint": "nac2_enrichment_joint",
@@ -81,17 +83,21 @@ def latest(pattern: str, key) -> Path | None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    ap.add_argument("--score", default="weighted_score",
+                    help="which ranking to publish, BY NAME rather than by "
+                         "whichever file is newest")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     wrote = 0
     for tier, (sub, stem) in FRAMES.items():
-        r = latest(str(RANK / f"rank_v2_{tier}_*.csv"),
+        r = latest(str(RANK / f"rank_v2_{tier}_{args.score}_*.csv"),
                    key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
         if r is None:
-            log.warning("%s: no ranking yet, skipping", tier)
+            log.warning("%s: no %s ranking yet, skipping", tier, args.score)
             continue
+        log.info("%s: publishing %s", tier, Path(r).name)
         rk = pd.read_csv(r)
 
         fdir = DATA / sub

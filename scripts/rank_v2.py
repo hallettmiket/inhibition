@@ -374,7 +374,11 @@ def main() -> None:
         if g.empty:
             continue
         ranked = filter_and_rank(g, args.score, cons_col, args.quota, args.floor)
-        dest = OUT.write(f"rank_v2_{tier}", ".csv")
+        # the SCORE goes in the filename. Writing every ordering to
+        # rank_v2_<tier>_<n> and letting consumers take the newest is how the
+        # overnight selection silently used enrichment_joint -- the 2.0.0
+        # quantity -- when the chain had ranked on topn_viable_frac first.
+        dest = OUT.write(f"rank_v2_{tier}_{args.score}", ".csv")
         ranked.sort_values(["warhead_class", "class_rank"]).to_csv(dest, index=False)
         surv = ranked[ranked.passes]
         print(f"\n{'='*76}\n{tier}: {len(ranked)} molecules, {len(surv)} survive "

@@ -85,6 +85,10 @@ RECEPTOR_3IKD = Path(
 RECEPTOR_FOR_POSE_COLUMN = {
     "pose_path": RECEPTOR,           # production docking, 6VAJ
     "nac_pose_path": RECEPTOR_3IKD,  # reactive near-attack docking, 3IKD
+    "nac2_pose_path": RECEPTOR_3IKD, # 2.1.0 screen, 3IKD_ian -- registered here
+                                     # because the fallback below is 6VAJ, and an
+                                     # unregistered column renders every pose 48.6 A
+                                     # from the pocket while looking perfectly fine
 }
 
 

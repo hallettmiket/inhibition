@@ -1866,8 +1866,119 @@ and every raw angle is retained so a window can be redrawn without re-docking.*
                    "same gate at 200 runs. A candidate above that range is not "
                    "thereby better than a known binder — see the intervals.")
 
+def panel_nac2_ranking() -> None:
+    """The 2.1.0 ranking — per warhead class, on the weighted anchoring score.
+
+    A SECOND panel rather than a rewrite of the first, for the same reason the
+    frame carries `nac2_*` beside `nac_*`: the two rankings genuinely disagree
+    (top-10-viable vs the 2.0.0 enrichment ranks at rho = +0.42), so replacing
+    one with the other would move every molecule on screen with no way to see
+    what changed or to go back.
+
+    THERE IS NO GLOBAL TOP-N HERE, DELIBERATELY. D0073 measured a library-wide
+    consensus bar promoting rigid chemistry and demoting flexible chemistry --
+    pass rates ran BDHI 16.6% against chloroacetamide 2.9%, and pass rate is
+    monotone in rotatable-bond count. A merged ordering is therefore a rigidity
+    ranking wearing a geometry label, so the panel shows one list per class and
+    the frame carries no column to sort across them.
+    """
+    st.header("Ranking 2.1.0 — weighted anchoring score, per warhead class")
+    curation_header("Ranking 2.1.0")
+    st.caption("Covalent arms only (T₃, T₄). One ranked list **per warhead "
+               "class** — there is no global top-N by design (D0073).")
+
+    with st.expander("**What the columns mean** — read before comparing any two "
+                     "molecules", expanded=False):
+        st.markdown(r"""
+| column | what it is |
+|---|---|
+| **weighted** | the ranking score: `0.5·anchor_quality + 0.5·top-10 viable`. **Weights are equal and unvalidated** — nothing has yet shown which component predicts anything, so a tuned weight would be fitted to nothing. |
+| **anchor** | how *well* the warhead is anchored to Cys113, scored **continuously**. Distance and angle each give a factor that is 1.0 at ideal and decays, and they **multiply** — a pose at perfect distance and hopeless angle is not half-good. |
+| **top-10 viable** | fraction of the ten *lowest-energy* poses in attack geometry. The metric D0068 argued for. **42.8% of all molecules score zero here** — that is the population the 2.0.0 ranking could not see. |
+| **enrich (2.0.0)** | the old score, recomputed on the same run so the comparison is like-for-like. Ranks against top-10-viable at only ρ = +0.42. |
+| **consensus** | agreement among the top ten poses under **gnina's** ordering. gnina puts a sub-2 Å pose first 26.8% of the time on this receptor against AutoDock's 18.3%. |
+| **in range** | how often the sampler put the warhead within striking distance — the quantity the old joint score was silently multiplying in. |
+
+**None of these has been shown to predict physical stability.** D0071 tested the
+2.0.0 metrics on a pre-registered cohort and found they did not. The same test
+has not been run on these.
+""")
+
+    for key in ("t3", "t4"):
+        df, fname = D.load_frame(key)
+        st.subheader(D.display_name(key))
+        if df is None or "nac2_weighted_score" not in df.columns:
+            st.info(f"no 2.1.0 ranking in this frame ({fname}) — run "
+                    "`scripts/gui_refresh_v2.py`")
+            continue
+        scored = df.dropna(subset=["nac2_weighted_score"])
+        surv = scored[scored.nac2_passes == True] if "nac2_passes" in scored else scored  # noqa: E712
+        st.caption(f"`{fname}` — {len(scored)} scored, **{len(surv)} clear the "
+                   f"within-class consensus filter**")
+
+        surv, _rules = curated(surv, "Ranking 2.1.0", label=D.display_name(key))
+        if surv.empty:
+            st.info("no candidates survive the current curation filter")
+            continue
+
+        for cls in sorted(surv.warhead_class.dropna().unique()):
+            g = surv[surv.warhead_class == cls]
+            top = g.nsmallest(15, "nac2_class_rank").copy()
+            with st.expander(f"**{cls}** — {len(g)} survivors", expanded=True):
+                show = top.rename(columns={
+                    "nac2_class_rank": "rank", "nac2_weighted_score": "weighted",
+                    "nac2_anchor_quality": "anchor",
+                    "nac2_topn_viable_frac": "top-10 viable",
+                    "nac2_enrichment_joint": "enrich (2.0.0)",
+                    "nac2_consensus_gnina": "consensus",
+                    "nac2_frac_in_range": "in range"})
+                cols = [c for c in ("rank", "candidate_id", "weighted", "anchor",
+                                    "top-10 viable", "enrich (2.0.0)", "consensus",
+                                    "in range", "QED", "canonical_smiles")
+                        if c in show.columns]
+                st.dataframe(show[cols].style.format(
+                    {c: "{:.3f}" for c in ("weighted", "anchor", "top-10 viable",
+                                           "enrich (2.0.0)", "consensus",
+                                           "in range", "QED") if c in cols}),
+                    width="stretch", hide_index=True)
+
+        # --- structure + poses, for one molecule at a time -------------------
+        have = surv[surv.nac2_pose_path.notna()] if "nac2_pose_path" in surv else surv.iloc[:0]
+        if have.empty:
+            st.info("No 2.1.0 poses on disk yet.")
+            continue
+        pick = st.selectbox(f"structure and poses — {D.display_name(key)}",
+                            list(have.candidate_id.astype(str)),
+                            key=f"nac2_pick_{key}")
+        row = have[have.candidate_id.astype(str) == pick].iloc[0]
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            try:
+                cls = row.get("warhead_class")
+                png = depict.png(row.canonical_smiles, width=340, height=260,
+                                 highlight_smarts=depict.warhead_smarts(cls))
+                st.image(png, caption=f"{pick} — warhead highlighted")
+            except Exception as exc:                       # noqa: BLE001
+                st.caption(f"2D depiction unavailable: {exc}")
+            st.caption(
+                f"class rank **{int(row.nac2_class_rank)}** in {row.get('warhead_class','?')} "
+                f"· weighted {row.nac2_weighted_score:.3f} "
+                f"· top-10 viable {row.nac2_topn_viable_frac:.2f}")
+        with c2:
+            # The shared viewer, not a second implementation: it resolves the
+            # receptor FROM the pose column, draws the labelled surface and
+            # offers the export. `nac2_pose_path` is registered in
+            # pose3d.RECEPTOR_FOR_POSE_COLUMN, whose fallback is 6VAJ -- an
+            # unregistered column would render every pose 48.6 A from the pocket
+            # and look entirely correct doing it.
+            render_pose_viewer(key, D.display_name(key), have, row,
+                               key=f"nac2view_{key}_{pick}",
+                               pose_column="nac2_pose_path", height=430)
+
+
 PANELS = {
     "Shortlists": panel_candidates,
+    "Ranking 2.1.0": panel_nac2_ranking,
     "Near-attack ranking": panel_nac_ranking,
     "T₂ seed comparison": panel_seed_comparison,
     "Candidate dossier": panel_dossier,

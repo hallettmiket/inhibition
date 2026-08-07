@@ -184,6 +184,10 @@ def main() -> None:
                          "letting downstream take the newest is how an empty T3 "
                          "queue stranded 17 good T4 molecules overnight.")
     ap.add_argument("--per-class", type=int, default=2)
+    ap.add_argument("--score", default="weighted_score",
+                    help="which ranking to select from, BY NAME. Taking the "
+                         "newest file instead is how the overnight run selected "
+                         "off enrichment_joint by accident.")
     ap.add_argument("--classes", nargs="*", default=None,
                     help="restrict to these warhead classes")
     ap.add_argument("--pose-policy", default="best_viable",
@@ -197,10 +201,10 @@ def main() -> None:
     tiers = ["T3", "T4"] if args.tier == "both" else [args.tier]
     frames = []
     for t in tiers:
-        fs = sorted(glob.glob(str(RANK / f"rank_v2_{t}_*.csv")),
+        fs = sorted(glob.glob(str(RANK / f"rank_v2_{t}_{args.score}_*.csv")),
                     key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
         if not fs:
-            log.warning("no ranking for %s under %s", t, RANK)
+            log.warning("no %s ranking for %s under %s", args.score, t, RANK)
             continue
         d = pd.read_csv(fs[-1])
         d["tier"] = t
