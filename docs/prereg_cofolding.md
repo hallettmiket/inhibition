@@ -46,6 +46,24 @@ That is the rare thing that makes this testable rather than arguable.
 quoted, the model's stated training cutoff will be checked and any 2024+ entry
 that turns out to be included will be moved to the contaminated set.
 
+### Cutoff checked — the split survives *(added 2026-08-07, before any prediction)*
+
+**Boltz-2's stated cutoff is 2023-06-01**, deliberately later than the
+2021-09-30 used by AlphaFold 3, Boltz-1, and Chai-1. Deposition dates were then
+read out of the mmCIF files themselves rather than assumed from the PDB codes:
+
+| set | deposition dates | vs 2023-06-01 |
+|---|---|---|
+| the 10 "held out" | 2024-07-08 → 2025-05-27 | **all after** — genuinely excluded |
+| the 5 "in training" | 2019-12-17 → 2021-06-05 | **all before** — genuinely included |
+
+No entry changes sides. The margin is comfortable in both directions: the newest
+control predates the cutoff by two years, the oldest held-out entry postdates it
+by thirteen months. **This test would have been worthless against a model with a
+2021-09-30 cutoff and the later cutoff nearly cost us the benchmark** — had Pin1's
+2022–23 depositions been the ones we were relying on, there would be no held-out
+set at all.
+
 ## Tests, fixed now
 
 ### T1 — held-out pose accuracy *(primary)*

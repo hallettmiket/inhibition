@@ -195,14 +195,31 @@ def saved_pose_to_sdf(pose_sdf: Path, wd: Path, smiles: str,
     # consistent bond orders is a valid molecule — just not this one. It got as
     # far as antechamber's acdoctor ("Weird atomic valence (2) for atom C1")
     # only because acdoctor checks valences that RDKit had been told not to.
-    # Clearing the flag is what makes AddHs mean what it says.
+    #
+    # COUNT THE HYDROGENS BEFORE DELETING THEM, AND RESTATE THE COUNT.
+    #
+    # The first version of this fix cleared `noImplicit` and zeroed
+    # `numExplicitHs`, letting RDKit re-derive the hydrogen count from valence.
+    # That works for carbon and it is wrong for an aromatic nitrogen, where the
+    # hydrogen is not implied by the valence — it is the whole difference
+    # between a pyrrole-type N and a pyridine-type one. Imidazole has one of
+    # each; drop both hydrogens and the ring can no longer be kekulized, so
+    # sanitisation throws and the molecule never reaches MD at all.
+    #
+    # Measured over all 5,790 persisted poses: re-deriving reproduces the pose's
+    # own formula for 94.1% of them and LOSES 339 (5.9%), including the
+    # reference BJP-06-005-3. Restating the observed count reproduces 100.0% and
+    # breaks none of the ones that already worked.
+    n_hydrogens = {a.GetIdx(): sum(1 for nb in a.GetNeighbors()
+                                   if nb.GetAtomicNum() == 1)
+                   for a in pose.GetAtoms() if a.GetAtomicNum() > 1}
     rw = Chem.RWMol(pose)
     for idx in sorted([a.GetIdx() for a in pose.GetAtoms()
                        if a.GetAtomicNum() == 1], reverse=True):
         rw.RemoveAtom(idx)
     for a in rw.GetAtoms():
-        a.SetNoImplicit(False)
-        a.SetNumExplicitHs(0)
+        a.SetNoImplicit(True)
+        a.SetNumExplicitHs(n_hydrogens[a.GetIdx()])
     Chem.SanitizeMol(rw)
     template = Chem.MolFromSmiles(smiles)
     if template is None:
