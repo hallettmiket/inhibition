@@ -65,6 +65,9 @@ def main() -> None:
     ap.add_argument("--gpus", type=int, nargs="+", default=[1, 2, 3, 5])
     ap.add_argument("--production-ps", type=float, default=100000.0)
     ap.add_argument("--queue", default=None)
+    ap.add_argument("--winners", default=None,
+                    help="pose_rank_bpmd CSV; the elevated pose is taken from "
+                         "its is_winner rows rather than from geometry alone")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -93,6 +96,31 @@ def main() -> None:
                  skipped)
     if ok.empty:
         raise SystemExit("nothing in the queue has a viable pose to start from")
+
+    # The pose to elevate comes from the BPMD pose ranking when it exists.
+    # Geometry says a pose COULD react; BPMD says it is physically there, and
+    # spending 4 GPU-hours on the former when the latter is available is the
+    # thing this stage exists to prevent.
+    if args.winners:
+        w = pd.read_csv(args.winners)
+        w = w[w.get("is_winner", False) == True]                 # noqa: E712
+        if len(w):
+            best = w.set_index("ident").pose_rank.to_dict()
+            occ = w.set_index("ident").get("frac_in_window", pd.Series(dtype=float)).to_dict()
+            before = ok.pose_rank.copy()
+            ok["pose_rank"] = ok.ident.map(best).fillna(ok.pose_rank)
+            ok["bpmd_occupancy"] = ok.ident.map(occ)
+            moved = int((before != ok.pose_rank).sum())
+            log.info("BPMD chose a different pose for %d of %d molecules",
+                     moved, len(ok))
+            # a molecule with no BPMD winner has not been pose-ranked; say so
+            missing = sorted(set(ok.ident) - set(best))
+            if missing:
+                log.warning("no BPMD winner for %s — elevating the "
+                            "geometry-chosen pose", ", ".join(missing[:4]))
+        else:
+            log.warning("%s has no is_winner rows; using geometry-chosen poses",
+                        args.winners)
 
     ok = ok.sort_values(["class_rank", "warhead_class"]).head(min(args.n, len(args.gpus)))
     LOGS.mkdir(parents=True, exist_ok=True)

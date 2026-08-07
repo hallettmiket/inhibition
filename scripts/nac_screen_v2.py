@@ -80,11 +80,19 @@ _COORD_TOL = 0.05
 
 
 def write_sdf(mol, order: list[int], dest: Path) -> int:
-    """Write the top-`order` conformers to one SDF, in that order."""
+    """Write the top-`order` conformers to one SDF, stamping `pose_rank`.
+
+    The rank is written as a PROPERTY, not left to file position, because
+    `bpmd_run.read_pose` selects a pose by its own `pose_rank` and refuses to
+    take one by index -- a pose identified by where it sits in a file is a pose
+    that a re-sort silently redefines.
+    """
     from rdkit import Chem
     w = Chem.SDWriter(str(dest))
     n = 0
-    for i in order:
+    for rank, i in enumerate(order, 1):
+        mol.SetProp("pose_rank", str(rank))
+        mol.SetProp("energy_rank", str(rank))
         w.write(mol, confId=i)
         n += 1
     w.close()

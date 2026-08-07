@@ -71,6 +71,19 @@ for tier in T4 T3; do
   say "select $tier exit $? -> $LOGS/select_$tier.log"
 done
 
+# ------------------------------------------------- 4b. pose ranking by BPMD
+# Ranking molecules and ranking a molecule's own poses are DIFFERENT problems.
+# Stage 2 chose the molecules; this chooses which of a molecule's poses is real
+# enough to spend 4 GPU-hours on. ~1 GPU-hour to protect a 4 GPU-hour run.
+say "ranking poses within each selected molecule (BPMD)"
+# poses written before the writer stamped pose_rank cannot be addressed by rank
+nice -n 19 $PY scripts/backfill_pose_rank.py > "$LOGS/backfill.log" 2>&1
+nice -n 19 $PY scripts/rank_poses_bpmd.py --max-poses 3 --replicates 2 \
+  --production-ps 3000 --gpu "${GPUS[0]}" > "$LOGS/poserank.log" 2>&1
+say "pose ranking exit $? -> $LOGS/poserank.log"
+WINNERS=$(ls -t /data/lab_vm/append_only/inhibition/00_outputs/blacksmith/pose_rank_bpmd/pose_rank_*.csv 2>/dev/null | head -1)
+say "winners: ${WINNERS:-none}"
+
 # ---------------------------------------------------------------- 5. elevation
 # 100 ns is ~4 GPU-hours per molecule, so only as many as there are cards, and
 # ONE replicate. That is a screen, not a residence measurement -- a single
@@ -78,6 +91,7 @@ done
 say "launching elevation on the queue"
 nice -n 19 $PY scripts/elevate_queue.py --n "${#MDGPUS[@]}" \
   --gpus "${MDGPUS[@]}" --production-ps 100000 \
+  ${WINNERS:+--winners "$WINNERS"} \
   > "$LOGS/elevate.log" 2>&1
 say "elevation launcher exit $? -> $LOGS/elevate.log"
 

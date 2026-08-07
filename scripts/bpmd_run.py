@@ -173,7 +173,8 @@ def candidate_index(with_positives: bool = True) -> dict[str, ns.Candidate]:
 
 
 def resolve_pose(cand: ns.Candidate, *, nrun: int, gpu: str,
-                 allow_redock: bool) -> tuple[Path, str]:
+                 allow_redock: bool, sdf: Path | None = None
+                 ) -> tuple[Path, str]:
     """The SDF BPMD starts from — preferring the pose the score was computed from.
 
     `export_nac_poses` already wrote the shortlists' poses under the SAME
@@ -183,6 +184,10 @@ def resolve_pose(cand: ns.Candidate, *, nrun: int, gpu: str,
     over T_3/T_4 shortlists only — it is re-docked through `export_nac_poses`'s
     own function rather than a second implementation of it.
     """
+    if sdf is not None:
+        if not Path(sdf).is_file():
+            raise BPMDRunError(f"{cand.ident}: pose file {sdf} does not exist")
+        return Path(sdf), "explicit"
     p = POSES / f"{cand.ident}.sdf"
     if p.is_file():
         return p, "exported"
@@ -576,18 +581,23 @@ def run_replicate(cand_id: str, src: Path, md_wd: Path, plumed_txt: str,
                                    .get("ns_per_day"))}
 
 
-def prepare_pose(cand: ns.Candidate, *, nrun: int, gpu: str, allow_redock: bool
-                 ) -> dict:
+def prepare_pose(cand: ns.Candidate, *, nrun: int, gpu: str, allow_redock: bool,
+                 pose_rank: int = 1, sdf: Path | None = None) -> dict:
     """Everything up to the first replicate: pose, parameters, solvation, CV atoms.
 
     Solvation happens ONCE per pose and is shared by every replicate, so the
     replicates differ only in their velocity seed — which is what makes them
     replicates of one system rather than k loosely related simulations.
     """
-    sdf, source = resolve_pose(cand, nrun=nrun, gpu=gpu, allow_redock=allow_redock)
-    mol, props = read_pose(sdf)
+    sdf, source = resolve_pose(cand, nrun=nrun, gpu=gpu,
+                               allow_redock=allow_redock, sdf=sdf)
+    mol, props = read_pose(sdf, pose_rank)
 
-    wd = WORK / cand.ident.replace(":", "_")
+    # Each pose rank gets its OWN workdir. Sharing one would let pose 3's
+    # solvated system be reused for pose 1 by the resume logic, and the run
+    # would look complete while measuring the wrong pose.
+    stem = cand.ident.replace(":", "_")
+    wd = WORK / (stem if pose_rank == 1 else f"{stem}__p{pose_rank}")
     md_wd = wd / "md"
     cyx_index, _ = build_workdir(cand, mol, wd)
     if not (md_wd / "sys.gro").is_file():
@@ -630,14 +640,16 @@ def prepare_pose(cand: ns.Candidate, *, nrun: int, gpu: str, allow_redock: bool
 def run_pose(cand: ns.Candidate, *, replicates: int, production_ps: float,
              gpu: int, threads: int, nrun: int, dock_gpu: str,
              allow_redock: bool, on_row,
-             reuse_equilibration: bool = False) -> list[dict]:
+             reuse_equilibration: bool = False,
+             pose_rank: int = 1, sdf: Path | None = None) -> list[dict]:
     """`replicates` replicates of one pose. Every replicate produces a row."""
     base = {"ident": cand.ident, "warhead_class": cand.warhead_class,
             "mechanism": cand.mechanism, "approach": cand.label,
-            "production_ps": production_ps}
+            "production_ps": production_ps, "pose_rank": pose_rank}
     try:
         prep = prepare_pose(cand, nrun=nrun, gpu=dock_gpu,
-                            allow_redock=allow_redock)
+                            allow_redock=allow_redock,
+                            pose_rank=pose_rank, sdf=sdf)
     except Exception as exc:                              # noqa: BLE001
         # A pose that could not be SET UP is recorded once, for every replicate
         # it owed, so the shortfall is visible in the same table as the results.

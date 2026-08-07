@@ -163,6 +163,64 @@ def topn_viable(poses: pd.DataFrame, n: int = TOP_N) -> pd.DataFrame:
     return out
 
 
+#: Weights for the composite molecule score. EQUAL AND UNVALIDATED, on purpose:
+#: @tt8804 asked to keep them equal for now and revisit. Nothing has yet shown
+#: which component predicts anything, so a tuned weight would be fitted to
+#: nothing. They are named and exported so the sensitivity sweep is one edit.
+WEIGHTS = {"anchor_quality": 0.5, "topn_viable_frac": 0.5}
+
+
+def anchor_quality(distance: float, angle: float, mechanism: str) -> float:
+    """Continuous 0-1 quality of ONE pose's anchoring geometry.
+
+    Enrichment asks a binary question -- is this pose inside the window -- and
+    then counts. That throws away most of what was measured: a pose at 3.5 A and
+    2 deg off ideal and a pose at 4.19 A and 29.9 deg both score 1, and a pose
+    at 4.21 A scores 0. The window is a decision boundary, not a measurement.
+
+    This is @tt8804's "enrichment modified with the concept of anchoring": score
+    HOW WELL the atom is anchored to the residue rather than whether it clears a
+    threshold. Distance and angle each contribute a factor that is 1.0 at the
+    ideal and decays smoothly, and they MULTIPLY -- a pose at perfect distance
+    and hopeless angle is not half-good, it is not reaction-competent, and a sum
+    would let one term hide the other.
+
+    Ideal geometry per mechanism, from the criterion's own constants:
+      SN2            180 deg (backside, anti to the leaving group)
+      perpendicular    0 deg off the sp2 plane normal
+    Distance ideal is the middle of the near-attack window.
+    """
+    if distance != distance or angle != angle:
+        return float("nan")
+    lo, hi = nac.NAC_DIST_MIN, nac.NAC_DIST_MAX
+    mid, half = (lo + hi) / 2.0, (hi - lo) / 2.0
+    d_term = max(0.0, 1.0 - abs(distance - mid) / (2.0 * half))
+
+    if nac.MECHANISMS.get(mechanism) == "anti_to_leaving_group":
+        ideal, tol = 180.0, 180.0 - nac.SN2_ANGLE_MIN     # 30 deg
+    else:
+        ideal, tol = 0.0, nac.PERPENDICULAR_MAX_OFF_NORMAL  # 30 deg
+    a_term = max(0.0, 1.0 - abs(angle - ideal) / (2.0 * tol))
+    return d_term * a_term
+
+
+def composite(poses: pd.DataFrame, n: int = TOP_N) -> pd.DataFrame:
+    """Per-molecule weighted score over its top-N poses by energy.
+
+    `anchor_quality` is averaged over the window rather than maximised: one
+    excellent pose among ten poor ones is a different molecule from ten decent
+    ones, and the max would call them equal.
+    """
+    g = poses[poses.energy_rank <= n].copy()
+    g["anchor_quality"] = [anchor_quality(d, a, m) for d, a, m
+                           in zip(g.distance, g.angle, g.mechanism)]
+    out = g.groupby("ident").agg(
+        anchor_quality=("anchor_quality", "mean"),
+        anchor_quality_best=("anchor_quality", "max"),
+    ).reset_index()
+    return out
+
+
 def consensus_both(agg: pd.DataFrame, poses: pd.DataFrame,
                    smarts: dict) -> pd.DataFrame:
     """Consensus under AutoDock's ordering and under gnina's.
@@ -248,9 +306,9 @@ def filter_and_rank(df: pd.DataFrame, score: str, cons: str,
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("--score", default="enrichment_conditional",
-                    choices=("enrichment_conditional", "enrichment_joint",
-                             "topn_viable_frac"))
+    ap.add_argument("--score", default="weighted_score",
+                    choices=("weighted_score", "enrichment_conditional",
+                             "enrichment_joint", "topn_viable_frac"))
     ap.add_argument("--consensus", default="consensus_gnina",
                     choices=("consensus_gnina", "consensus_autodock"))
     ap.add_argument("--quota", type=float, default=DEFAULT_QUOTA)
@@ -274,6 +332,12 @@ def main() -> None:
         ok = ok.merge(cons, on="ident", how="left")
     if not poses.empty:
         ok = ok.merge(topn_viable(poses), on="ident", how="left")
+        ok = ok.merge(composite(poses), on="ident", how="left")
+        # the weighted score @tt8804 asked for: enrichment's question, scored
+        # continuously via anchoring, combined with how much of the favoured
+        # pose window is reaction-competent at all.
+        ok["weighted_score"] = sum(
+            WEIGHTS[c] * ok[c].fillna(0.0) for c in WEIGHTS if c in ok.columns)
     for c in ("consensus_autodock", "consensus_gnina"):
         if c not in ok.columns:
             ok[c] = np.nan
