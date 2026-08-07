@@ -89,7 +89,9 @@ import nac_rank as nr                             # noqa: E402
 log = logging.getLogger("nac-v2")
 OUT = sout.Topic("blacksmith", "nac_v2")
 POSE_DIR = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v2_poses")
-KEEP_TOP = 20
+#: RETIRED. Every pose is persisted now; this survives only so the docstring
+#: below and #23/#30 can refer to what was removed. Nothing reads it.
+KEEP_TOP = 20        # noqa: F841  (retired -- see nac_screen_v2 docstring)
 _COORD_TOL = 0.05
 
 
@@ -190,7 +192,9 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
 
         # ---- EVERY pose is persisted, not the 20 best-scoring --------------
         # #30: the crystal pose is present in the pose set 93.3% of the time and
-        # survives `KEEP_TOP = 20 by energy` under half the time. The 180 poses
+        # survives `#: RETIRED. Every pose is persisted now; this survives only so the docstring
+#: below and #23/#30 can refer to what was removed. Nothing reads it.
+KEEP_TOP = 20        # noqa: F841  (retired -- see nac_screen_v2 docstring) by energy` under half the time. The 180 poses
         # 2.1.0 discarded are exactly the ones splitting needs.
         rows = pd.DataFrame([{
             "ident": cand.ident, "warhead_class": cand.warhead_class,
@@ -299,7 +303,19 @@ def main() -> None:
     ap.add_argument("--shard", type=int, default=0)
     ap.add_argument("--n-shards", type=int, default=1)
     ap.add_argument("--gpu", default="1")
-    ap.add_argument("--nrun", type=int, default=200)
+    # 500, NOT 200 (@tt8804, 2026-08-07). 200 was inherited and never justified;
+    # D0068 requires a number to carry its defining parameter. Measured on 15
+    # crystal complexes docked at 2000 runs, each molecule's per-run hit rate
+    # falls exponentially with size (rho = -0.683, p = 0.005; each extra heavy
+    # atom multiplies it by 0.883). Covering 95% of the POOL means covering the
+    # 5th-percentile-hardest molecule, which needs 227 runs for T_3 and 258 for
+    # T_4 -- consistent with two independent 200-run dockings both returning
+    # 93.3%, just under 95%. 500 is that estimate plus margin, since the fit is
+    # on 15 molecules extrapolated past its size range and the library is docked
+    # once. Costs ~25% more wall-clock than 200, not 2.5x: AutoDock-GPU runs the
+    # LGA instances concurrently, so ~3.6 s of the per-molecule cost is fixed and
+    # only ~0.0032 s is per-run.
+    ap.add_argument("--nrun", type=int, default=500)
     ap.add_argument("--chunk", type=int, default=100)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--no-gnina", action="store_true")
