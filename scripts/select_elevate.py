@@ -224,6 +224,32 @@ def main() -> None:
     sg = sg_from_receptor()
     log.info("Cys113 SG at %s (from the receptor the MD will use)", np.round(sg, 3))
 
+    # COLLAPSE MODES TO DISTINCT PARENT MOLECULES.
+    #
+    # 2.2.0 ranks BINDING MODES, so a molecule appears once per mode with ident
+    # `<parent>_m<k>`. Taking the top n rows per class would therefore let ONE
+    # molecule occupy several slots -- every row legitimate, and the deliverable
+    # broken, because the chemists synthesise a MOLECULE at one compound a week
+    # and a "top 5" that is really a top 2 is not a top 5.
+    #
+    # A molecule enters ONCE, on its best mode. Its other modes are kept in the
+    # queue's record (`other_modes`) because "this one has a second credible
+    # mode" is worth knowing at elevation -- they simply do not consume slots.
+    #
+    # 2.1.0 frames have no `parent_ident`; there the parent IS the ident, so this
+    # is a no-op for them rather than a special case.
+    if "parent_ident" not in surv.columns:
+        surv["parent_ident"] = surv["ident"]
+    surv["parent_ident"] = surv["parent_ident"].fillna(surv["ident"])
+    n_modes = len(surv)
+    best = (surv.sort_values("class_rank")
+                .groupby("parent_ident", as_index=False)
+                .first())
+    others = (surv.groupby("parent_ident")["ident"]
+                  .apply(lambda x: ";".join(sorted(x))).to_dict())
+    log.info("collapsed %d modes -> %d distinct molecules", n_modes, len(best))
+    surv = best
+
     rows = []
     for (tier, cls), g in surv.groupby(["tier", "warhead_class"]):
         for r in g.nsmallest(args.per_class, "class_rank").itertuples():
@@ -237,12 +263,21 @@ def main() -> None:
                    "QED": getattr(r, "QED", np.nan),
                    "smiles": getattr(r, "smiles", None),
                    "selected_by": "automatic", "selected_reason":
-                   f"rank {int(r.class_rank)} of {len(g)} in {cls}"}
+                   f"rank {int(r.class_rank)} of {len(g)} in {cls}",
+                   "parent_ident": getattr(r, "parent_ident", r.ident),
+                   "other_modes": others.get(
+                       getattr(r, "parent_ident", r.ident), "")}
             rec.update(recheck(r.ident, smarts.get(cls, ""), mech.get(cls, ""),
                                sg, args.pose_policy))
             rows.append(rec)
 
     q = pd.DataFrame(rows).sort_values(["warhead_class", "class_rank"])
+    # The property the collapse exists to guarantee, checked rather than assumed.
+    dupes = q.parent_ident.duplicated().sum()
+    if dupes:
+        raise SystemExit(f"{dupes} duplicate parent molecules in the queue — the "
+                         "collapse did not hold, and a top-n would not be n "
+                         "distinct compounds")
     if args.require_geometry:
         dropped = (~q.geometry_ok).sum()
         q = q[q.geometry_ok]
