@@ -43,6 +43,7 @@ sys.path.insert(0, str(REPO))
 
 from shared import outputs as sout                  # noqa: E402
 from shared import report_theme as rt               # noqa: E402
+from shared import md_movie as mov                  # noqa: E402
 
 log = logging.getLogger("mdprio-report")
 MD = Path("/data/lab_vm/modifiable/inhibition/md_residence_3ikd")
@@ -61,6 +62,16 @@ PREDICTED = {
     "t4_9265b4bff789": (0.108, "acrylamide", 8),
 }
 REF_MEDIAN = 0.163        # crystallographic BPMD median — a yardstick, not a control
+
+
+def nac_lo() -> float:
+    import shared.nac_criterion as nac
+    return nac.NAC_DIST_MIN
+
+
+def nac_hi() -> float:
+    import shared.nac_criterion as nac
+    return nac.NAC_DIST_MAX
 
 
 def _er():
@@ -112,22 +123,105 @@ def residence(s: dict) -> dict:
             "left_at_ns": left, "dissociated": left is not None}
 
 
-def figure(ident: str, s: dict, res: dict, er) -> str:
+def nac_series(cand: str, rep: Path, movie: Path) -> dict | None:
+    """Warhead->Cys113 SG distance AND the near-attack angle, per frame.
+
+    NEITHER IS PRODUCED BY THE RUN. `md_residence` writes rmsd/mindist/numcont
+    only: `mindist` is the closest ligand-protein approach by ANY atom pair,
+    which is not the warhead and not the sulfur. So the two quantities the whole
+    project is about were never plotted for a 100 ns trajectory.
+
+    Computed here from the fitted movie frames, with the reactive atom located by
+    the SAME SMARTS the screen uses and the geometry measured by the SAME
+    `nac_criterion.measure`. A second definition of "the attack angle" is how the
+    plot and the ranking would come to disagree while both looked right.
+
+    Atom correspondence: the MD ligand was parameterised FROM `ligand_pose.sdf`,
+    so the MOL residue's atoms are that file's atoms in order. Hydrogens are
+    stripped from both sides before pairing, because the movie carries heavy
+    atoms only.
+    """
+    from rdkit import Chem, RDLogger
+    RDLogger.DisableLog("rdApp.*")
+    import shared.nac_criterion as nac
+
+    sdf = rep.parent.parent / "ligand_pose.sdf"
+    if not (sdf.is_file() and movie.is_file()):
+        return None
+    mol = Chem.SDMolSupplier(str(sdf), removeHs=False)[0]
+    if mol is None:
+        return None
+    heavy = [a.GetIdx() for a in mol.GetAtoms() if a.GetAtomicNum() > 1]
+    pos = {old: new for new, old in enumerate(heavy)}     # sdf idx -> heavy idx
+
+    wh = pd.read_csv(REPO / "data/reference/warhead_classes_10.csv")
+    match = mech = None
+    for r in wh.itertuples():
+        patt = Chem.MolFromSmarts(r.reactive_atom_smarts)
+        if patt is None:
+            continue
+        ms = mol.GetSubstructMatches(patt)
+        if ms:
+            match, mech = ms[0], r.mechanism
+            break
+    if match is None or any(i not in pos for i in match):
+        log.warning("%s: no reactive SMARTS match on the MD ligand", cand)
+        return None
+
+    # walk the movie: MOL heavy atoms in order, and Cys113's SG
+    frames_lig, frames_sg, cur_lig, sg = [], [], [], None
+    for ln in movie.read_text().splitlines():
+        if ln.startswith("MODEL"):
+            cur_lig, sg = [], None
+        elif ln.startswith("ENDMDL"):
+            if cur_lig and sg is not None:
+                frames_lig.append(np.array(cur_lig)); frames_sg.append(sg)
+        elif ln.startswith(("ATOM", "HETATM")):
+            resn, name = ln[17:20].strip(), ln[12:16].strip()
+            xyz = [float(ln[30:38]), float(ln[38:46]), float(ln[46:54])]
+            if resn == "MOL":
+                cur_lig.append(xyz)
+            elif resn == "CYS" and name == "SG":
+                sg = np.array(xyz)
+    if not frames_lig:
+        return None
+
+    idx = [pos[i] for i in match]
+    dist, ang = [], []
+    for lig, s_ in zip(frames_lig, frames_sg):
+        if max(idx) >= len(lig):
+            return None
+        r = nac.measure(mech, lig[idx], s_)
+        dist.append(r.distance); ang.append(r.angle)
+    t = np.linspace(0.0, 100.0, len(dist))
+    return {"t": t, "dist": np.array(dist), "angle": np.array(ang),
+            "kind": nac.MECHANISMS.get(mech, ""), "mechanism": mech}
+
+
+def figure(ident: str, s: dict, res: dict, er, nacs: dict | None = None) -> str:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     plt.rcParams.update(rt.MPL)
 
-    panels = [k for k in ("rmsd", "dist", "mindist", "contacts") if k in s]
+    panels = [k for k in ("rmsd", "mindist", "contacts") if k in s]
+    extra = ["nac_dist", "nac_angle"] if nacs else []
+    panels = panels[:1] + extra + panels[1:]
     fig, axes = plt.subplots(len(panels), 1, figsize=(9, 2.2 * len(panels)),
                              sharex=True)
     axes = np.atleast_1d(axes)
     titles = {"rmsd": "Ligand RMSD after superposing on the protein (nm)",
-              "dist": "Warhead → Cys113 SG distance (nm)",
+              "nac_dist": "Warhead → Cys113 SG distance (Å)",
+              "nac_angle": "Near-attack angle (°)",
               "mindist": "Minimum ligand–protein distance (nm)",
               "contacts": "Ligand–protein contacts"}
     for ax, k in zip(axes, panels):
-        t, y = s[k]
+        if k == "nac_dist":
+            t, y = nacs["t"], nacs["dist"]
+        elif k == "nac_angle":
+            t, y = nacs["t"], nacs["angle"]
+        else:
+            t, y = s[k]
         ax.plot(t, y, lw=0.7, color=rt.SERIES["accent"])
         ax.set_title(titles[k], loc="left", fontsize=9)
         ax.margins(x=0)
@@ -138,6 +232,31 @@ def figure(ident: str, s: dict, res: dict, er) -> str:
                     fontsize=8, color=rt.SERIES["alert"])
             if res.get("left_at_ns"):
                 ax.axvline(res["left_at_ns"], lw=1, color=rt.SERIES["alert"])
+        if k == "nac_dist":
+            # The attack window, so "close enough to react" is on the plot
+            # rather than in the reader's head.
+            ax.axhspan(nac_lo(), nac_hi(), color=rt.SERIES["ref"], alpha=0.13)
+            ax.text(0.995, nac_hi(), " attack window", va="bottom", ha="right",
+                    transform=ax.get_yaxis_transform(), fontsize=8,
+                    color=rt.SERIES["ref"])
+        if k == "nac_angle":
+            # The competent band depends on the MECHANISM, and getting it wrong
+            # would draw a target the molecule was never aiming at: SN2 wants a
+            # backside approach at >=150 deg, the perpendicular mechanisms want
+            # <=30 deg off the sp2 plane normal. Read from the criterion rather
+            # than hardcoded per panel.
+            import shared.nac_criterion as nacm
+            if "anti" in (nacs.get("kind") or ""):
+                ax.axhspan(nacm.SN2_ANGLE_MIN, 180, color=rt.SERIES["ref"], alpha=0.13)
+                lbl, at = f" ≥{nacm.SN2_ANGLE_MIN:.0f}° backside", nacm.SN2_ANGLE_MIN
+            else:
+                ax.axhspan(0, nacm.PERPENDICULAR_MAX_OFF_NORMAL,
+                           color=rt.SERIES["ref"], alpha=0.13)
+                lbl = f" ≤{nacm.PERPENDICULAR_MAX_OFF_NORMAL:.0f}° off plane normal"
+                at = nacm.PERPENDICULAR_MAX_OFF_NORMAL
+            ax.text(0.995, at, lbl, va="bottom", ha="right",
+                    transform=ax.get_yaxis_transform(), fontsize=8,
+                    color=rt.SERIES["ref"])
     axes[-1].set_xlabel("time (ns)")
     fig.suptitle(ident, x=0.005, ha="left", fontsize=11, weight="bold")
     fig.tight_layout()
@@ -149,6 +268,8 @@ def main() -> None:
     ap.add_argument("--candidate", required=True)
     ap.add_argument("--rep", default="rep1")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--no-movie", action="store_true",
+                    help="skip the 3D trajectory movie (it costs a trjconv pass)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -165,9 +286,38 @@ def main() -> None:
     log.info("%s: %.1f ns, residence %.3f, dissociated=%s", args.candidate,
              res["length_ns"], res["residence_frac"], res["dissociated"])
 
-    img = figure(args.candidate, s, res, er)
+    # ---- the movie: surface, charge colouring, labelled key residues -------
+    # Built from the SAME trajectory the numbers come from, so the panel and the
+    # structure cannot describe different runs.
+    movie_block = ""
+    mpdb = rep / "movie.pdb"
+    if not args.no_movie:
+        if not mpdb.is_file():
+            mov.build_movie_pdb(rep, mpdb, total_ps=res["length_ns"] * 1000.0)
+        if mpdb.is_file():
+            try:
+                pdb_txt, dsg, labels, lpos = er.surface_payload(mpdb)
+                three = (REPO / "scripts/.cache_3dmol-min.js").read_text()
+                movie_block = mov.viewer_html(pdb_txt, dsg, labels, lpos, three)
+                log.info("movie embedded: %d frames", len(dsg))
+            except Exception as exc:                   # noqa: BLE001
+                # A failed movie must not cost the numbers. Recorded in the page
+                # rather than dropped, so a missing viewer is visible as a
+                # failure and not mistaken for "this run had no movie".
+                log.warning("movie failed: %s", exc)
+                movie_block = rt.callout(
+                    "Movie unavailable",
+                    f"The trajectory rendered no viewer: <code>{exc}</code>. "
+                    "The figures and residence numbers above are unaffected — "
+                    "they are computed from the trajectory directly.", "warn")
     verdict = ("Held" if not res["dissociated"] else
                f"Left at {res['left_at_ns']:.0f} ns")
+
+    # The NAC series needs the fitted movie frames, so it comes after the movie.
+    nacs = nac_series(args.candidate, rep, mpdb) if not args.no_movie else None
+    if nacs is None:
+        log.warning("no warhead->SG distance/angle series for %s", args.candidate)
+    img = figure(args.candidate, s, res, er, nacs)
 
     facts = [("molecule", args.candidate), ("class", cls),
              ("pose elevated", f"rank {pose}" if pose else "—"),
@@ -184,8 +334,14 @@ def main() -> None:
         f'<p>{rt.pill("Held" if not res["dissociated"] else "Left")} '
         f'Mean ligand RMSD {res["rmsd_mean_nm"]:.3f} nm, max '
         f'{res["rmsd_max_nm"]:.3f} nm, final {res["rmsd_final_nm"]:.3f} nm.</p>',
-        f'<img src="{img}" style="max-width:100%">',
-        rt.section("2", "Against what was predicted for it"),
+        f'<img src="data:image/png;base64,{img}" style="max-width:100%">',
+        (rt.section("2", "The trajectory") +
+         "<p>Surface coloured by formal charge (<span style='color:#b3261e'>red</span> "
+         "negative, <span style='color:#003087'>blue</span> positive), ligand in "
+         "yellow sticks, key residues labelled. Fitted on CA atoms, so what moves "
+         "is the ligand relative to the protein.</p>" + movie_block)
+        if movie_block else "",
+        rt.section("3", "Against what was predicted for it"),
         f"<p>It was selected on a BPMD occupancy of "
         f"<strong>{rt.num(occ, '{:.3f}')}</strong>, against a crystallographic "
         f"median of {REF_MEDIAN:.3f}. That number is what the pre-registration "
@@ -209,7 +365,7 @@ def main() -> None:
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>{args.candidate} — 100 ns residence</title>"
-        f"<style>{rt.CSS}</style></head><body>\n"
+        f"<style>{rt.CSS}{mov.VIEWER_CSS}</style></head><body>\n"
         + "\n".join(body) + "\n</body></html>")
     print(f"{args.candidate}: {verdict}, residence {res['residence_frac']:.3f} "
           f"-> {dest}")
