@@ -65,6 +65,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--score", default="enrichment_conditional")
     ap.add_argument("--out-list", default=None)
+    ap.add_argument("--limit", type=int, default=0,
+                    help="cap the worklist (@tt8804: sweep the top 50)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -112,6 +114,8 @@ def main() -> None:
     rest = pd.DataFrame(rows)
 
     out = pd.concat([best, rest], ignore_index=True)
+    if args.limit:
+        out = out.head(args.limit)
     out["priority"] = range(1, len(out) + 1)
     cols = [c for c in ("priority", "parent_ident", "ident", "warhead_class",
                         "tier", "class_rank", args.score, "QED", "why")
