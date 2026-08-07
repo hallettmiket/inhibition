@@ -1866,32 +1866,35 @@ and every raw angle is retained so a window can be redrawn without re-docking.*
                    "same gate at 200 runs. A candidate above that range is not "
                    "thereby better than a known binder — see the intervals.")
 
-def _reference_scores():
-    """Reference molecules on the SAME measurement as the candidates.
+def _ref_table():
+    """Reference molecules scored by the SAME functions as the candidates.
 
-    Loaded separately and never merged into a ranked list. @tt8804 ruled the
-    known Pin1 binders too few and too poor to decide which chemistry to pursue,
-    so they are a YARDSTICK -- what does the incumbent score -- and must not take
-    a rank slot from a candidate or enter a per-class quota.
+    Never merged into a ranked list. @tt8804 ruled the known Pin1 binders too few
+    and too poor to decide which chemistry to pursue, so they are a yardstick --
+    what does the incumbent score -- and must not take a rank slot.
     """
-    import glob as _glob
-    fs = _glob.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
-                    "rank_v2/rank_v2_REF_*_*.csv")
+    import glob as _g
+    fs = _g.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
+                 "rank_v2/rank_v2_REF_*_*.csv")
     if not fs:
-        return None
+        return None, None
     f = max(fs, key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
     try:
-        return pd.read_csv(f), Path(f).name
+        d = pd.read_csv(f)
     except Exception:                                  # noqa: BLE001
-        return None
+        return None, None
+    pd_ = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v2_poses")
+    d["pose_path"] = d.ident.map(
+        lambda i: str(pd_ / f"{i}.sdf") if (pd_ / f"{i}.sdf").is_file() else None)
+    return d, Path(f).name
 
 
-def _reference_md():
-    """100 ns outcomes for any reference that has been through elevation."""
-    import glob as _glob
+def _ref_md():
+    """100 ns outcomes for references that have been through elevation."""
+    import glob as _g
     rows = []
-    for f in _glob.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
-                        "md_residence/md_residence_ref_*.csv"):
+    for f in _g.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
+                     "md_residence/md_residence_ref_*.csv"):
         try:
             d = pd.read_csv(f)
         except Exception:                              # noqa: BLE001
@@ -1899,644 +1902,219 @@ def _reference_md():
         for r in d.itertuples():
             if getattr(r, "status", "") != "ok":
                 continue
-            rows.append({
-                "reference_name": getattr(r, "reference_name", "?"),
-                "ns": getattr(r, "ns_analysed", float("nan")),
-                "rmsd_mean": getattr(r, "explicit_ligand_rmsd_nm_mean", float("nan")),
-                "rmsd_max": getattr(r, "explicit_ligand_rmsd_nm_max", float("nan")),
-                "engaged": getattr(r, "explicit_frac_frames_engaged", float("nan")),
-                "potency": getattr(r, "reference_potency", ""),
-            })
-    return pd.DataFrame(rows).drop_duplicates("reference_name") if rows else None
+            rows.append({"molecule": getattr(r, "reference_name", "?"),
+                         "ns": getattr(r, "ns_analysed", float("nan")),
+                         "RMSD mean": getattr(r, "explicit_ligand_rmsd_nm_mean", float("nan")),
+                         "RMSD max": getattr(r, "explicit_ligand_rmsd_nm_max", float("nan")),
+                         "engaged": getattr(r, "explicit_frac_frames_engaged", float("nan"))})
+    return pd.DataFrame(rows).drop_duplicates("molecule") if rows else None
+
+
+#: Where the single viewer's molecule lives, and where each table's last-seen
+#: selection is kept. Streamlit keeps EVERY table's selection alive at once, so
+#: without the second dict the first table with a selection would win forever
+#: and later clicks elsewhere would do nothing.
+_SEL = "nac2_selected"
+_SEEN = "nac2_seen"
+
+
+def _selectable(df, numeric, wkey, source):
+    """One selectable table. Returns a pick only if THIS table just changed.
+
+    Formatting goes through column_config, never a Styler: st.dataframe's
+    on_select is silently inert when handed a Styler -- the table renders
+    perfectly and no row is ever selectable, with no warning.
+    """
+    ev = st.dataframe(
+        df.drop(columns=["_pose"], errors="ignore"),
+        width="stretch", hide_index=True,
+        on_select="rerun", selection_mode="single-row", key=wkey,
+        column_config={c: st.column_config.NumberColumn(format="%.3f")
+                       for c in numeric})
+    sel = getattr(ev, "selection", None)
+    if sel is None and isinstance(ev, dict):
+        sel = ev.get("selection")
+    rows = list((sel.get("rows", []) if isinstance(sel, dict)
+                 else getattr(sel, "rows", None) or []))
+    seen = st.session_state.setdefault(_SEEN, {})
+    if not rows:
+        seen[wkey] = None
+        return None
+    # The selection is a row POSITION into the frame just rendered, so it is
+    # resolved against that same frame here. Carrying an index across a re-sort
+    # is how a click lands on a different molecule than the one under the cursor.
+    row = df.iloc[rows[0]]
+    ident = str(row["candidate_id"])
+    if seen.get(wkey) == ident:
+        return None                       # already registered, not a fresh click
+    seen[wkey] = ident
+    return {"ident": ident, "pose": row.get("_pose"), "source": source}
 
 
 def panel_nac2_ranking() -> None:
-    """The 2.1.0 ranking — per warhead class, on the weighted anchoring score.
+    """The 2.1.0 ranking: every table on the left, ONE viewer on the right.
 
-    A SECOND panel rather than a rewrite of the first, for the same reason the
-    frame carries `nac2_*` beside `nac_*`: the two rankings genuinely disagree
-    (top-10-viable vs the 2.0.0 enrichment ranks at rho = +0.42), so replacing
-    one with the other would move every molecule on screen with no way to see
-    what changed or to go back.
-
-    THERE IS NO GLOBAL TOP-N HERE, DELIBERATELY. D0073 measured a library-wide
-    consensus bar promoting rigid chemistry and demoting flexible chemistry --
-    pass rates ran BDHI 16.6% against chloroacetamide 2.9%, and pass rate is
-    monotone in rotatable-bond count. A merged ordering is therefore a rigidity
-    ranking wearing a geometry label, so the panel shows one list per class and
-    the frame carries no column to sort across them.
+    A viewer per tier is a viewer you cannot compare across, and the reference
+    molecules had none at all. There is now a single viewer, and anything clicked
+    on the left drives it -- candidates from either tier and the known binders
+    alike, which is the comparison this panel exists to support.
     """
     st.header("Ranking 2.1.0 — weighted anchoring score, per warhead class")
     curation_header("Ranking 2.1.0")
-    st.caption("Covalent arms only (T₃, T₄). One ranked list **per warhead "
-               "class** — there is no global top-N by design (D0073).")
 
     with st.expander("**What the columns mean** — read before comparing any two "
                      "molecules", expanded=False):
-        st.markdown(r"""
-| column | what it is |
-|---|---|
-| **weighted** | the ranking score: `0.5·anchor_quality + 0.5·top-10 viable`. **Weights are equal and unvalidated** — nothing has yet shown which component predicts anything, so a tuned weight would be fitted to nothing. |
-| **anchor** | how *well* the warhead is anchored to Cys113, scored **continuously**. Distance and angle each give a factor that is 1.0 at ideal and decays, and they **multiply** — a pose at perfect distance and hopeless angle is not half-good. |
-| **top-10 viable** | fraction of the ten *lowest-energy* poses in attack geometry. The metric D0068 argued for. **42.8% of all molecules score zero here** — that is the population the 2.0.0 ranking could not see. |
-| **enrich (2.0.0)** | the old score, recomputed on the same run so the comparison is like-for-like. Ranks against top-10-viable at only ρ = +0.42. |
-| **consensus** | agreement among the top ten poses under **gnina's** ordering. gnina puts a sub-2 Å pose first 26.8% of the time on this receptor against AutoDock's 18.3%. |
-| **in range** | how often the sampler put the warhead within striking distance — the quantity the old joint score was silently multiplying in. |
+        st.markdown(
+            "| column | what it is |\n|---|---|\n"
+            "| **weighted** | `0.5·anchor + 0.5·top-10 viable`. **Weights equal "
+            "and unvalidated** — nothing has shown which component predicts "
+            "anything. |\n"
+            "| **anchor** | how *well* the warhead is anchored to Cys113, scored "
+            "continuously. Distance and angle each decay from ideal and "
+            "**multiply**. |\n"
+            "| **top-10 viable** | fraction of the ten *lowest-energy* poses in "
+            "attack geometry. **See issue #23** — the energy ordering this rests "
+            "on carries no signal about reaction geometry, and Sulfopin scores 0 "
+            "here despite reacting. |\n"
+            "| **enrich (2.0.0)** | the old score, recomputed on the same run. |\n"
+            "| **consensus** | agreement among the top ten poses, gnina's "
+            "ordering. |\n"
+            "| **in range** | how often the sampler put the warhead within "
+            "striking distance. |\n\n"
+            "**No score here has been shown to predict physical stability.** "
+            "D0071 tested the 2.0.0 metrics and found they did not; these have "
+            "not been tested.")
 
-**None of these has been shown to predict physical stability.** D0071 tested the
-2.0.0 metrics on a pre-registered cohort and found they did not. The same test
-has not been run on these.
-""")
+    left, right = st.columns([3, 2], gap="medium")
+    picked = None
 
-    # --- the yardstick, before any candidate --------------------------------
-    ref = _reference_scores()
-    if ref is not None:
-        rdf, rname = ref
-        with st.expander("**Known Pin1 binders on this same measurement** — the "
-                         "yardstick, not a validation set", expanded=True):
-            st.caption(
-                "Scored by the identical functions as the candidates below, so "
-                "the numbers are comparable. **Nothing in the pipeline is "
-                "calibrated against them** — @tt8804's ruling is that 15 "
-                "crystallographic depositions are too few and too poor to decide "
-                "which chemistry to pursue. They are here so a candidate's score "
-                "can be read next to what the incumbent actually does. "
-                "**Sulfopin is the parent.**")
-            cols = [c for c in ("reference_name", "warhead_class", "weighted_score",
-                                "anchor_quality", "topn_viable_frac",
-                                "enrichment_joint", "consensus_gnina")
-                    if c in rdf.columns]
-            show = rdf[cols].rename(columns={
-                "reference_name": "molecule", "weighted_score": "weighted",
-                "anchor_quality": "anchor", "topn_viable_frac": "top-10 viable",
-                "enrichment_joint": "enrich (2.0.0)", "consensus_gnina": "consensus"})
-            num = [c for c in ("weighted", "anchor", "top-10 viable",
-                               "enrich (2.0.0)", "consensus") if c in show.columns]
-            st.dataframe(show.sort_values("weighted", ascending=False)
-                         .style.format({c: "{:.3f}" for c in num}),
-                         width="stretch", hide_index=True)
-            st.caption(f"`{rname}`. A molecule matching several warhead SMARTS is "
-                       "scored under each and listed once per class — that is a "
-                       "property of the criterion, not a duplicate.")
-
-            md = _reference_md()
-            if md is not None and len(md):
-                st.markdown("**Through the 100 ns elevation leg**")
-                mshow = md.rename(columns={
-                    "reference_name": "molecule", "ns": "ns",
-                    "rmsd_mean": "RMSD mean (nm)", "rmsd_max": "RMSD max (nm)",
-                    "engaged": "frames engaged"})
-                st.dataframe(mshow.style.format({
-                    "ns": "{:.0f}", "RMSD mean (nm)": "{:.3f}",
-                    "RMSD max (nm)": "{:.3f}", "frames engaged": "{:.2f}"}),
-                    width="stretch", hide_index=True)
+    with left:
+        rdf, rname = _ref_table()
+        if rdf is not None:
+            with st.expander("**Known Pin1 binders** — same measurement, not a "
+                             "validation set", expanded=True):
                 st.caption(
-                    "Both stay bound for the full 100 ns — max RMSD under 0.72 nm "
-                    "against a 1.0 nm bound threshold. Verified independently by "
-                    "ligand-COM-to-Cys113-SG distance, which never exceeds 1 nm in "
-                    "10,001 frames. ATRA ran as the NEUTRAL acid, so it is not the "
-                    "species that binds at pH 7.4.")
+                    "Scored by the identical functions as the candidates, so the "
+                    "numbers are comparable. **Nothing is calibrated against "
+                    "them.** Sulfopin is the parent. A molecule matching several "
+                    "warhead SMARTS appears once per class — that is a property "
+                    "of the criterion, not a duplicated row.")
+                cols = [c for c in ("reference_name", "warhead_class",
+                                    "weighted_score", "anchor_quality",
+                                    "topn_viable_frac", "enrichment_joint",
+                                    "consensus_gnina") if c in rdf.columns]
+                t = rdf[cols + ["pose_path"]].rename(columns={
+                    "reference_name": "candidate_id", "weighted_score": "weighted",
+                    "anchor_quality": "anchor", "topn_viable_frac": "top-10 viable",
+                    "enrichment_joint": "enrich (2.0.0)",
+                    "consensus_gnina": "consensus", "pose_path": "_pose"})
+                num = [c for c in ("weighted", "anchor", "top-10 viable",
+                                   "enrich (2.0.0)", "consensus") if c in t.columns]
+                picked = _selectable(
+                    t.sort_values("weighted", ascending=False).reset_index(drop=True),
+                    num, "nac2_tbl_ref", "reference") or picked
+                st.caption(f"`{rname}`")
+                md = _ref_md()
+                if md is not None and len(md):
+                    st.markdown("**Through the 100 ns elevation leg**")
+                    st.dataframe(md, width="stretch", hide_index=True,
+                                 column_config={c: st.column_config.NumberColumn(
+                                     format="%.3f")
+                                     for c in md.columns if c != "molecule"})
+                    st.caption(
+                        "Both stay bound for the full 100 ns, max RMSD under "
+                        "0.72 nm against a 1.0 nm threshold — verified "
+                        "independently by ligand-COM-to-Cys113-SG distance. ATRA "
+                        "ran as the NEUTRAL acid, so it is not the species that "
+                        "binds at pH 7.4.")
 
-    for key in ("t3", "t4"):
-        df, fname = D.load_frame(key)
-        st.subheader(D.display_name(key))
-        if df is None or "nac2_weighted_score" not in df.columns:
-            st.info(f"no 2.1.0 ranking in this frame ({fname}) — run "
-                    "`scripts/gui_refresh_v2.py`")
-            continue
-        scored = df.dropna(subset=["nac2_weighted_score"])
-        surv = scored[scored.nac2_passes == True] if "nac2_passes" in scored else scored  # noqa: E712
-        st.caption(f"`{fname}` — {len(scored)} scored, **{len(surv)} clear the "
-                   f"within-class consensus filter**")
-
-        surv, _rules = curated(surv, "Ranking 2.1.0", label=D.display_name(key))
-        if surv.empty:
-            st.info("no candidates survive the current curation filter")
-            continue
-
-        # WHICH MOLECULE THE VIEWER SHOWS IS DRIVEN BY CLICKING THE TABLE.
-        # A dropdown beside a table is two controls for one decision, and the
-        # one you are looking at is not the one that works. The tables are
-        # selectable; the selectbox stays only as a keyboard/search path and
-        # follows whatever was last clicked.
-        state_key = f"nac2_sel_{key}"
-        ordered = (surv.sort_values(["warhead_class", "nac2_class_rank"])
-                   .candidate_id.astype(str).tolist())
-        if st.session_state.get(state_key) not in ordered:
-            st.session_state[state_key] = ordered[0] if ordered else None
-
-        for cls in sorted(surv.warhead_class.dropna().unique()):
-            g = surv[surv.warhead_class == cls]
-            top = g.nsmallest(15, "nac2_class_rank").copy()
-            with st.expander(f"**{cls}** — {len(g)} survivors", expanded=True):
-                # SELECT the source columns first, THEN rename. Renaming in
-                # place collided: the frame already carries its own `rank`, so
-                # nac2_class_rank -> "rank" produced two columns of that name and
-                # Streamlit refused the whole dataframe. Selecting first makes a
-                # collision impossible rather than unlikely.
-                src = [("nac2_class_rank", "rank"),
-                       ("candidate_id", "candidate_id"),
-                       ("nac2_weighted_score", "weighted"),
-                       ("nac2_anchor_quality", "anchor"),
-                       ("nac2_topn_viable_frac", "top-10 viable"),
-                       ("nac2_enrichment_joint", "enrich (2.0.0)"),
-                       ("nac2_consensus_gnina", "consensus"),
-                       ("nac2_frac_in_range", "in range"),
-                       ("QED", "QED"),
-                       ("canonical_smiles", "canonical_smiles")]
-                use = [(x, y) for x, y in src if x in top.columns]
-                show = top[[x for x, _ in use]].copy()
-                show.columns = [y for _, y in use]
-                numeric = [y for _, y in use
+        for tkey in ("t3", "t4"):
+            df, fname = D.load_frame(tkey)
+            st.subheader(D.display_name(tkey))
+            if df is None or "nac2_weighted_score" not in df.columns:
+                st.info(f"no 2.1.0 ranking in this frame ({fname})")
+                continue
+            scored = df.dropna(subset=["nac2_weighted_score"])
+            surv = scored[scored.nac2_passes == True] if "nac2_passes" in scored else scored  # noqa: E712
+            st.caption(f"`{fname}` — {len(scored)} scored, **{len(surv)} clear the "
+                       f"within-class consensus filter**")
+            surv, _rules = curated(surv, "Ranking 2.1.0", label=D.display_name(tkey))
+            if surv.empty:
+                st.info("no candidates survive the current curation filter")
+                continue
+            for cls in sorted(surv.warhead_class.dropna().unique()):
+                g = surv[surv.warhead_class == cls]
+                top = g.nsmallest(15, "nac2_class_rank").copy()
+                with st.expander(f"**{cls}** — {len(g)} survivors", expanded=True):
+                    # SELECT source columns first, THEN rename. The frame carries
+                    # its own `rank`, so renaming in place produced two columns of
+                    # that name and Streamlit refused the whole table.
+                    src = [("nac2_class_rank", "rank"),
+                           ("candidate_id", "candidate_id"),
+                           ("nac2_weighted_score", "weighted"),
+                           ("nac2_anchor_quality", "anchor"),
+                           ("nac2_topn_viable_frac", "top-10 viable"),
+                           ("nac2_enrichment_joint", "enrich (2.0.0)"),
+                           ("nac2_consensus_gnina", "consensus"),
+                           ("nac2_frac_in_range", "in range"), ("QED", "QED"),
+                           ("nac2_pose_path", "_pose")]
+                    use = [(x, y) for x, y in src if x in top.columns]
+                    show = top[[x for x, _ in use]].copy()
+                    show.columns = [y for _, y in use]
+                    if "rank" in show.columns:
+                        show["rank"] = show["rank"].astype("Int64")
+                    num = [y for _, y in use
                            if y in ("weighted", "anchor", "top-10 viable",
                                     "enrich (2.0.0)", "consensus", "in range", "QED")]
-                if "rank" in show.columns:
-                    show["rank"] = show["rank"].astype("Int64")
+                    picked = _selectable(show.reset_index(drop=True), num,
+                                         f"nac2_tbl_{tkey}_{cls}", tkey) or picked
 
-                # column_config, NOT a Styler. st.dataframe row selection is
-                # silently inert when handed a Styler -- the table renders and
-                # looks fine, and no row is ever selectable. Formatting has to
-                # go through column_config for on_select to work at all.
-                st.dataframe(
-                    show, width="stretch", hide_index=True,
-                    on_select="rerun", selection_mode="single-row",
-                    key=f"nac2_tbl_{key}_{cls}",
-                    column_config={c: st.column_config.NumberColumn(format="%.3f")
-                                   for c in numeric})
-                ev = st.session_state.get(f"nac2_tbl_{key}_{cls}")
-                # The selection is POSITIONAL into the frame just rendered, so it
-                # is resolved against that same frame immediately -- carrying an
-                # index across a re-sort is how a click lands on another molecule.
-                sel = (ev or {}).get("selection", {}) if isinstance(ev, dict) \
-                    else getattr(ev, "selection", None)
-                rows = (sel or {}).get("rows", []) if isinstance(sel, dict) \
-                    else (getattr(sel, "rows", None) or [])
-                if rows:
-                    picked = str(show.iloc[rows[0]]["candidate_id"])
-                    if picked != st.session_state.get(state_key):
-                        st.session_state[state_key] = picked
-                        st.rerun()
+    if picked:
+        st.session_state[_SEL] = picked
+    cur = st.session_state.get(_SEL)
 
-        # --- structure + poses, for the clicked molecule ---------------------
-        have = surv[surv.nac2_pose_path.notna()] if "nac2_pose_path" in surv else surv.iloc[:0]
-        if have.empty:
-            st.info("No 2.1.0 poses on disk yet.")
-            continue
-
-        ids = have.candidate_id.astype(str).tolist()
-        current = st.session_state.get(state_key)
-        if current not in ids:
-            st.info(f"`{current}` has no pose on disk; showing the first that does.")
-            current = ids[0]
-        st.markdown(f"### Structure and poses — `{current}`")
-        st.caption("Click any row above to change this. The selectbox below is a "
-                   "search path, not a second decision — it follows the table.")
-        chosen = st.selectbox("find by id", ids, index=ids.index(current),
-                              key=f"nac2_box_{key}", label_visibility="collapsed")
-        if chosen != current:
-            st.session_state[state_key] = chosen
-            st.rerun()
-        pick = current
-
-        row = have[have.candidate_id.astype(str) == pick].iloc[0]
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            try:
-                wcls = row.get("warhead_class")
-                png = depict.png(row.canonical_smiles, width=340, height=260,
-                                 highlight_smarts=depict.warhead_smarts(wcls))
-                st.image(png, caption=f"{pick} — warhead highlighted")
-            except Exception as exc:                       # noqa: BLE001
-                st.caption(f"2D depiction unavailable: {exc}")
-            st.caption(
-                f"class rank **{int(row.nac2_class_rank)}** in {row.get('warhead_class','?')} "
-                f"· weighted {row.nac2_weighted_score:.3f} "
-                f"· top-10 viable {row.nac2_topn_viable_frac:.2f}")
-        with c2:
-            # The shared viewer, not a second implementation: it resolves the
-            # receptor FROM the pose column, draws the labelled surface and
-            # offers the export. `nac2_pose_path` is registered in
-            # pose3d.RECEPTOR_FOR_POSE_COLUMN, whose fallback is 6VAJ -- an
-            # unregistered column would render every pose 48.6 A from the pocket
-            # and look entirely correct doing it.
-            render_pose_viewer(key, D.display_name(key), have, row,
-                               key=f"nac2view_{key}_{pick}",
-                               pose_column="nac2_pose_path", height=430)
-
-
-def panel_nac_ranking() -> None:
-    """The near-attack ranking, shown WITH the reasons not to over-read it.
-
-    Kept as its own panel rather than folded into "Shortlists" on purpose. The
-    existing shortlists are the PI-approved selection (issue #1); this is a
-    different ranking on a different quantity, and two rankings that look alike
-    on screen are the confusion this project keeps paying for.
-    """
-    st.header("Near-attack ranking — can the molecule present its warhead?")
-    # Declares this panel's relationship to the chemist's filter BEFORE any
-    # candidate is shown. Silence is how the original bug read to the user.
-    curation_header("Near-attack ranking")
-    st.caption("Covalent arms only (T₃, T₄). T₁ and T₂ carry no warhead, so the "
-               "question is undefined for them rather than false — they are not "
-               "ranked last, they are absent (D0043).")
-
-    # THE FORMULA, ON THE PAGE. A ranking score whose definition lives in a
-    # decision record is a number people compare without knowing what they are
-    # comparing. The denominator is the part that surprises readers: it is what
-    # makes values from different warhead mechanisms mean the same thing.
-    with st.expander("**How the enrichment score is computed** — read this before "
-                     "comparing any two numbers", expanded=True):
-        st.markdown(
-            r"""
-$$\text{enrichment} \;=\; \frac{\text{fraction of independent docking runs reaching a viable near-attack conformation}}
-{\text{fraction a randomly-oriented approach would reach by chance}}$$
-
-**Numerator — measured.** The molecule is docked *N* times independently into
-3IKD (currently **N = 200**). A pose counts as *viable* when it satisfies both:
-
-| | |
-|---|---|
-| **distance** | warhead atom to Cys113 **SG**, **2.8 – 4.2 Å** — a van der Waals *contact*, the reactant state, **not** a formed bond |
-| **angle** | mechanism-specific (see below) |
-
-**Denominator — computed exactly, not sampled.** The fraction of *all possible
-approach directions* that would satisfy that angular window, from its solid
-angle. This is the number a nucleophile arriving from a uniformly random
-direction would score.
-
-| mechanism | angular criterion | chance baseline |
-|---|---|---|
-| SN2 (chloroacetamide, sulfamate/sulfonate acetamide) | S···C–LG **≥ 150°** — backside, anti to the leaving group | **6.70 %** |
-| Michael, SNAr, BDHI ring-opening | **≤ 30°** off the sp² plane normal **and** Bürgi–Dunitz approach 85–125° | **8.16 %** |
-
-**So the score reads:** *how many times more often than chance does this molecule
-reach a chemically competent geometry?*
-
-- **1.0×** — no better than a randomly-oriented approach.
-- **> 1.0×** — the pocket and the molecule's own shape actively steer the warhead into position.
-
-**Why divide at all?** The two angular windows differ in solid angle, so raw
-viable fractions are **not comparable across mechanisms** — acrylamides would
-out-score chloroacetamides for reasons that are pure trigonometry. Dividing each
-by its own baseline removes that. Pooling the *raw* fractions gives AUC ≈ 0.5,
-which is an artefact of the windows rather than a result.
-
-**Reference points, measured on this same gate:**
-
-| | enrichment |
-|---|---|
-| crystallographic Cys113 binders | **1.6 – 4.3×** |
-| random warhead-matched *measured* inactives | **≈ 0.8×** |
-
-*Implementation: `shared/nac_criterion.py` — `viable_fraction()` and
-`isotropic_null()`. Windows are pre-registered from stereoelectronics (D0045)
-and every raw angle is retained so a window can be redrawn without re-docking.*
-""")
-
-    st.warning(
-        "**Read this as a FILTER, not a fine ordering.**\n\n"
-        "- The score **does not converge** (D0068). The same molecules score "
-        "2.91× at 200 runs and 0.96× at 2,000, and the crystallographic "
-        "positives — never selected on score — fall identically. Every "
-        "enrichment below is quoted **with the run count that produced it**, "
-        "because without one it is not a quantity.\n"
-        "- The 95% interval is ~1.12× wide at 200 runs, so **1,239 of 1,806 "
-        "molecules have an interval reaching the top-25 band**. Do not read the "
-        "order within the shortlist.\n"
-        "- What it *is* good for, measured: the top 300 sit at 0.96× on the "
-        "converged scale against **0.99× for known crystallographic binders** "
-        "and **0.76× for random warhead-matched inactives** — indistinguishable "
-        "from known binders (p = 0.21), clearly above random (AUC 0.620, "
-        "p = 0.0017). It concentrates active-like molecules.")
-
-    st.info(
-        "**Pose stability (BPMD) is not here yet.** `shared/bpmd.py` is built and "
-        "tested but not run — it ranks by whether the warhead *stays* in "
-        "position under thermal motion, which is a property of the pose rather "
-        "than of how hard the search looked, and is the intended fix for the "
-        "convergence problem above. **MD residence over 100 ns** — the criterion "
-        "the Lu lab chemists actually weigh (#12 §F) — is running now on 3IKD.")
-
-    for key in ("t3", "t4"):
-        df, fname = D.load_frame(key)
-        st.subheader(D.display_name(key))
-        if df is None or "nac_enrichment" not in df.columns:
-            st.info(f"no near-attack ranking in this frame ({fname})")
-            continue
-        scored = df.dropna(subset=["nac_enrichment"])
-        st.caption(f"`{fname}` — {len(scored)} of {len(df)} scored")
-        # Filtered like any candidate list. The enrichment values are NOT
-        # recomputed on the subset: each is a per-molecule measurement against an
-        # isotropic baseline, not a rank within the displayed set, so it means
-        # the same thing whoever else is on screen.
-        scored, _rules = curated(scored, "Near-attack ranking",
-                                 label=D.display_name(key))
-        if scored.empty:
-            st.info("no candidates survive the current curation filter")
-            continue
-
-        top = scored.nlargest(25, "nac_enrichment").copy()
-        top["enrichment"] = [f"{r.nac_enrichment:.2f}× [{r.nac_enrichment_lo:.2f}, "
-                             f"{r.nac_enrichment_hi:.2f}]" for r in top.itertuples()]
-        top["runs"] = top.nac_run_count.astype(int)
-        cols = [c for c in ("candidate_id", "enrichment", "runs", "warhead_class",
-                            "canonical_smiles", "QED", "SAscore") if c in top.columns]
-        st.dataframe(top[cols], width="stretch", hide_index=True)
-
-        # THE POSE, AND IT IS THE ONE THE SCORE CAME FROM.
-        # `nac_pose_path` points at the reactive-3IKD pose written by
-        # scripts/export_nac_poses.py. The frame ALSO carries `pose_path` from
-        # the earlier production docking, which resolves to a real file and is
-        # the wrong molecule's answer here — showing it would be a confident,
-        # correctly-rendered lie about which geometry earned the number.
-        if "nac_pose_path" not in top.columns or top.nac_pose_path.isna().all():
-            st.info("No near-attack poses exported for this approach yet. "
-                    "`scripts/export_nac_poses.py` re-docks the shortlist under "
-                    "the scoring protocol and writes them.")
-            continue
-
-        have = top[top.nac_pose_path.notna()]
-        pick = st.selectbox(
-            f"pose to view — {D.display_name(key)}",
-            list(have.candidate_id.astype(str)),
-            format_func=lambda c: (
-                f"{c}  ·  "
-                f"{have.set_index(have.candidate_id.astype(str)).loc[c, 'nac_enrichment']:.2f}×"),
-            key=f"nacpose_{key}")
-        prow = have[have.candidate_id.astype(str) == pick].iloc[0]
-
-        # THE 2D STRUCTURE, BESIDE THE POSE. The 3D view answers "where does it
-        # sit"; the flat depiction answers "what IS it", and a chemist reads the
-        # second one first. The warhead is highlighted so the atom the geometry
-        # is measured on is identifiable without counting bonds in the 3D.
-        s1, s2 = st.columns([2, 3])
-        with s1:
-            hl = depict.warhead_smarts(str(prow.get("warhead_class", "")))
-            smi = prow.get("canonical_smiles")
-            if isinstance(smi, str) and smi:
-                try:
-                    st.image(depict.png(smi, highlight_smarts=hl, width=460,
-                                        height=360),
-                             caption=f"{prow.candidate_id} — free form"
-                                     + (", warhead highlighted" if hl else ""))
-                except Exception as exc:                    # noqa: BLE001
-                    st.warning(f"could not depict: {str(exc)[:80]}")
-                st.code(smi, language=None)
-            else:
-                st.info("no SMILES on this row")
-        with s2:
-            st.caption("**The docked form is the FREE molecule, not the adduct** "
-                       "— the question is whether it can orient to react, which "
-                       "an already-reacted adduct cannot answer. Verified: the "
-                       "pose matches `canonical_smiles` on formula and heavy-atom "
-                       "count, with the warhead unsaturated.")
-            adduct = prow.get("adduct_smiles")
-            if isinstance(adduct, str) and adduct and adduct != "nan":
-                with st.expander("the adduct, for comparison — NOT what was docked"):
-                    try:
-                        st.image(depict.png(adduct, width=420, height=320),
-                                 caption="post-reaction adduct")
-                    except Exception:                        # noqa: BLE001
-                        st.code(adduct, language=None)
-
-        g1, g2, g3 = st.columns(3)
-        g1.metric("enrichment", f"{prow.nac_enrichment:.2f}×",
-                  help=f"at {int(prow.nac_run_count)} runs — the score does not "
-                       "converge, so the run count is part of the number (D0068)")
-        if "nac_pose_distance" in prow and pd.notna(prow.get("nac_pose_distance")):
-            g2.metric("warhead → SG", f"{prow.nac_pose_distance:.2f} Å",
-                      help="near-attack window is 2.8–4.2 Å: a van der Waals "
-                           "CONTACT, not a formed bond")
-        if "nac_pose_angle" in prow and pd.notna(prow.get("nac_pose_angle")):
-            g3.metric("approach angle", f"{prow.nac_pose_angle:.1f}°",
-                      help="mechanism-specific: SN2 wants ≥150° anti to the "
-                           "leaving group; Michael/SNAr want ≤30° off the sp² "
-                           "plane normal")
-        if "nac_pose_viable" in prow and prow.get("nac_pose_viable") is False:
-            st.warning("This molecule's best pose does **not** clear the "
-                       "near-attack criterion. Shown so the failure is "
-                       "inspectable rather than absent.")
-
-        render_pose_viewer(key, D.display_name(key), have, prow,
-                           key=f"nacview_{key}_{pick}",
-                           pose_column="nac_pose_path")
-
-        # The reference band, so a number on this page can be placed against
-        # something real rather than against the other numbers on this page.
-        st.caption("Crystallographic Cys113 binders scored **1.6–4.3×** on this "
-                   "same gate at 200 runs. A candidate above that range is not "
-                   "thereby better than a known binder — see the intervals.")
-
-def _reference_scores():
-    """Reference molecules on the SAME measurement as the candidates.
-
-    Loaded separately and never merged into a ranked list. @tt8804 ruled the
-    known Pin1 binders too few and too poor to decide which chemistry to pursue,
-    so they are a YARDSTICK -- what does the incumbent score -- and must not take
-    a rank slot from a candidate or enter a per-class quota.
-    """
-    import glob as _glob
-    fs = _glob.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
-                    "rank_v2/rank_v2_REF_*_*.csv")
-    if not fs:
-        return None
-    f = max(fs, key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
-    try:
-        return pd.read_csv(f), Path(f).name
-    except Exception:                                  # noqa: BLE001
-        return None
-
-
-def _reference_md():
-    """100 ns outcomes for any reference that has been through elevation."""
-    import glob as _glob
-    rows = []
-    for f in _glob.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
-                        "md_residence/md_residence_ref_*.csv"):
-        try:
-            d = pd.read_csv(f)
-        except Exception:                              # noqa: BLE001
-            continue
-        for r in d.itertuples():
-            if getattr(r, "status", "") != "ok":
+    with right:
+        st.markdown("### Viewer")
+        if not cur:
+            st.info("Click any row on the left — candidate or reference — and its "
+                    "structure and poses appear here.")
+            return
+        st.caption(f"**{cur['ident']}** · {cur['source']}")
+        smi = None
+        for tkey in ("t3", "t4"):
+            df, _ = D.load_frame(tkey)
+            if df is None:
                 continue
-            rows.append({
-                "reference_name": getattr(r, "reference_name", "?"),
-                "ns": getattr(r, "ns_analysed", float("nan")),
-                "rmsd_mean": getattr(r, "explicit_ligand_rmsd_nm_mean", float("nan")),
-                "rmsd_max": getattr(r, "explicit_ligand_rmsd_nm_max", float("nan")),
-                "engaged": getattr(r, "explicit_frac_frames_engaged", float("nan")),
-                "potency": getattr(r, "reference_potency", ""),
-            })
-    return pd.DataFrame(rows).drop_duplicates("reference_name") if rows else None
-
-
-def panel_nac2_ranking() -> None:
-    """The 2.1.0 ranking — per warhead class, on the weighted anchoring score.
-
-    A SECOND panel rather than a rewrite of the first, for the same reason the
-    frame carries `nac2_*` beside `nac_*`: the two rankings genuinely disagree
-    (top-10-viable vs the 2.0.0 enrichment ranks at rho = +0.42), so replacing
-    one with the other would move every molecule on screen with no way to see
-    what changed or to go back.
-
-    THERE IS NO GLOBAL TOP-N HERE, DELIBERATELY. D0073 measured a library-wide
-    consensus bar promoting rigid chemistry and demoting flexible chemistry --
-    pass rates ran BDHI 16.6% against chloroacetamide 2.9%, and pass rate is
-    monotone in rotatable-bond count. A merged ordering is therefore a rigidity
-    ranking wearing a geometry label, so the panel shows one list per class and
-    the frame carries no column to sort across them.
-    """
-    st.header("Ranking 2.1.0 — weighted anchoring score, per warhead class")
-    curation_header("Ranking 2.1.0")
-    st.caption("Covalent arms only (T₃, T₄). One ranked list **per warhead "
-               "class** — there is no global top-N by design (D0073).")
-
-    with st.expander("**What the columns mean** — read before comparing any two "
-                     "molecules", expanded=False):
-        st.markdown(r"""
-| column | what it is |
-|---|---|
-| **weighted** | the ranking score: `0.5·anchor_quality + 0.5·top-10 viable`. **Weights are equal and unvalidated** — nothing has yet shown which component predicts anything, so a tuned weight would be fitted to nothing. |
-| **anchor** | how *well* the warhead is anchored to Cys113, scored **continuously**. Distance and angle each give a factor that is 1.0 at ideal and decays, and they **multiply** — a pose at perfect distance and hopeless angle is not half-good. |
-| **top-10 viable** | fraction of the ten *lowest-energy* poses in attack geometry. The metric D0068 argued for. **42.8% of all molecules score zero here** — that is the population the 2.0.0 ranking could not see. |
-| **enrich (2.0.0)** | the old score, recomputed on the same run so the comparison is like-for-like. Ranks against top-10-viable at only ρ = +0.42. |
-| **consensus** | agreement among the top ten poses under **gnina's** ordering. gnina puts a sub-2 Å pose first 26.8% of the time on this receptor against AutoDock's 18.3%. |
-| **in range** | how often the sampler put the warhead within striking distance — the quantity the old joint score was silently multiplying in. |
-
-**None of these has been shown to predict physical stability.** D0071 tested the
-2.0.0 metrics on a pre-registered cohort and found they did not. The same test
-has not been run on these.
-""")
-
-    # --- the yardstick, before any candidate --------------------------------
-    ref = _reference_scores()
-    if ref is not None:
-        rdf, rname = ref
-        with st.expander("**Known Pin1 binders on this same measurement** — the "
-                         "yardstick, not a validation set", expanded=True):
-            st.caption(
-                "Scored by the identical functions as the candidates below, so "
-                "the numbers are comparable. **Nothing in the pipeline is "
-                "calibrated against them** — @tt8804's ruling is that 15 "
-                "crystallographic depositions are too few and too poor to decide "
-                "which chemistry to pursue. They are here so a candidate's score "
-                "can be read next to what the incumbent actually does. "
-                "**Sulfopin is the parent.**")
-            cols = [c for c in ("reference_name", "warhead_class", "weighted_score",
-                                "anchor_quality", "topn_viable_frac",
-                                "enrichment_joint", "consensus_gnina")
-                    if c in rdf.columns]
-            show = rdf[cols].rename(columns={
-                "reference_name": "molecule", "weighted_score": "weighted",
-                "anchor_quality": "anchor", "topn_viable_frac": "top-10 viable",
-                "enrichment_joint": "enrich (2.0.0)", "consensus_gnina": "consensus"})
-            num = [c for c in ("weighted", "anchor", "top-10 viable",
-                               "enrich (2.0.0)", "consensus") if c in show.columns]
-            st.dataframe(show.sort_values("weighted", ascending=False)
-                         .style.format({c: "{:.3f}" for c in num}),
-                         width="stretch", hide_index=True)
-            st.caption(f"`{rname}`. A molecule matching several warhead SMARTS is "
-                       "scored under each and listed once per class — that is a "
-                       "property of the criterion, not a duplicate.")
-
-            md = _reference_md()
-            if md is not None and len(md):
-                st.markdown("**Through the 100 ns elevation leg**")
-                mshow = md.rename(columns={
-                    "reference_name": "molecule", "ns": "ns",
-                    "rmsd_mean": "RMSD mean (nm)", "rmsd_max": "RMSD max (nm)",
-                    "engaged": "frames engaged"})
-                st.dataframe(mshow.style.format({
-                    "ns": "{:.0f}", "RMSD mean (nm)": "{:.3f}",
-                    "RMSD max (nm)": "{:.3f}", "frames engaged": "{:.2f}"}),
-                    width="stretch", hide_index=True)
-                st.caption(
-                    "Both stay bound for the full 100 ns — max RMSD under 0.72 nm "
-                    "against a 1.0 nm bound threshold. Verified independently by "
-                    "ligand-COM-to-Cys113-SG distance, which never exceeds 1 nm in "
-                    "10,001 frames. ATRA ran as the NEUTRAL acid, so it is not the "
-                    "species that binds at pH 7.4.")
-
-    for key in ("t3", "t4"):
-        df, fname = D.load_frame(key)
-        st.subheader(D.display_name(key))
-        if df is None or "nac2_weighted_score" not in df.columns:
-            st.info(f"no 2.1.0 ranking in this frame ({fname}) — run "
-                    "`scripts/gui_refresh_v2.py`")
-            continue
-        scored = df.dropna(subset=["nac2_weighted_score"])
-        surv = scored[scored.nac2_passes == True] if "nac2_passes" in scored else scored  # noqa: E712
-        st.caption(f"`{fname}` — {len(scored)} scored, **{len(surv)} clear the "
-                   f"within-class consensus filter**")
-
-        surv, _rules = curated(surv, "Ranking 2.1.0", label=D.display_name(key))
-        if surv.empty:
-            st.info("no candidates survive the current curation filter")
-            continue
-
-        for cls in sorted(surv.warhead_class.dropna().unique()):
-            g = surv[surv.warhead_class == cls]
-            top = g.nsmallest(15, "nac2_class_rank").copy()
-            with st.expander(f"**{cls}** — {len(g)} survivors", expanded=True):
-                # SELECT the source columns first, THEN rename. Renaming in
-                # place collided: the frame already carries its own `rank`, so
-                # nac2_class_rank -> "rank" produced two columns of that name and
-                # Streamlit refused the whole dataframe. Selecting first makes a
-                # collision impossible rather than unlikely.
-                src = [("nac2_class_rank", "rank"),
-                       ("candidate_id", "candidate_id"),
-                       ("nac2_weighted_score", "weighted"),
-                       ("nac2_anchor_quality", "anchor"),
-                       ("nac2_topn_viable_frac", "top-10 viable"),
-                       ("nac2_enrichment_joint", "enrich (2.0.0)"),
-                       ("nac2_consensus_gnina", "consensus"),
-                       ("nac2_frac_in_range", "in range"),
-                       ("QED", "QED"),
-                       ("canonical_smiles", "canonical_smiles")]
-                use = [(a, b) for a, b in src if a in top.columns]
-                show = top[[a for a, _ in use]].copy()
-                show.columns = [b for _, b in use]
-                numeric = [b for _, b in use
-                           if b in ("weighted", "anchor", "top-10 viable",
-                                    "enrich (2.0.0)", "consensus", "in range", "QED")]
-                if "rank" in show.columns:
-                    show["rank"] = show["rank"].astype("Int64")
-                st.dataframe(show.style.format({c: "{:.3f}" for c in numeric}),
-                             width="stretch", hide_index=True)
-
-        # --- structure + poses, for one molecule at a time -------------------
-        have = surv[surv.nac2_pose_path.notna()] if "nac2_pose_path" in surv else surv.iloc[:0]
-        if have.empty:
-            st.info("No 2.1.0 poses on disk yet.")
-            continue
-        pick = st.selectbox(f"structure and poses — {D.display_name(key)}",
-                            list(have.candidate_id.astype(str)),
-                            key=f"nac2_pick_{key}")
-        row = have[have.candidate_id.astype(str) == pick].iloc[0]
-        c1, c2 = st.columns([1, 2])
-        with c1:
+            hit = df[df.candidate_id.astype(str) == cur["ident"]]
+            if len(hit):
+                smi = hit.iloc[0].get("canonical_smiles")
+                break
+        if smi is None:
+            rdf, _ = _ref_table()
+            if rdf is not None and "reference_name" in rdf.columns:
+                hit = rdf[rdf.reference_name.astype(str) == cur["ident"]]
+                if len(hit):
+                    smi = hit.iloc[0].get("smiles")
+        if isinstance(smi, str):
             try:
-                cls = row.get("warhead_class")
-                png = depict.png(row.canonical_smiles, width=340, height=260,
-                                 highlight_smarts=depict.warhead_smarts(cls))
-                st.image(png, caption=f"{pick} — warhead highlighted")
-            except Exception as exc:                       # noqa: BLE001
+                st.image(depict.png(smi, width=330, height=250))
+            except Exception as exc:                   # noqa: BLE001
                 st.caption(f"2D depiction unavailable: {exc}")
-            st.caption(
-                f"class rank **{int(row.nac2_class_rank)}** in {row.get('warhead_class','?')} "
-                f"· weighted {row.nac2_weighted_score:.3f} "
-                f"· top-10 viable {row.nac2_topn_viable_frac:.2f}")
-        with c2:
-            # The shared viewer, not a second implementation: it resolves the
-            # receptor FROM the pose column, draws the labelled surface and
-            # offers the export. `nac2_pose_path` is registered in
-            # pose3d.RECEPTOR_FOR_POSE_COLUMN, whose fallback is 6VAJ -- an
-            # unregistered column would render every pose 48.6 A from the pocket
-            # and look entirely correct doing it.
-            render_pose_viewer(key, D.display_name(key), have, row,
-                               key=f"nac2view_{key}_{pick}",
-                               pose_column="nac2_pose_path", height=430)
+        pose = cur.get("pose")
+        if isinstance(pose, str) and Path(pose).is_file():
+            try:
+                # The receptor is resolved FROM the pose column: nac2_pose_path is
+                # registered in p3d.RECEPTOR_FOR_POSE_COLUMN, whose fallback is
+                # 6VAJ -- an unregistered source draws every pose 48.6 A from the
+                # pocket and looks entirely correct doing it.
+                html = p3d.pose_html(Path(pose),
+                                     receptor=p3d.receptor_for("nac2_pose_path"),
+                                     height=430)
+                st.components.v1.html(html, height=450)
+            except Exception as exc:                   # noqa: BLE001
+                st.caption(f"pose viewer unavailable: {exc}")
+        else:
+            st.info("no poses on disk for this molecule")
 
 
 PANELS = {
