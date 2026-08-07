@@ -44,6 +44,8 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
+from shared import report_theme as T          # noqa: E402
+
 log = logging.getLogger("morning")
 DATA = Path("/data/lab_vm/append_only/inhibition")
 B = DATA / "00_outputs/blacksmith"
@@ -113,7 +115,7 @@ def md_summary(ident: str) -> dict:
     return out
 
 
-def fig_md(ident: str, theme: dict) -> str | None:
+def fig_md(ident: str, theme: dict | None = None) -> str | None:
     wd = MDROOT / ident.replace(":", "_") / "md" / "rep1"
     r = read_xvg(wd / "rmsd.xvg")
     if r is None or len(r) < 10:
@@ -121,24 +123,18 @@ def fig_md(ident: str, theme: dict) -> str | None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    plt.rcParams.update({
-        "figure.facecolor": theme["paper"], "axes.facecolor": theme["paper"],
-        "savefig.facecolor": theme["paper"], "text.color": theme["ink"],
-        "axes.labelcolor": theme["ink"], "xtick.color": theme["muted"],
-        "ytick.color": theme["muted"], "axes.edgecolor": theme["grid"],
-        "grid.color": theme["grid"], "font.size": 9,
-        "axes.spines.top": False, "axes.spines.right": False, "figure.dpi": 120,
-    })
+    plt.rcParams.update(T.MPL)
     t, y = to_ns(r[:, 0], 100.0), r[:, 1]
     fig, a = plt.subplots(figsize=(9, 2.4))
-    a.plot(t, y, lw=0.6, color=theme["accent"])
-    a.axhline(1.0, color=theme["drift"], lw=1, ls="--", alpha=0.8)
+    a.plot(t, y, lw=0.7, color=T.SERIES["accent"])
+    a.axhline(1.0, color=T.SERIES["alert"], lw=1.1, ls="--", alpha=0.9)
+    a.axhspan(1.0, max(1.05, y.max() * 1.05), color=T.SERIES["alert"], alpha=0.05, lw=0)
     a.set_xlabel("time (ns)")
     a.set_ylabel("ligand RMSD (nm)")
     a.set_xlim(0, max(100, t[-1]))
-    a.grid(axis="y", lw=0.5, alpha=0.5)
-    a.text(1, a.get_ylim()[1] * 0.88, "bound below 1.0 nm", color=theme["muted"],
-           fontsize=8)
+    a.grid(axis="y", lw=0.6, alpha=0.6, color=T.SERIES["grid"])
+    a.text(1, a.get_ylim()[1] * 0.9, "bound below 1.0 nm", color=T.SERIES["muted"],
+           fontsize=8.5, va="top")
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight")
     plt.close(fig)
@@ -219,106 +215,6 @@ def gate(md: dict, nac_frac: float | None) -> tuple[str, str]:
     bits.append(f"attack geometry {nac_frac*100:.1f}% "
                 f"{'PASS' if ok_nac else 'FAIL'} (gate >{GATE_NAC*100:.0f}%)")
     return ("pass" if (ok_res and ok_nac) else "fail"), "; ".join(bits)
-
-
-THEMES = {"light": dict(paper="#faf8f4", ink="#14181e", muted="#6d7078",
-                        grid="#ddd8cf", accent="#a8761a", anchor="#2f6f6a",
-                        drift="#a8443a"),
-          "dark": dict(paper="#14171c", ink="#e9e6e0", muted="#9599a1",
-                       grid="#2c3138", accent="#d9a441", anchor="#57a79e",
-                       drift="#cd6f63")}
-
-CSS = """
-:root{--paper:#faf8f4;--raise:#f3efe7;--ink:#14181e;--muted:#6d7078;--rule:#e0dad0;
- --accent:#a8761a;--anchor:#2f6f6a;--drift:#a8443a;
- --serif:"Iowan Old Style",Palatino,Georgia,serif;
- --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
- --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
-@media (prefers-color-scheme:dark){:root{--paper:#14171c;--raise:#1b1f26;--ink:#e9e6e0;
- --muted:#9599a1;--rule:#2c3138;--accent:#d9a441;--anchor:#57a79e;--drift:#cd6f63;}}
-:root[data-theme="dark"]{--paper:#14171c;--raise:#1b1f26;--ink:#e9e6e0;--muted:#9599a1;
- --rule:#2c3138;--accent:#d9a441;--anchor:#57a79e;--drift:#cd6f63;}
-:root[data-theme="light"]{--paper:#faf8f4;--raise:#f3efe7;--ink:#14181e;--muted:#6d7078;
- --rule:#e0dad0;--accent:#a8761a;--anchor:#2f6f6a;--drift:#a8443a;}
-*{box-sizing:border-box}
-body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
- font-size:16px;line-height:1.6}
-.wrap{max-width:1120px;margin:0 auto;padding:0 26px 100px}
-h1,h2,h3{font-family:var(--serif);font-weight:600;line-height:1.2;text-wrap:balance}
-h1{font-size:clamp(2rem,4vw,2.9rem);margin:0 0 .8rem}
-h2{font-size:1.6rem;margin:0 0 .3rem}
-h3{font-size:1.05rem;margin:1.6rem 0 .4rem}
-p{margin:0 0 .9rem}code{font-family:var(--mono);font-size:.87em;background:var(--raise);
- padding:.1em .35em;border-radius:3px}
-.mast{border-bottom:2px solid var(--ink);padding:50px 0 22px;margin-bottom:30px}
-.eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.15em;
- text-transform:uppercase;color:var(--muted);margin-bottom:1.2rem}
-.facts{display:flex;flex-wrap:wrap;gap:0 2.4rem;font-family:var(--mono);font-size:.78rem;
- color:var(--muted);border-top:1px solid var(--rule);padding-top:.3rem}
-.facts div{padding-top:.7rem}
-.facts b{display:block;color:var(--ink);font-weight:600;font-size:1rem}
-section{margin:0 0 3.4rem}
-.shead{display:flex;gap:1rem;align-items:baseline;border-top:1px solid var(--rule);
- padding-top:1.3rem;margin-bottom:1.2rem}
-.snum{font-family:var(--mono);font-size:.74rem;color:var(--accent);padding-top:.4rem;
- letter-spacing:.09em;white-space:nowrap}
-.sub{color:var(--muted);font-size:.93rem;margin:.1rem 0 0}
-.scroll{overflow-x:auto;margin:1.2rem 0;border:1px solid var(--rule);border-radius:5px;
- background:var(--raise)}
-table{border-collapse:collapse;width:100%;font-size:.85rem}
-th,td{padding:.5rem .8rem;text-align:left;border-bottom:1px solid var(--rule);white-space:nowrap}
-th{font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;
- color:var(--muted);background:var(--paper)}
-td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
-tbody tr:last-child td{border-bottom:none}
-tr.ref td{color:var(--anchor);font-weight:600}
-.pill{font-family:var(--mono);font-size:.68rem;padding:.1rem .45rem;border-radius:99px;
- border:1px solid currentColor;white-space:nowrap}
-.pass{color:var(--anchor)}.fail{color:var(--drift)}.pend{color:var(--muted)}
-.card{border:1px solid var(--rule);border-radius:6px;background:var(--raise);
- padding:1.1rem 1.3rem;margin:1.2rem 0}
-.card h3{margin-top:0}
-.row{display:flex;gap:1.4rem;flex-wrap:wrap;align-items:flex-start}
-.row img{background:transparent;border-radius:4px;max-width:100%}
-.callout{border:1px solid var(--rule);border-left:3px solid var(--accent);
- background:var(--raise);padding:1rem 1.2rem;margin:1.4rem 0;border-radius:0 5px 5px 0}
-.callout.warn{border-left-color:var(--drift)}
-.ctitle{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;
- text-transform:uppercase;color:var(--muted);margin-bottom:.4rem}
-figure{margin:1rem 0}figure img{width:100%;height:auto;border-radius:4px}
-.darkonly{display:none}
-@media (prefers-color-scheme:dark){html:not([data-theme]) .lightonly{display:none}
- html:not([data-theme]) .darkonly{display:block}}
-:root[data-theme="dark"] .lightonly{display:none}
-:root[data-theme="dark"] .darkonly{display:block}
-:root[data-theme="light"] .lightonly{display:block}
-:root[data-theme="light"] .darkonly{display:none}
-ul{padding-left:1.1rem}li{margin-bottom:.4rem}
-.foot{border-top:1px solid var(--rule);padding-top:1.2rem;margin-top:3rem;
- font-size:.79rem;color:var(--muted);font-family:var(--mono);line-height:1.7}
-.viewer{border:1px solid var(--rule);border-radius:6px;overflow:hidden;
- background:var(--raise);margin:1rem 0}
-/* 3Dmol absolutely-positions its canvas inside the element it is given. Without
-   position:relative and a real height on THAT element, the canvas escapes its
-   box and lays itself over the page -- which is exactly what happened. */
-.glbox{position:relative;width:100%;height:420px;overflow:hidden}
-.glbox canvas{position:absolute;top:0;left:0}
-.vctl{display:flex;align-items:center;gap:.9rem;padding:.7rem 1rem;
- border-top:1px solid var(--rule);flex-wrap:wrap}
-button.play{font-family:var(--mono);font-size:.78rem;background:var(--ink);
- color:var(--paper);border:none;padding:.42rem .95rem;border-radius:4px;
- cursor:pointer;min-width:78px}
-button.play:hover{opacity:.85}
-button.play:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.vctl input[type=range]{flex:1;min-width:150px;accent-color:var(--accent)}
-.readout{font-family:var(--mono);font-size:.77rem;color:var(--muted);white-space:nowrap}
-.readout b{color:var(--ink)}
-.legend{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:.75rem;color:var(--muted);
- padding:.55rem 1rem;border-top:1px solid var(--rule);font-family:var(--mono)}
-.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:.35rem;
- vertical-align:middle}
-@media (max-width:640px){.wrap{padding:0 16px 70px}}
-"""
 
 
 MOVIE_JS_TMPL = """
@@ -506,7 +402,7 @@ def build(rank, queue, prank, mds, refs, figs, meta, movies) -> str:
         "<tr><td colspan='5' class='pend'>not run</td></tr>"
 
     return f"""<title>Overnight report — 2.1.0 ranking, selection and elevation</title>
-<style>{CSS}</style>
+<style>{T.CSS}</style>
 <div class="wrap">
 <header class="mast">
   <div class="eyebrow">Pin1 covalent inhibitors · pipeline 2.1.0 · inhibition@3IKD_ian</div>
@@ -639,7 +535,7 @@ def main() -> None:
         if s:
             m["depiction"] = depict(s)
         mds.append(m)
-        f = fig_md(i, THEMES["light"])
+        f = fig_md(i)
         if f:
             figs[i] = f
 
