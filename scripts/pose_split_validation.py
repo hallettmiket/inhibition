@@ -113,6 +113,10 @@ def main() -> None:
     ap.add_argument("--set", required=True)
     ap.add_argument("--gpu", default="3")
     ap.add_argument("--nrun", type=int, default=200)
+    ap.add_argument("--dump-poses", default=None,
+                    help="directory to persist ALL poses (geometry + coords + "
+                         "RMSD to crystal) — the substrate for designing a "
+                         "replacement keep rule")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -156,12 +160,32 @@ def main() -> None:
                 n = min(len(poses), len(en))
                 rmsds = np.array([cb.sym_rmsd(px, pe, cx, ce)
                                   for px, pe in poses[:n]])
+                meas = ns.measure_dlg(dlg, cand)
                 if best is None or np.nanmin(rmsds) < np.nanmin(best[0]):
-                    best = (rmsds, np.array(en[:n]))
+                    best = (rmsds, np.array(en[:n]), poses[:n], meas[:n])
             if best is None:
                 raise ValueError("no poses")
-            rmsds, en = best
+            rmsds, en, poses, res = best
             order = np.argsort(en)              # energy rank, as production does
+
+            if args.dump_poses:
+                # EVERY pose, not the kept 20. Designing a replacement for
+                # `KEEP_TOP` needs the population the current rule discards --
+                # that is the whole point -- and production persists only the
+                # survivors, so this is the only place that population exists.
+                dd = Path(args.dump_poses); dd.mkdir(parents=True, exist_ok=True)
+                per = pd.DataFrame({
+                    "ident": r.ident, "pose_idx": np.arange(len(rmsds)),
+                    "energy": en, "energy_rank": np.argsort(order) + 1,
+                    "rmsd_to_crystal": rmsds,
+                    "distance": [m.distance for m in res[:len(rmsds)]],
+                    "angle": [m.angle for m in res[:len(rmsds)]],
+                    "viable": [m.viable for m in res[:len(rmsds)]],
+                })
+                np.save(dd / f"{r.ident}_coords.npy",
+                        np.stack([px for px, _ in poses[:len(rmsds)]]))
+                log.info("  dumped %d poses + coords for %s", len(per), r.ident)
+                per.to_csv(dd / f"{r.ident}_poses.csv", index=False)
             rec.update({
                 "status": "ok", "n_poses": len(rmsds),
                 "best_rmsd_all": float(np.nanmin(rmsds)),
