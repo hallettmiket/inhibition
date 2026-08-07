@@ -194,7 +194,12 @@ def identity(feat: np.ndarray, labels: np.ndarray, mode: int) -> dict:
     d = m[:, 3:].mean(axis=0)
     nd = np.linalg.norm(d)
     d = d / nd if nd > 1e-9 else np.array([0.0, 0.0, 1.0])
-    return {"n_poses": int(len(m)),
+    # NOT "n_poses". The screen merges this dict into a row that already has
+    # `n_poses` meaning "poses this molecule produced"; the same key here means
+    # "poses in this mode", and update() silently overwrote the total with the
+    # mode count. One key, two meanings, no error -- the aggregate row reported
+    # 468 of 468 for a molecule with 500 poses.
+    return {"mode_size": int(len(m)),
             "centroid_x": float(c[0]), "centroid_y": float(c[1]),
             "centroid_z": float(c[2]),
             "dir_x": float(d[0]), "dir_y": float(d[1]), "dir_z": float(d[2]),

@@ -87,8 +87,24 @@ import nac_screen as ns                           # noqa: E402
 import nac_rank as nr                             # noqa: E402
 
 log = logging.getLogger("nac-v2")
-OUT = sout.Topic("blacksmith", "nac_v2")
-POSE_DIR = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v2_poses")
+#: 2.2.0 writes to its OWN topic, not nac_v2.
+#:
+#: `rank_v2` globs `agg_s*_*.csv` out of whichever topic it is pointed at. The
+#: 2.1.0 frames there are one row per MOLECULE at nrun=200; these are one row per
+#: MODE at nrun=500, with idents `<parent>_m<k>`. Because the idents differ, a
+#: dedup would NOT collapse them -- the two tables would simply concatenate into
+#: one frame with two incompatible meanings and no error. Separate topics make
+#: that impossible, and leave the 2.1.0 data intact for comparison.
+OUT = sout.Topic("blacksmith", "nac_v3")
+#: 2.2.0 poses go to their OWN directory, and this is not cosmetic.
+#:
+#: `write_sdf` is guarded by `if not sdf.exists()` -- correct under the
+#: append-only rule, never overwrite. But every molecule already has a file in
+#: `nac_v2_poses` from the 200-run screen, so pointing 2.2.0 at that directory
+#: would have written NONE of the new poses and left every downstream stage
+#: reading the old energy-selected, un-protonated ones. The re-dock would have
+#: completed, reported success, and changed nothing.
+POSE_DIR = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v3_poses")
 #: RETIRED. Every pose is persisted now; this survives only so the docstring
 #: below and #23/#30 can refer to what was removed. Nothing reads it.
 KEEP_TOP = 20        # noqa: F841  (retired -- see nac_screen_v2 docstring)
@@ -176,6 +192,11 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         if best is None:
             raise ValueError("no usable poses")
         frac, res, en, dlg, mol, match = best
+        # `pose_energies` returns a LIST. Every per-mode aggregate indexes it
+        # with a boolean mask, which a list cannot take -- that failed 6 of 6
+        # molecules in the smoke test with "only integer scalar arrays can be
+        # converted to a scalar index".
+        en = np.asarray(en, dtype=float)
 
         in_rng = np.array([nac.NAC_DIST_MIN <= r.distance <= nac.NAC_DIST_MAX
                            for r in res])
@@ -192,9 +213,7 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
 
         # ---- EVERY pose is persisted, not the 20 best-scoring --------------
         # #30: the crystal pose is present in the pose set 93.3% of the time and
-        # survives `#: RETIRED. Every pose is persisted now; this survives only so the docstring
-#: below and #23/#30 can refer to what was removed. Nothing reads it.
-KEEP_TOP = 20        # noqa: F841  (retired -- see nac_screen_v2 docstring) by energy` under half the time. The 180 poses
+        # survives `KEEP_TOP = 20 by energy` under half the time. The 180 poses
         # 2.1.0 discarded are exactly the ones splitting needs.
         rows = pd.DataFrame([{
             "ident": cand.ident, "warhead_class": cand.warhead_class,
@@ -206,6 +225,13 @@ KEEP_TOP = 20        # noqa: F841  (retired -- see nac_screen_v2 docstring) by e
             "angle_kind": res[i].angle_kind,
             "viable": viable[i], "in_range": bool(in_rng[i]),
         } for i in range(len(res))])
+
+        # Anchoring quality per pose, computed ONCE. Used twice below: to score
+        # each mode, and to choose the representative pose within it. Defined
+        # here rather than beside the representative block, which is where it
+        # was and which put its use before its definition.
+        anchor = np.array([nac.anchor_quality(r.distance, r.angle, cand.mechanism)
+                           for r in res])
 
         # ---- one aggregate row PER MODE -----------------------------------
         aggs = []
@@ -264,8 +290,6 @@ KEEP_TOP = 20        # noqa: F841  (retired -- see nac_screen_v2 docstring) by e
         # anchoring picks WITHIN a mode, consensus (mode population) weights
         # BETWEEN modes. Energy appears in neither.
         reps = []
-        anchor = np.array([nac.anchor_quality(r.distance, r.angle, cand.mechanism)
-                           for r in res])
         for k in mode_ids:
             idx = np.flatnonzero(labels == k)
             a = anchor[idx]
@@ -292,6 +316,11 @@ KEEP_TOP = 20        # noqa: F841  (retired -- see nac_screen_v2 docstring) by e
                     aggs[kk][c] = float(g[c].iloc[kk]) if c in g else np.nan
         return rows, aggs
     except Exception as exc:                       # noqa: BLE001
+        # The traceback goes to the log, not just the status string. A one-line
+        # message ("only integer scalar arrays...") is not enough to locate a
+        # failure that hits every molecule, and finding that out after a
+        # four-hour library run is the expensive way to learn it.
+        log.debug("%s failed", cand.ident, exc_info=True)
         agg["status"] = f"failed: {str(exc)[:160]}"
         return pd.DataFrame(), [agg]
     finally:
@@ -320,7 +349,7 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--no-gnina", action="store_true")
     args = ap.parse_args()
-    logging.basicConfig(level=logging.INFO,
+    logging.basicConfig(level=(logging.DEBUG if os.environ.get("NACV2_DEBUG") else logging.INFO),
                         format=f"%(levelname)s [s{args.shard}] %(message)s")
     os.nice(19)
 
