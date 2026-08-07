@@ -114,7 +114,7 @@ anchor that separates at p = 0.007.
 - `scripts/elevation_report.py` — self-contained HTML report; every figure and
   table recomputed from the shard CSVs at build time.
 
-### Known-unfixed, carried into 2.1.0
+### Known-unfixed, carried forward
 - `mmgbsa.RECEPTOR_PDB` still defaults to **6VAJ**, and every covalent path takes
   that default.
 - `nac_rank.refine()` counts `failed:` rows as done when resuming.
