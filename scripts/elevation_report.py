@@ -799,9 +799,29 @@ def build_html(s1, pre, anchor, m1, t2, m2, md, figs, pdb, dist, labels, positio
   </table></div>
   <div class="col"><p>Tier 2 pushes the warhead out of the near-attack window and measures how
   hard the push has to be. Every replica escapes within 3 ns — that is expected for
-  well-tempered metadynamics and is not the readout; the <em>cost</em> is. On the completed
-  groups the enrichment contrast reproduces tier 1's null: A and B are indistinguishable on
-  both occupancy and bias. The anchor is still running and is the number that will matter.</p></div>
+  well-tempered metadynamics and is <em>not</em> the readout; the cost is. Two facts
+  about the protocol constrain how far it can be read: <code>bias_at_exit</code> separated
+  nothing (all p&nbsp;≥&nbsp;0.08) and tracks occupancy at ρ&nbsp;=&nbsp;0.974, so the
+  escape-cost term is nearly inert at this length — <strong>occupancy is the discriminating
+  readout</strong>. And the run is short and unconverged by design, so the comparison rests on
+  every molecule receiving the identical protocol rather than on any single molecule's score
+  being its stability.</p>
+  <p><strong>Tier 2 reproduces tier 1's null independently.</strong> A&nbsp;≈&nbsp;B&nbsp;≈&nbsp;D
+  on both occupancy and bias, while all three BDHI groups separate from the crystallographic
+  anchor (p&nbsp;=&nbsp;0.0070, 0.0148, 0.0207). The two tiers agree at Spearman
+  ρ&nbsp;=&nbsp;0.475, p&nbsp;=&nbsp;0.003 across 37 molecules.</p>
+  <div class="callout warn">
+    <div class="ctitle">A claim made and withdrawn</div>
+    <p>On tier-2 occupancy V (0.172) is not distinguished from REF (0.163), and this was
+    briefly reported as the pre-registration's <em>V&nbsp;≈&nbsp;REF</em> reading firing.
+    <strong>It is withdrawn.</strong> On the readout the prereg actually named — tier-1
+    |Δd| — V is 0.203 against REF's 0.102, so <strong>the two tiers disagree in sign on the
+    same comparison</strong>. Failing to distinguish at n&nbsp;=&nbsp;5 is not equivalence,
+    the prereg forbids inference at that size in terms, and the two readouts that favour V
+    were selected after seeing that they agreed. Nothing here supports a synthesis
+    shortlist.</p>
+  </div>
+  </div>
 </section>
 
 <section>
