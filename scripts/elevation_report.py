@@ -362,31 +362,91 @@ def _png(fig, plt) -> str:
 # --------------------------------------------------------------------------- movie
 
 
-def movie_payload(pdb: Path) -> tuple[str, list[float], list[float]]:
-    """Multi-model PDB plus the per-frame warhead→SG distance shown in the viewer.
+#: Formal charge class per residue, used to paint the surface red→white→blue.
+#: AMBER splits histidine by protonation state: HID/HIE are neutral at pH 7,
+#: HIP is the doubly-protonated cation. Lumping all three as "basic" would
+#: paint two neutral residues blue.
+ACIDIC = {"ASP", "GLU"}
+BASIC = {"ARG", "LYS", "HIP"}
 
-    The distance is recomputed from the SAME coordinates the viewer renders, so
-    the readout under the animation cannot drift from what is on screen.
+#: Pin1 PPIase active site in UniProt Q13526 numbering, mapped onto this
+#: structure's renumbering. The offset is verified by residue IDENTITY at build
+#: time rather than trusted — an offset that slipped by one would label the
+#: wrong residue with a name that still looks entirely plausible.
+PIN1_OFFSET = 50
+KEY_SITES = {
+    113: ("Cys113", "target", "CYS"), 59: ("His59", "catalytic", "HIS"),
+    157: ("His157", "catalytic", "HIS"), 152: ("Thr152", "catalytic", "THR"),
+    63: ("Lys63", "basic", "LYS"), 68: ("Arg68", "basic", "ARG"),
+    69: ("Arg69", "basic", "ARG"), 122: ("Leu122", "pocket", "LEU"),
+    130: ("Met130", "pocket", "MET"), 134: ("Phe134", "pocket", "PHE"),
+}
+#: Hang each label off the sidechain tip so it lands on the surface rather than
+#: buried at the backbone.
+TIP = {"CYS": "SG", "LYS": "NZ", "ARG": "CZ", "HID": "NE2", "HIE": "NE2",
+       "HIP": "NE2", "PHE": "CZ", "MET": "SD", "LEU": "CD1", "THR": "OG1"}
+HIS_FORMS = {"HID", "HIE", "HIP"}
+
+
+def _charge(resn: str) -> float:
+    return -1.0 if resn in ACIDIC else (1.0 if resn in BASIC else 0.0)
+
+
+def surface_payload(pdb: Path) -> tuple[str, list, list, list]:
+    """Multi-model PDB carrying formal charge in the B-factor, plus overlays.
+
+    Returns (pdb_text, warhead_sg_distance_per_frame, label_defs,
+    label_positions_per_frame). Distance and label anchors are computed from the
+    SAME coordinates that get rendered, so no readout can disagree with what is
+    on screen.
     """
-    text = pdb.read_text()
-    frames, cur = [], []
-    for l in text.splitlines():
+    frames, cur, out, block = [], [], [], []
+    for l in pdb.read_text().splitlines():
         if l.startswith("MODEL"):
-            cur = []
+            cur, block = [], [l]
         elif l.startswith(("ATOM", "HETATM")):
-            cur.append((l[17:20].strip(), l[12:16].strip(),
+            resn, name = l[17:20].strip(), l[12:16].strip()
+            cur.append((resn, int(l[22:26]), name,
                         float(l[30:38]), float(l[38:46]), float(l[46:54])))
+            block.append(f"{l[:60]}{_charge(resn):6.2f}{l[66:]}")
         elif l.startswith("ENDMDL"):
             frames.append(cur)
-    i_sg = next(i for i, a in enumerate(frames[0]) if a[0] == "CYS" and a[1] == "SG")
-    i_c10 = next(i for i, a in enumerate(frames[0]) if a[0] == "MOL" and a[1] == "C10")
-    dist, cen = [], []
+            out.extend(block + [l])
+
+    f0 = frames[0]
+    by_res: dict[int, str] = {}
+    for a in f0:
+        by_res.setdefault(a[1], a[0])
+
+    labels = []
+    for pin1, (text, kind, expect) in sorted(KEY_SITES.items()):
+        rid = pin1 - PIN1_OFFSET
+        got = by_res.get(rid)
+        norm = "HIS" if got in HIS_FORMS else got
+        if norm != expect:
+            raise ValueError(
+                f"residue-numbering check failed: {text} maps to resid {rid}, "
+                f"which is {got}, but {expect} was expected. The offset is "
+                f"wrong — refusing to label the structure with names that do "
+                f"not match it.")
+        want = TIP.get(got, "CA")
+        idx = next((i for i, a in enumerate(f0) if a[1] == rid and a[2] == want), None)
+        if idx is None:
+            idx = next(i for i, a in enumerate(f0) if a[1] == rid and a[2] == "CA")
+        labels.append(dict(text=text, kind=kind, resid=rid, atom=idx))
+
+    cys = 113 - PIN1_OFFSET
+    i_sg = next(i for i, a in enumerate(f0)
+                if a[1] == cys and a[2] == "SG")
+    i_c10 = next(i for i, a in enumerate(f0) if a[0] == "MOL" and a[2] == "C10")
+
+    dist, positions = [], []
     for f in frames:
-        sg = np.array(f[i_sg][2:])
-        dist.append(round(float(np.linalg.norm(np.array(f[i_c10][2:]) - sg)), 2))
-        lig = np.mean([a[2:] for a in f if a[0] == "MOL"], axis=0)
-        cen.append(round(float(np.linalg.norm(lig - sg)), 2))
-    return text, dist, cen
+        sg = np.array(f[i_sg][3:])
+        dist.append(round(float(np.linalg.norm(np.array(f[i_c10][3:]) - sg)), 2))
+        positions.append([[round(f[d["atom"]][3 + k], 2) for k in range(3)]
+                          for d in labels])
+    return "\n".join(out), dist, labels, positions
 
 
 # --------------------------------------------------------------------------- html
@@ -492,6 +552,9 @@ button.play:focus-visible,input:focus-visible{outline:2px solid var(--accent);ou
 input[type=range]{flex:1;min-width:150px;accent-color:var(--accent)}
 .readout{font-family:var(--mono);font-size:.79rem;color:var(--muted);white-space:nowrap}
 .readout b{color:var(--ink)}
+.tog{font-family:var(--mono);font-size:.76rem;color:var(--muted);cursor:pointer;
+  display:inline-flex;align-items:center;gap:.4rem}
+.tog input{accent-color:var(--accent);cursor:pointer}
 #state{font-family:var(--mono);font-size:.72rem;padding:.16rem .5rem;border-radius:99px;
   border:1px solid currentColor}
 .s-nac{color:var(--anchor)} .s-bound{color:var(--accent)} .s-free{color:var(--drift)}
@@ -519,7 +582,7 @@ def fmt_p(p: float) -> str:
     return f'<span class="{cls}">{s}</span>'
 
 
-def build_html(s1, pre, anchor, m1, t2, m2, md, figs, pdb, dist, cen) -> str:
+def build_html(s1, pre, anchor, m1, t2, m2, md, figs, pdb, dist, labels, positions) -> str:
     three = (REPO / "scripts/.cache_3dmol-min.js").read_text()
 
     rows_g = "".join(
@@ -791,16 +854,30 @@ def build_html(s1, pre, anchor, m1, t2, m2, md, figs, pdb, dist, cen) -> str:
       <div class="readout"><b id="tns">0</b> ns &nbsp;·&nbsp; warhead → SG <b id="dsg">—</b> Å</div>
       <span id="state" class="s-bound">bound</span>
     </div>
+    <div class="controls" style="border-top:none;padding-top:0">
+      <label class="tog"><input type="checkbox" id="surf" checked> van der Waals surface</label>
+      <label class="tog"><input type="checkbox" id="labs" checked> residue labels</label>
+      <span class="readout" id="perf"></span>
+    </div>
     <div class="legend">
-      <span><span class="swatch" style="background:#8a9099"></span>Pin1 backbone</span>
-      <span><span class="swatch" style="background:var(--accent)"></span>{LEAD}</span>
+      <span><span class="swatch" style="background:#2f6fb5"></span>basic · Arg, Lys</span>
+      <span><span class="swatch" style="background:#efece7;outline:1px solid #b9b3aa"></span>neutral</span>
+      <span><span class="swatch" style="background:#c0392b"></span>acidic · Asp, Glu</span>
       <span><span class="swatch" style="background:#e8c14a"></span>Cys113 SG</span>
-      <span>1 ns per frame · fitted on backbone</span>
+      <span><span class="swatch" style="background:var(--accent)"></span>{LEAD}</span>
+      <span>1 ns / frame · fitted on backbone</span>
     </div>
   </div>
-  <div class="col"><p class="sub">101 frames at 1 ns intervals, PBC-corrected and
-  superposed on the protein backbone. The distance readout is recomputed from the same
-  coordinates being rendered, so it cannot drift from what is on screen.</p></div>
+  <div class="col"><p class="sub">101 frames at 1 ns intervals, PBC-corrected and superposed
+  on the protein backbone. The surface is a <strong>van der Waals</strong> surface — chosen
+  over the slower solvent-excluded surface because it is recomputed at <em>every</em> frame, so
+  it tracks sidechain motion instead of being a still from frame 0. It is coloured by formal
+  charge, <span style="color:#c0392b">acidic</span> to <span style="color:#2f6fb5">basic</span>,
+  with neutral residues pale. Active-site residues are
+  labelled in <strong>Pin1 (UniProt Q13526) numbering</strong>; this structure is renumbered by
+  −50, and the build verifies every label against the residue identity at that position rather
+  than trusting the offset. The distance readout comes from the same coordinates being
+  rendered.</p></div>
 
   <div class="col">
     <div class="callout warn">
@@ -895,24 +972,70 @@ def build_html(s1, pre, anchor, m1, t2, m2, md, figs, pdb, dist, cen) -> str:
 
 <script>{three}</script>
 <script>
-const DSG = {json.dumps(dist)}, CEN = {json.dumps(cen)}, ESC = {ESCAPE_NS};
+const DSG = {json.dumps(dist)}, ESC = {ESCAPE_NS};
+const LABELS = {json.dumps(labels)}, LPOS = {json.dumps(positions)};
 const NACLO = {NAC_LO * 10:.2f}, NACHI = {NAC_HI * 10:.2f};
-// UMD footer exports the global as 3Dmol; $3Dmol is the conventional alias
-// and is not guaranteed by every build. Bind whichever exists.
+// The UMD footer only guarantees the global as 3Dmol; $3Dmol is the
+// conventional alias and is not exported by every build. Bind whichever exists.
 const MOL3D = window.$3Dmol || window['3Dmol'];
-let viewer, frame = 0, timer = null;
 
-function styleIt() {{
-  viewer.setStyle({{}}, {{cartoon: {{color: '#8a9099', opacity: 0.92}}}});
-  viewer.setStyle({{resn: 'MOL'}}, {{stick: {{radius: 0.17, colorscheme: 'yellowCarbon'}}}});
-  viewer.addStyle({{resn: 'CYS', atom: 'SG'}}, {{sphere: {{radius: 0.62, color: '#e8c14a'}}}});
+const KIND = {{ target: '#e8c14a', catalytic: '#57a79e', basic: '#2f6fb5', pocket: '#9599a1' }};
+let viewer, frame = 0, timer = null, lastCost = 0;
+
+const wantSurf = () => document.getElementById('surf').checked;
+const wantLabs = () => document.getElementById('labs').checked;
+
+function paint() {{
+  viewer.setStyle({{}}, {{cartoon: {{color: '#8a9099', opacity: 0.55}}}});
+  viewer.setStyle({{resn: 'MOL'}}, {{stick: {{radius: 0.19, colorscheme: 'yellowCarbon'}}}});
+  viewer.addStyle({{resi: {113 - PIN1_OFFSET}, atom: 'SG'}},
+                  {{sphere: {{radius: 0.7, color: '#e8c14a'}}}});
+}}
+
+// The surface is rebuilt every frame rather than computed once from frame 0:
+// the protein is fitted on backbone so the fold barely moves, but the sidechains
+// lining the pocket do, and a still surface would quietly misreport the pocket
+// the ligand is actually leaving.
+function drawSurface() {{
+  viewer.removeAllSurfaces();
+  if (!wantSurf()) return;
+  viewer.addSurface(MOL3D.SurfaceType.VDW, {{
+    opacity: 0.66,
+    colorscheme: {{prop: 'b', gradient: new MOL3D.Gradient.RWB(-1, 1)}}
+  }}, {{resn: 'MOL', invert: true}});
+}}
+
+function drawLabels(i) {{
+  viewer.removeAllLabels();
+  if (!wantLabs()) return;
+  LABELS.forEach((L, k) => {{
+    const p = LPOS[i][k];
+    viewer.addLabel(L.text, {{
+      position: {{x: p[0], y: p[1], z: p[2]}},
+      backgroundColor: '#101418', backgroundOpacity: 0.72,
+      fontColor: KIND[L.kind] || '#e9e6e0',
+      fontSize: L.kind === 'target' ? 14 : 11,
+      borderThickness: L.kind === 'target' ? 1.2 : 0,
+      borderColor: '#e8c14a', inFront: true
+    }});
+  }});
 }}
 
 function show(i) {{
   frame = i;
+  const t0 = performance.now();
   const r = viewer.setFrame(i);
-  if (r && typeof r.then === 'function') {{ r.then(() => viewer.render()); }}
-  else {{ viewer.render(); }}
+  const after = () => {{
+    paint();
+    drawSurface();
+    drawLabels(i);
+    viewer.render();
+    lastCost = performance.now() - t0;
+    document.getElementById('perf').textContent =
+      wantSurf() ? Math.round(lastCost) + ' ms/frame' : '';
+  }};
+  if (r && typeof r.then === 'function') {{ r.then(after); }} else {{ after(); }}
+
   document.getElementById('tns').textContent = i;
   document.getElementById('dsg').textContent = DSG[i].toFixed(1);
   document.getElementById('scrub').value = i;
@@ -922,26 +1045,36 @@ function show(i) {{
   else {{ st.textContent = 'bound'; st.className = 's-bound'; }}
 }}
 
+// Surface rebuilds dominate the frame cost, so playback paces itself off what
+// the last frame actually took instead of a fixed interval that would either
+// stutter or crawl depending on the machine.
+function step() {{
+  show((frame + 1) % DSG.length);
+  if (timer) timer = setTimeout(step, wantSurf() ? Math.max(120, lastCost * 1.15) : 90);
+}}
+
 function toggle() {{
   const b = document.getElementById('play');
-  if (timer) {{ clearInterval(timer); timer = null; b.textContent = '▶ Play'; return; }}
+  if (timer) {{ clearTimeout(timer); timer = null; b.textContent = '▶ Play'; return; }}
   b.textContent = '❚❚ Pause';
-  timer = setInterval(() => show((frame + 1) % DSG.length), 90);
+  timer = setTimeout(step, 60);
 }}
 
 window.addEventListener('DOMContentLoaded', () => {{
   const PDB = document.getElementById('pdbdata').textContent;
   viewer = MOL3D.createViewer(document.getElementById('gl'), {{backgroundAlpha: 0}});
   viewer.addModelsAsFrames(PDB, 'pdb');
-  styleIt();
+  paint();
   viewer.zoomTo({{resn: 'MOL'}});
-  viewer.zoom(0.45);
+  viewer.zoom(0.35);
   show(0);
   document.getElementById('play').addEventListener('click', toggle);
   document.getElementById('scrub').addEventListener('input', e => {{
     if (timer) toggle();
     show(+e.target.value);
   }});
+  document.getElementById('surf').addEventListener('change', () => show(frame));
+  document.getElementById('labs').addEventListener('change', () => show(frame));
 }});
 </script>
 <script type="text/plain" id="pdbdata">{pdb}</script>
@@ -970,10 +1103,11 @@ def main() -> None:
         figs[f"t1_{name}"] = fig_tier1(s1, theme)
     log.info("figures built for both themes")
 
-    pdb, dist, cen = movie_payload(Path(args.movie))
+    pdb, dist, labels, positions = surface_payload(Path(args.movie))
     log.info("movie: %d frames", len(dist))
 
-    html = build_html(s1, pre, anchor, m1, t2, m2, md, figs, pdb, dist, cen)
+    html = build_html(s1, pre, anchor, m1, t2, m2, md, figs, pdb, dist,
+                      labels, positions)
     Path(args.out).write_text(html)
     log.info("wrote %s (%.1f MB)", args.out, len(html) / 1e6)
 
