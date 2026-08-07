@@ -1,4 +1,4 @@
-# Recap of 2.0.0 — what was built, what it proved, and what carries forward
+# Recap of 2.0.0 “Azurite” — what was built, what it proved, and what carries forward
 
 *Written at the open of the ranking rework. Branch `receptor/3ikd-chemist-prepared`,
 58 commits, tagged `v2.0.0`. @tt8804, 2026-08-06.*

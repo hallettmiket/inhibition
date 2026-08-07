@@ -1,4 +1,4 @@
-# The 2.1.0 framework
+# The 2.1.0 “Bornite” framework
 
 *Settled 2026-08-06 with @tt8804. This is the architecture; `CHANGELOG.md` will
 carry the release when the version number is fixed (see §8 — whether this is

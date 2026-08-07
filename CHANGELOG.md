@@ -16,28 +16,40 @@ Every entry below states whether prior numbers survive it.
 
 ---
 
-## next — number not yet fixed
+## 2.2.0 “Chalcopyrite” — in progress
 
-Ranking rework, opened after 2.0.0 established that the 2.0.0 ranking has no
-physical support (D0071). Recap of what carries forward: `docs/recap_2.0.0.md`.
-
-**Whether this is 2.1.0 or 3.0.0 depends on what the tweaks do**, and the test is
-stated rather than chosen:
-
-- **2.1.0** if the reworked ranking *adds* or *reweights* components. Enrichment
-  and consensus values already reported stay valid measurements; only their
-  standing in the ranking changes.
-- **3.0.0** if it **redefines** an existing metric — most likely `enrichment`,
-  which D0068 showed should be a top-N fraction rather than a whole-population
-  one. Old and new values would share a name and not be comparable, which is the
-  same hazard as the receptor swap and gets the same bump.
-
-Working on branch `ranking/2.1.0-rework`; the tag is cut when the shape of the
-change is known.
+Pose splitting and tooling upgrades. Outline: `docs/outline_2.2.0.md`.
+Retrospective on the release it follows: `docs/retrospective_2.1.0.md`.
 
 ---
 
-## 2.0.0 — 2026-08-06
+## 2.1.0 “Bornite” — 2026-08-07
+
+The ranking rework. Screen re-run persisting per-pose geometry, gnina scores and
+the poses themselves; consensus as a per-warhead-class quota (D0073); a weighted
+anchoring score; selection that re-measures the pose it elevates; BPMD pose
+ranking as a separate stage; references through the identical criterion, with
+Sulfopin and ATRA through 100 ns.
+
+**Numbered 2.1.0, not 3.0.0.** The open question when this work began was whether
+the rework *redefined* `enrichment` — which would make old and new values share a
+name while not being comparable, and would take a major. It did not: the 2.0.0
+quantity is carried forward unchanged as `enrichment_joint` and the new
+quantities sit beside it under new names. Existing numbers stay valid; what
+changed is their standing in the ranking.
+
+**Closed by its own finding (issue #23):** the pose window it scores is ordered by
+docking energy, and energy carries no information about reaction geometry —
+Sulfopin, which has a crystallographic Cys113 adduct, scores 0.000. The structure
+carries forward; the score does not. Full account in
+`docs/retrospective_2.1.0.md`.
+
+Names come from the copper-mineral alphabet in issue #27 — see
+[`docs/versioning.md`](docs/versioning.md).
+
+---
+
+## 2.0.0 “Azurite” — 2026-08-06
 
 **MAJOR: every 1.0.0 number is invalid.** D0059 replaced the receptor, and 6VAJ
 and 3IKD place the pocket 48.6 Å apart — prior values measure the wrong site.

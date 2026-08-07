@@ -33,6 +33,27 @@ this hazard: redefining `enrichment` from a whole-population fraction to a top-N
 fraction would make every published enrichment value non-comparable while still
 being called "enrichment". If 2.1.0 does that, it is **3.0.0**.
 
+## Release names
+
+Releases carry a name as well as a number, from a **copper-mineral alphabet**
+(issue #27): every name is an IMA-recognised mineral with Cu in its formula,
+taken in order.
+
+| version | letter | mineral | formula | colour |
+|---|---|---|---|---|
+| 2.0.0 | **A** | **Azurite** | Cu₃(CO₃)₂(OH)₂ | deep azure blue |
+| 2.1.0 | **B** | **Bornite** | Cu₅FeS₄ | iridescent peacock |
+| 2.2.0 | **C** | **Chalcopyrite** | CuFeS₂ | brass yellow |
+
+The letter advances **per release**, not per major — so the next release after
+Chalcopyrite is Dioptase whether it is 2.3.0 or 3.0.0. A name is easier to say
+in a meeting than "two point one", and unlike a number it cannot be confused
+with a different quantity that also has dots in it.
+
+**1.0.0 has no name.** It was assigned retroactively and never cut (below), so
+giving it a letter would imply a release that never happened and would push every
+real release one letter along.
+
 ## Applying it to what we have
 
 **1.0.0** is assigned **retroactively** and is not a real release. It names

@@ -1,4 +1,4 @@
-# 2.2.0 outline — pose splitting, and a score that survives its own test
+# 2.2.0 “Chalcopyrite” — pose splitting, and a score that survives its own test
 
 *Opened 2026-08-07 at @tt8804's direction: "tooling upgrades and an upgraded
 pose-splitting feature". Companion to `docs/retrospective_2.1.0.md`.*

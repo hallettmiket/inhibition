@@ -1,4 +1,4 @@
-# 2.1.0 retrospective
+# 2.1.0 “Bornite” retrospective
 
 *Written at the close of the 2.1.0 ranking framework, 2026-08-07, before 2.2.0
 opens. Companion to `docs/framework_2.1.0.md` (what was built) and
