@@ -62,14 +62,56 @@ coordinates for a mode-diverse subset.
 
 ### 1.2 Pose splitting — the core feature
 
-**Change.** Each molecule stops having *a* score and gets a **ranked set of
-binding-mode hypotheses**, each scored on its own.
+**@tt8804, 2026-08-07 — the shape of this is settled, and it is simpler than what
+I first proposed:**
+
+> *"within the 200 to split/group poses by consensus and we treat all those split
+> poses as separate candidates and we filter by our current methods"*
+
+**A mode is a candidate row.** Not a nested structure hanging off a molecule — a
+row in the same table, scored by the same functions, filtered by the same
+pipeline.
 
 ```
-molecule ─┬─ mode A   n=64   anchor 0.71   viable 0.55   ← elevate
-          ├─ mode B   n=51   anchor 0.12   viable 0.02
-          └─ mode C   n=18   anchor 0.44   viable 0.30   ← and maybe
+   BEFORE                          AFTER
+   t4_abc123   score 0.31          t4_abc123_m1   n=64   score 0.71
+                                   t4_abc123_m2   n=51   score 0.12
+                                   t4_abc123_m3   n=18   score 0.44
 ```
+
+**This is the right call and it is worth saying why.** My version made a molecule
+own a ranked set of hypotheses, which meant every downstream consumer — ranking,
+class stratification, selection, the GUI, the elevation queue — needed to learn a
+new nested shape. Flattening a mode into a row means **none of them change**. The
+candidate table gets longer and everything that reads it keeps working. The
+5,765-molecule table becomes perhaps 12,000–20,000 rows, which is nothing.
+
+It also makes modes compete *directly*: a strong mode of a mediocre molecule can
+outrank a weak mode of a good one, which is exactly the comparison the current
+design cannot express.
+
+**The stage sequence, confirmed by @tt8804:**
+
+```
+1. chemical-space generation
+2. pose generation          dock 200, keep all 200
+3. POSE SPLITTING           ← new stage: group by consensus, emit one row per mode
+4. ranking                  unchanged methods, longer table
+5. selection
+6. elevation
+```
+
+Splitting is a **stage**, not a scoring option. It sits between generation and
+ranking, and its output is the candidate table ranking already consumes. That is
+why nothing downstream needs rewriting.
+
+**"By consensus" now means something different, and better.** Consensus today is
+*"do the top-10 by energy agree?"* — which #23/#30 killed, because the top-10 is
+an energy-selected sample and energy is uninformative. Under splitting, consensus
+becomes **how populated a mode is over all 200 poses**: 64 of 200 poses agreeing
+on a geometry *is* the consensus for that mode. Same word, no energy anywhere in
+it, and it stops being a whole-molecule scalar that punishes genuine multi-mode
+binders.
 
 **Design constraints, each from something measured:**
 
@@ -97,10 +139,35 @@ molecule ─┬─ mode A   n=64   anchor 0.71   viable 0.55   ← elevate
   not privilege multi-mode molecules, or ranking acquires a bias toward
   promiscuous binders — the exact failure mode consensus had, inverted.
 
+- **`topn_viable_frac` cannot survive into a mode.** It is defined as "the
+  fraction of the top-10 *by energy* that are reaction-competent". Inside a mode
+  that is still an energy-ordered sample of the mode's members. It is replaced by
+  the mode's own `viable_fraction` over **all** its poses — no energy anywhere in
+  the score. This retires the last consumer of the energy ordering.
+
+- **⚠ THE TRAP: the deliverable is molecules, not modes.** Selection takes the top
+  *n* per warhead class. Once modes are rows, one molecule contributing four modes
+  can occupy four slots — and the top-5 becomes five modes of two compounds. The
+  chemists synthesise **one compound a week** and the deliverable is a **top-5 of
+  distinct molecules**, so a top-5 that is really a top-2 is a broken deliverable
+  even though every row is legitimate.
+
+  **The rule:** modes compete as rows through ranking, and **collapse to distinct
+  parent molecules at selection.** A molecule enters the top-*n* once, on its best
+  mode. Its other modes are retained and reported — because "this molecule has a
+  second credible mode" is exactly the thing worth knowing at elevation, and
+  testing two modes of one molecule is a stated goal — but they do not consume
+  deliverable slots.
+
+- **Class stratification survives untouched.** Each mode inherits its parent's
+  warhead class, so `class_rank` and per-class selection (D0073 /
+  `docs/class_stratification.md`) keep working on the longer table with no change.
+
 **Accepted when:** (a) mode assignments are stable across two independent
 re-docks of the same molecule; (b) on the 15 ground-truth cases, the crystal pose
 falls inside a named mode ≥90% of the time; (c) elevating the top mode beats
-33.3% (the current top-10 number), with 93.3% as the ceiling.
+33.3% (the current top-10 number), with 93.3% as the ceiling; (d) a top-5 request
+returns **5 distinct molecules**.
 
 ---
 
