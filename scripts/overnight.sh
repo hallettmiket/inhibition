@@ -95,4 +95,30 @@ nice -n 19 $PY scripts/elevate_queue.py --n "${#MDGPUS[@]}" \
   > "$LOGS/elevate.log" 2>&1
 say "elevation launcher exit $? -> $LOGS/elevate.log"
 
-say "chain complete; MD continues in tmux session 'elevate100'"
+# ------------------------------------------------------------------ 6. report
+# An interim report NOW, so there is something to read even if the 100 ns leg
+# does not finish; then a final one once the trajectories stop. Every section
+# degrades to "not yet" rather than failing, which is what makes the interim
+# worth writing at all.
+say "interim report"
+nice -n 19 $PYC scripts/morning_report.py \
+  --out /data/lab_vm/modifiable/inhibition/morning_report.html \
+  > "$LOGS/report_interim.log" 2>&1
+say "interim report exit $? -> /data/lab_vm/modifiable/inhibition/morning_report.html"
+
+say "waiting for the 100 ns trajectories"
+DEADLINE=$(( $(date +%s) + 30600 ))            # 8.5 h ceiling; the report ships regardless
+while pgrep -u "$USER" -f "md_residence_3ikd.py" >/dev/null 2>&1; do
+  [ "$(date +%s)" -ge "$DEADLINE" ] && { say "deadline reached; reporting on what landed"; break; }
+  sleep 900
+  # refresh as it goes, so an early riser sees current numbers
+  nice -n 19 $PYC scripts/morning_report.py \
+    --out /data/lab_vm/modifiable/inhibition/morning_report.html \
+    >> "$LOGS/report_interim.log" 2>&1
+done
+
+say "final report"
+nice -n 19 $PYC scripts/morning_report.py \
+  --out /data/lab_vm/modifiable/inhibition/morning_report.html \
+  > "$LOGS/report_final.log" 2>&1
+say "chain complete — report at /data/lab_vm/modifiable/inhibition/morning_report.html"
