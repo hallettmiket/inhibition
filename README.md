@@ -8,6 +8,39 @@ This is a murmurent **choreography**: a problem statement many people attack,
 each with their own **approach**. The pipeline code lives here; the generic
 machinery for *describing* choreographies belongs in the murmurent repo.
 
+<!-- release-block:start -->
+## Release 2.1.0 “Bornite” — closed
+
+> **Branch** `release/2.1.0-bornite` · **status** closed, superseded by
+> [2.2.0 “Chalcopyrite”](https://github.com/hallettmiket/inhibition/tree/release/2.2.0-chalcopyrite)
+>
+> | | |
+> |---|---|
+> | **Outline / architecture** | [`docs/framework_2.1.0.md`](docs/framework_2.1.0.md) — the four stages, and why each choice was made |
+> | **Retrospective** | **[`docs/retrospective_2.1.0.md`](docs/retrospective_2.1.0.md)** — what worked, what broke, and the finding that ended the release |
+> | **Predecessor** | [`docs/recap_2.0.0.md`](docs/recap_2.0.0.md) |
+> | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) |
+
+**What it was.** The ranking rework. The screen re-ran across all 5,769
+candidates *persisting its working* — per-pose geometry, gnina scores and the
+poses themselves. Consensus became a quota **within warhead class** rather than a
+library-wide bar (D0073). Ranking molecules and ranking *a molecule's own poses*
+were separated into different stages, the second using BPMD. Known binders went
+through the identical criterion, and Sulfopin and ATRA through 100 ns MD.
+
+**How it ended.** Its own instruments indicted its score. The pose window it
+ranks on is ordered by **docking energy, which carries no information about
+reaction geometry** — ρ = +0.009 across 115,300 poses — and **Sulfopin, which has
+a crystallographic Cys113 adduct, scores 0.000**. The structure carries forward;
+the score does not. Recorded as
+[issue #23](https://github.com/hallettmiket/inhibition/issues/23) and in the
+retrospective above.
+
+**Two numbers from this release worth keeping:** docking finds a sub-2 Å pose for
+a Pin1 crystal ligand **41.5%** of the time and puts it first **18.3%** of the
+time. Almost everything 2.1.0 built sits in that gap.
+<!-- release-block:end -->
+
 > ### New here? Read these two first
 >
 > 1. **[`docs/state_of_the_project.md`](docs/state_of_the_project.md)** — what
