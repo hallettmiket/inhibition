@@ -29,11 +29,24 @@ without docking again:
 
 WHAT IS PERSISTED, chosen so no third re-run is needed:
 
-  poses_*.csv   one row per pose for the TOP 20 BY ENERGY: energy, distance,
-                angle, approach, viable, plus gnina Affinity/CNNscore/
-                CNNaffinity. Twenty is past every window worth testing (D0068
-                argues for top-N; the redock benchmark found the right pose
-                always inside the top 10 when present).
+  poses_*.csv   one row per pose for EVERY pose -- not the top 20 by energy.
+                energy, distance, angle, approach, viable, and the MODE the pose
+                was assigned to.
+
+                The old top-20-by-energy window was the single largest loss in
+                the pipeline. #30 measured that the crystallographic pose is
+                present in the pose set 93.3% of the time at 200 runs (100% at
+                500) and survives the energy cut under half the time, because
+                energy places the correct pose at a rank indistinguishable from
+                uniform (KS p = 0.666). Persisting only the survivors also meant
+                pose splitting could not be done retrospectively at all.
+
+                ENERGY STILL GENERATES THE POSES AND NO LONGER SELECTS THEM.
+                Each of the N runs is an independent Lamarckian GA optimising
+                AutoDock's scoring function, so energy decides WHERE a run lands
+                -- that cannot be removed without removing the docking. What is
+                removed is energy as a SELECTION criterion. `mean_energy` is
+                reported per mode and consumed by nothing.
   agg_*.csv     counts over ALL poses -- n_poses, n_in_range, n_viable,
                 n_viable_given_in_range -- so the conditional score can also be
                 computed over the whole population, not only the retained window.
