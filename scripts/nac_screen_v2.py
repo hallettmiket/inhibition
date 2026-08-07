@@ -48,6 +48,7 @@ This project's defect catalogue is values taken by position instead of identity.
 from __future__ import annotations
 
 import argparse
+import glob
 import logging
 import os
 import re
@@ -216,6 +217,27 @@ def main() -> None:
     cands = [c for i, c in enumerate(cands) if i % args.n_shards == args.shard]
     if args.limit:
         cands = cands[:args.limit]
+
+    # Resume. A shard that dies at 90% must not restart from zero overnight.
+    # Two rules, both learned the hard way:
+    #   - only `ok` rows count as done. nac_rank.refine() counts `failed:` rows
+    #     as done and therefore never retries a transient failure.
+    #   - the run count is part of the identity. Skipping on ident alone would
+    #     seat a 200-run measurement inside a re-run at a different effort,
+    #     which is the same defect the BPMD resume had (catalogue #22).
+    done = set()
+    for f in sorted(glob.glob(str(OUT.dir / f"agg_s{args.shard}_*.csv"))):
+        try:
+            d = pd.read_csv(f)
+        except Exception:                          # noqa: BLE001
+            continue
+        if {"ident", "status", "nrun"} <= set(d.columns):
+            done |= set(d[(d.status == "ok") & (d.nrun == args.nrun)].ident)
+    if done:
+        before = len(cands)
+        cands = [c for c in cands if c.ident not in done]
+        log.info("resume: %d already complete at nrun=%d, %d remain of %d",
+                 len(done), args.nrun, len(cands), before)
     log.info("%d candidates on this shard", len(cands))
 
     pose_buf, agg_buf, done = [], [], 0
