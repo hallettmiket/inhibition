@@ -1,25 +1,54 @@
 # Changelog
 
-Versions describe **the method**, not the code — a version is the state of the
-discovery pipeline you would have to name when quoting a number from it. The
-boundary between 1.x and 2.x is the handoff from @mhallet to @tt8804.
+Versions describe **the discovery method**, not a public API. The rule and its
+justification are in [`docs/versioning.md`](docs/versioning.md); in short:
 
-Numbers produced under different major versions are **not comparable**: 2.0.0
-changed the receptor, and 6VAJ and 3IKD place the pocket 48.6 Å apart (D0059).
+- **MAJOR** — previously reported numbers are **invalid** and must be re-measured.
+- **MINOR** — new capability or metric; existing numbers stay valid.
+- **PATCH** — a defect fix that corrects numbers within an unchanged definition.
+
+The load-bearing distinction is between invalidating a *measurement* and
+invalidating an *interpretation*. Replacing the receptor (D0059) killed the
+measurements — major. Discovering that a metric predicts nothing (D0071) killed
+an interpretation while the measured values stayed correct — not a major.
+
+Every entry below states whether prior numbers survive it.
 
 ---
 
-## 2.1.0 — in progress
+## next — number not yet fixed
 
 Ranking rework, opened after 2.0.0 established that the 2.0.0 ranking has no
-physical support. See `docs/recap_2.0.0.md` for what carries forward.
+physical support (D0071). Recap of what carries forward: `docs/recap_2.0.0.md`.
+
+**Whether this is 2.1.0 or 3.0.0 depends on what the tweaks do**, and the test is
+stated rather than chosen:
+
+- **2.1.0** if the reworked ranking *adds* or *reweights* components. Enrichment
+  and consensus values already reported stay valid measurements; only their
+  standing in the ranking changes.
+- **3.0.0** if it **redefines** an existing metric — most likely `enrichment`,
+  which D0068 showed should be a top-N fraction rather than a whole-population
+  one. Old and new values would share a name and not be comparable, which is the
+  same hazard as the receptor swap and gets the same bump.
+
+Working on branch `ranking/2.1.0-rework`; the tag is cut when the shape of the
+change is known.
 
 ---
 
 ## 2.0.0 — 2026-08-06
 
+**MAJOR: every 1.0.0 number is invalid.** D0059 replaced the receptor, and 6VAJ
+and 3IKD place the pocket 48.6 Å apart — prior values measure the wrong site.
+
 The 3IKD receptor and the geometric (near-attack) ranking, end to end: screen,
 rank, elevation suite, and the first full molecular workup.
+
+*This release bundles what convention would have shipped as roughly one major,
+four minors and several patches; the whole line was developed unreleased on one
+branch. The audit is in [`docs/versioning.md`](docs/versioning.md) rather than
+back-dated into tags that were never cut.*
 
 **The headline result is a negative one, and it is the point of the release:**
 neither of the two ranking metrics predicts whether a docked pose survives
@@ -96,9 +125,10 @@ anchor that separates at p = 0.007.
 
 ## 1.0.0 — up to the handoff from @mhallet
 
-Everything before @tt8804 took over the project: the 6VAJ receptor, the T_3/T_4
-generative campaigns, the original docking and MM-GBSA pipeline, and decisions
-D0001–D0058.
+**Assigned retroactively; no 1.0.0 was ever cut.** It names everything before
+@tt8804 took over — the 6VAJ receptor, the T_3/T_4 generative campaigns, the
+original docking and MM-GBSA pipeline, decisions D0001–D0058 — so that
+pre-handoff numbers have a pipeline to be attributed to.
 
-Retained for provenance. **Numbers from 1.0.0 are 6VAJ measurements** and are not
-comparable to anything in 2.x without re-measurement (D0059).
+**Numbers from 1.0.0 are 6VAJ measurements** and are not comparable to anything
+in 2.x without re-measurement (D0059).
