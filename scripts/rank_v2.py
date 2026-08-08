@@ -305,7 +305,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--score", default="weighted_score",
                     choices=("weighted_score", "enrichment_conditional",
-                             "enrichment_joint", "topn_viable_frac"))
+                             "enrichment_joint", "topn_viable_frac",
+                             "conditional_x_consensus"))
     ap.add_argument("--consensus", default="consensus_gnina",
                     choices=("consensus_gnina", "consensus_autodock"))
     ap.add_argument("--quota", type=float, default=DEFAULT_QUOTA)
@@ -318,6 +319,34 @@ def main() -> None:
     global SRC
     SRC = V3 if args.topic == "nac_v3" else V2
     log.info("reading %s", SRC)
+
+    # THE GATE'S THRESHOLDS WERE CALIBRATED FOR A DIFFERENT QUANTITY.
+    #
+    # 2.1.0's `consensus` was agreement among the top-10 poses BY ENERGY, where
+    # 0.50 means "half the favoured poses agree". 2.2.0's `consensus` is MODE
+    # POPULATION over all 500 poses, where 0.50 means "this mode is the majority
+    # of everything the molecule did" -- a much stronger claim about a different
+    # measurement.
+    #
+    # Measured on the library: single-mode molecules sit at a median 0.860 and
+    # 99.9% clear 0.50 trivially; multi-mode molecules sit at 0.142 and only 33%
+    # of their modes clear it, removing 142 molecules outright and every MINORITY
+    # mode of the rest. Those minority modes are exactly what pose splitting
+    # exists to surface -- sulfopin's reactive mode is the minority one.
+    #
+    # Coherence is now guaranteed by CONSTRUCTION: clustering labels anything
+    # below MIN_POPULATION_FRAC (5%) as noise, so a mode that exists is already a
+    # real mode. Re-asking the question with a threshold built for another
+    # measurement double-counts it and biases against multi-modal binders.
+    if args.topic == "nac_v3":
+        if args.consensus == "consensus_gnina":
+            args.consensus = "consensus"          # the mode population itself
+        if args.floor == CONSENSUS_FLOOR:
+            args.floor = 0.05                     # "the mode is real"
+        if args.quota == DEFAULT_QUOTA:
+            args.quota = 1.0                      # rank every real mode
+        log.info("nac_v3: gating on `%s` at floor %.2f, quota %.2f",
+                 args.consensus, args.floor, args.quota)
 
     agg, poses = load_v2()
     ok = agg[agg.status == "ok"].copy()
@@ -335,12 +364,47 @@ def main() -> None:
     denom = (ok.n_poses_mode if "n_poses_mode" in ok.columns else ok.n_poses)
     ok["frac_in_range"] = ok.n_in_range / denom.replace(0, np.nan)
 
+    # THE SCORE @tt8804 ACTUALLY SPECIFIED: "rank the poses by how well anchored
+    # they are WEIGHTED BY THE CONSENSUS SCORE of that pose."
+    #
+    # It is also the fix for a small-sample artefact. Conditional enrichment is a
+    # ratio, so a mode with few poses in the distance window takes extreme
+    # values: measured on this library, modes with <10 poses in window reach
+    # 12.25 while modes with >=100 top out at 7.82. Ungated, a mode holding 6% of
+    # a molecule's poses was ranking first in its class on 8 poses' worth of
+    # evidence.
+    #
+    # Multiplying by consensus makes the weight of evidence part of the score
+    # rather than a threshold bolted beside it: a 6%-population mode scoring 12
+    # lands at 0.74, an 86%-population mode scoring 2 lands at 1.76. No cut-off
+    # is invented, and a minority mode can still win if its enrichment is high
+    # ENOUGH -- which is what sulfopin's case requires.
+    if "consensus" in ok.columns:
+        ok["conditional_x_consensus"] = (ok.enrichment_conditional
+                                         * ok.consensus)
+
     wh = pd.read_csv(REPO / "data/reference/warhead_classes_10.csv")
     smarts = dict(zip(wh.class_id, wh.reactive_atom_smarts))
-    cons = consensus_both(agg, poses, smarts) if not poses.empty else pd.DataFrame()
+    # 2.2.0 ALREADY HAS ITS CONSENSUS, AND IT IS A DIFFERENT QUANTITY.
+    #
+    # `consensus_both` recomputes agreement among the top-N poses BY ENERGY --
+    # the ordering #23/#30 showed is uninformative and that this version exists
+    # to remove. Under nac_v3 the screen has already written `consensus` as the
+    # MODE POPULATION over all 500 poses, with no energy in it.
+    #
+    # It also cannot merge: the poses frame is keyed on the parent molecule while
+    # these rows are keyed on <parent>_m<k>, so `on="ident"` matches nothing and
+    # every consensus column comes back NaN. Measured, not guessed -- with the
+    # recompute in place, 0 of 6,302 molecules passed the gate, because the gate
+    # compares NaN and NaN >= NaN is False.
+    per_mode = args.topic == "nac_v3"
+    cons = (pd.DataFrame() if per_mode or poses.empty
+            else consensus_both(agg, poses, smarts))
     if not cons.empty:
         ok = ok.merge(cons, on="ident", how="left")
-    if not poses.empty:
+    if not poses.empty and not per_mode:
+        # Same keying problem, and the same objection: both read a top-N-by-energy
+        # window. `topn_viable_frac` is the metric that scored Sulfopin 0.000.
         ok = ok.merge(topn_viable(poses), on="ident", how="left")
         ok = ok.merge(composite(poses), on="ident", how="left")
         # the weighted score @tt8804 asked for: enrichment's question, scored

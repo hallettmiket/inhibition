@@ -94,8 +94,17 @@ def main() -> None:
     log.info("bromine warhead classes, by SMARTS: %s", br)
     priority = ["acrylamide"] + br
 
-    best = d.nsmallest(N_BEST, "class_rank").copy()
-    best["why"] = "top-5 overall"
+    # "TOP 5 OVERALL" MUST BE BY SCORE, NOT BY class_rank.
+    #
+    # class_rank is rank WITHIN a warhead class, so nsmallest(5, "class_rank")
+    # returns five rows all holding rank 1 -- the winners of five arbitrary
+    # classes, chosen by whatever order pandas happened to produce. It is a
+    # sample of class winners wearing the name of a top-5.
+    score_col = args.score if args.score in d.columns else None
+    if score_col is None:
+        raise SystemExit(f"{args.score} not in the ranking; cannot take a top-5")
+    best = d.nlargest(N_BEST, score_col).copy()
+    best["why"] = f"top-{N_BEST} overall by {score_col}"
     taken = set(best.parent_ident)
 
     # round-robin the three priority classes so a shortfall costs each of them
@@ -118,7 +127,7 @@ def main() -> None:
         out = out.head(args.limit)
     out["priority"] = range(1, len(out) + 1)
     cols = [c for c in ("priority", "parent_ident", "ident", "warhead_class",
-                        "tier", "class_rank", args.score, "QED", "why")
+                        "tier", "class_rank", args.score, "consensus", "QED", "why")
             if c in out.columns]
     dest = OUT.write("worklist", ".csv")
     out[cols].to_csv(dest, index=False)
