@@ -65,8 +65,19 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--score", default="enrichment_conditional")
     ap.add_argument("--out-list", default=None)
+    # ASYMMETRIC BY DESIGN (@tt8804): "we are most interested in the 3 warhead
+    # classes I mentioned and then the rest maybe just the top few."
+    #
+    # A flat per-class number is misleading here because the classes are wildly
+    # different sizes: 50 is 1% of acrylamide's 4,216 molecules and 35% of
+    # bdhi_c4's 138. A flat 50 would also cost 450 sweeps -- 88 GPU-hours on
+    # three cards, against a ~44 hour weekend, before any MD at all.
+    ap.add_argument("--per-class-priority", type=int, default=50,
+                    help="acrylamide, bdhi_c4, bdhi_c5")
+    ap.add_argument("--per-class-other", type=int, default=5,
+                    help="the remaining classes — the top few only")
     ap.add_argument("--limit", type=int, default=0,
-                    help="cap the worklist (@tt8804: sweep the top 50)")
+                    help="hard cap on the whole worklist, applied last")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -107,19 +118,25 @@ def main() -> None:
     best["why"] = f"top-{N_BEST} overall by {score_col}"
     taken = set(best.parent_ident)
 
-    # round-robin the three priority classes so a shortfall costs each of them
-    # proportionally rather than erasing two
+    others = [c for c in sorted(d.warhead_class.dropna().unique())
+              if c not in priority]
+    quota = ({c: args.per_class_priority for c in priority} |
+             {c: args.per_class_other for c in others})
+    log.info("allocation: %s", ", ".join(f"{c}={quota[c]}" for c in priority + others))
+
     pools = {c: d[(d.warhead_class == c) & (~d.parent_ident.isin(taken))]
-                .sort_values("class_rank").to_dict("records")
-             for c in priority}
-    rows, i = [], 0
-    while any(pools.values()):
-        for c in priority:
-            if pools[c]:
-                r = pools[c].pop(0)
-                r["why"] = f"{c} rank {int(r['class_rank'])}"
-                rows.append(r)
-        i += 1
+                .sort_values("class_rank").head(quota[c]).to_dict("records")
+             for c in quota}
+    # Round-robin over the PRIORITY classes first so a shortfall costs each of
+    # them proportionally rather than erasing two, then the rest.
+    rows = []
+    for group in (priority, others):
+        while any(pools[c] for c in group):
+            for c in group:
+                if pools[c]:
+                    r = pools[c].pop(0)
+                    r["why"] = f"{c} rank {int(r['class_rank'])}"
+                    rows.append(r)
     rest = pd.DataFrame(rows)
 
     out = pd.concat([best, rest], ignore_index=True)
@@ -170,9 +187,12 @@ def main() -> None:
     print(out[cols].head(12).to_string(index=False))
     print(f"\n  first {N_BEST}: the best overall, whatever class they are in")
     print(f"  then round-robin over {', '.join(priority)}")
-    print("\n  class composition of the first 100:")
-    for c, n in out.head(100).warhead_class.value_counts().items():
-        print(f"    {c:<22} {n}")
+    print("\n  class composition:")
+    for c, n in out.warhead_class.value_counts().items():
+        tag = "  <- priority" if c in priority else ""
+        print(f"    {c:<22} {n}{tag}")
+    sweeps = len(pairs) if "pairs" in dir() else len(out)
+    print(f"\n  {len(out)} molecules; sweep cost ~{len(out)*35/60/3:.0f} h on 3 GPUs")
     print(f"\n  -> {dest}\n  -> {lst}")
 
 
