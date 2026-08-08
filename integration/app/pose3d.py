@@ -89,6 +89,10 @@ RECEPTOR_FOR_POSE_COLUMN = {
                                      # because the fallback below is 6VAJ, and an
                                      # unregistered column renders every pose 48.6 A
                                      # from the pocket while looking perfectly fine
+    "nac3_pose_path": RECEPTOR_3IKD, # 2.2.0 mode representatives, same receptor.
+                                     # Registered at the same time the column was
+                                     # created rather than after someone spots
+                                     # the ligand floating outside the protein.
 }
 
 

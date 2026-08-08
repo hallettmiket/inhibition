@@ -116,15 +116,20 @@ def geometry_stats(dist: np.ndarray, angle: np.ndarray, kind: str) -> dict:
 def run_sweep(cand: str, pose: Path, pose_rank: int, gpu: int,
               ps: float, net_charge: int | None) -> Path | None:
     """10 ns of MD through the production script, so the physics is identical."""
-    rep = SWEEP_ROOT / cand / "md" / "rep1"
+    # ONE WORKDIR PER (MOLECULE, MODE). md_residence names the directory after
+    # the candidate, so sweeping two modes of one molecule would put them in the
+    # same place and the second would find the first's finished trajectory and
+    # skip itself -- reporting mode 0's result as mode 4's.
+    root = SWEEP_ROOT / f"rank{pose_rank}"
+    rep = root / cand / "md" / "rep1"
     if (rep / "prod.xtc").is_file():
         log.info("%s: trajectory already present, not re-running", cand)
         return rep
     cmd = [str(PY), str(REPO / "scripts/md_residence_3ikd.py"),
            "--candidate", cand, "--pose", str(pose),
            "--pose-rank", str(pose_rank), "--production-ps", str(int(ps)),
-           "--gpu", str(gpu), "--keep", "--tag", "sweep",
-           "--work-root", str(SWEEP_ROOT)]
+           "--gpu", str(gpu), "--keep", "--tag", f"sweep_r{pose_rank}",
+           "--work-root", str(root)]
     if net_charge is not None:
         cmd += ["--net-charge", str(net_charge)]
     log.info("%s: %.0f ps sweep on GPU %d", cand, ps, gpu)
@@ -150,7 +155,11 @@ def main() -> None:
 
     rows = []
     for cand in args.candidates:
-        rec = {"ident": cand, "sweep_ps": args.sweep_ps}
+        # `ident` carries the MODE, so two modes of one molecule are two rows
+        # rather than one overwriting the other downstream.
+        rec = {"ident": f"{cand}_m{args.pose_rank - 1}" if args.pose_rank > 1 else cand,
+               "parent_ident": cand, "pose_rank": args.pose_rank,
+               "mode": args.pose_rank - 1, "sweep_ps": args.sweep_ps}
         pose = Path(args.pose_dir) / f"{cand}.sdf"
         if not pose.is_file():
             rec["status"] = f"no pose at {pose}"

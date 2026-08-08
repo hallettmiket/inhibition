@@ -123,8 +123,39 @@ def main() -> None:
     dest = OUT.write("worklist", ".csv")
     out[cols].to_csv(dest, index=False)
 
+    # EXTRA MODES WORTH SWEEPING (@tt8804).
+    #
+    # The sweep would otherwise take mode 0 only. Measured over 4,482 molecules:
+    # 15% are multi-mode, and for 9% of THOSE the dominant mode is NOT the
+    # best-anchored one -- with a median anchoring gain of 0.503 when it differs,
+    # on a mode holding a median 13% of poses. That is sulfopin's failure in a
+    # new place: the reactive mode is the minority one, and consensus will never
+    # surface it.
+    #
+    # So: mode 0 always, PLUS any mode beating it by more than MODE_GAIN on
+    # anchoring. The population floor already guarantees such a mode is real,
+    # which keeps realism ahead of attack geometry rather than behind it.
+    MODE_GAIN = 0.2
+    v3 = pd.concat([pd.read_csv(f) for f in sorted(glob.glob(
+        "/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v3/agg_s*_*.csv"))],
+        ignore_index=True)
+    v3 = v3[v3.status == "ok"]
+    pairs = []
+    for pid in out.parent_ident:
+        g = v3[v3.parent_ident == pid]
+        if g.empty:
+            pairs.append((pid, 1)); continue
+        g = g.sort_values("consensus", ascending=False)
+        dom = g.iloc[0]
+        pairs.append((pid, 1))                     # mode 0 -> pose_rank 1
+        for r in g.iloc[1:].itertuples():
+            if (r.anchor_quality_max - dom.anchor_quality_max) > MODE_GAIN:
+                pairs.append((pid, int(r.mode) + 1))
     lst = Path(args.out_list) if args.out_list else dest.with_suffix(".txt")
-    lst.write_text("\n".join(out.parent_ident.astype(str)) + "\n")
+    lst.write_text("\n".join(f"{a} {b}" for a, b in pairs) + "\n")
+    extra = len(pairs) - len(out)
+    log.info("worklist: %d molecules -> %d sweeps (%d extra modes)",
+             len(out), len(pairs), extra)
 
     print(f"\nWeekend worklist — {len(out):,} molecules in priority order\n")
     print(out[cols].head(12).to_string(index=False))
