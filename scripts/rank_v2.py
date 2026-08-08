@@ -306,7 +306,7 @@ def main() -> None:
     ap.add_argument("--score", default="weighted_score",
                     choices=("weighted_score", "enrichment_conditional",
                              "enrichment_joint", "topn_viable_frac",
-                             "conditional_x_consensus"))
+                             "conditional_x_consensus", "conditional_lcb"))
     ap.add_argument("--consensus", default="consensus_gnina",
                     choices=("consensus_gnina", "consensus_autodock"))
     ap.add_argument("--quota", type=float, default=DEFAULT_QUOTA)
@@ -382,6 +382,31 @@ def main() -> None:
     if "consensus" in ok.columns:
         ok["conditional_x_consensus"] = (ok.enrichment_conditional
                                          * ok.consensus)
+
+    # WILSON LOWER BOUND — evidence enters as uncertainty, not as a weight.
+    #
+    # Conditional enrichment is a PROPORTION estimated from n_in_range trials, so
+    # its uncertainty is a solved problem rather than something to approximate
+    # with a multiplier. Measured on this library: modes with <10 poses in the
+    # window reach 12.25 while modes with >=100 top out at 7.82 -- the extremes
+    # are small-sample artefacts, not molecules.
+    #
+    # Multiplying by consensus fixes that but overcorrects: it penalises a mode
+    # for being a MINORITY rather than for being thinly evidenced, and no
+    # minority mode then reaches the top 40 -- which would bury sulfopin's case,
+    # where the reactive mode is the minority one.
+    #
+    # The Wilson bound penalises exactly the thing that should be penalised. A
+    # 60-pose minority mode with a clean signal survives it; an 8-pose one does
+    # not. No weight is chosen, and the statistic is standard.
+    n = ok.n_in_range.astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        phat = ok.n_viable_given_in_range / n.replace(0, np.nan)
+        z = 1.96
+        den = 1.0 + z * z / n
+        centre = (phat + z * z / (2 * n)) / den
+        half = z * np.sqrt(phat * (1 - phat) / n + z * z / (4 * n * n)) / den
+        ok["conditional_lcb"] = (centre - half).clip(lower=0.0) / ok.isotropic_null
 
     wh = pd.read_csv(REPO / "data/reference/warhead_classes_10.csv")
     smarts = dict(zip(wh.class_id, wh.reactive_atom_smarts))

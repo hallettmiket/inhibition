@@ -49,7 +49,9 @@ import nac_screen as ns                           # noqa: E402
 import nac_screen_v2 as v2                        # noqa: E402
 
 log = logging.getLogger("screen-refs")
-OUT = sout.Topic("blacksmith", "nac_v2")
+#: References must land in the SAME topic as the candidates they are the
+#: yardstick for, or the ranking cannot see them. 2.2.0 = nac_v3.
+OUT = sout.Topic("blacksmith", "nac_v3")
 REF = REPO / "data/reference/pin1_reference_binders_4.csv"
 
 
@@ -71,7 +73,7 @@ def assign_classes(smiles: str, wh: pd.DataFrame) -> list[tuple[str, str, str]]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--gpu", default="6")
-    ap.add_argument("--nrun", type=int, default=200)
+    ap.add_argument("--nrun", type=int, default=500)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -129,12 +131,18 @@ def main() -> None:
 
     pose_buf, agg_buf = [], []
     for i, c in enumerate(cands, 1):
-        prow, agg = v2.one(c, rec_dir, Path(plain), args.nrun, args.gpu, True)
-        agg["is_reference"] = True
-        agg_buf.append(agg)
+        # `one` returns ONE ROW PER BINDING MODE now, so a reference contributes
+        # several candidate rows exactly as a library molecule does -- which is
+        # the point: the yardstick has to be measured the same way as the thing
+        # it is measuring.
+        prow, aggs = v2.one(c, rec_dir, Path(plain), args.nrun, args.gpu, True)
+        for a in aggs:
+            a["is_reference"] = True
+        agg_buf.extend(aggs)
         if not prow.empty:
             pose_buf.append(prow)
-        log.info("[%d/%d] %s: %s", i, len(cands), c.ident, agg["status"])
+        log.info("[%d/%d] %s: %d mode(s), %s", i, len(cands), c.ident,
+                 len(aggs), aggs[0]["status"] if aggs else "no rows")
 
     if pose_buf:
         pd.concat(pose_buf, ignore_index=True).to_csv(
