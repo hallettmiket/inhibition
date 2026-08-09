@@ -289,14 +289,29 @@ def main() -> None:
     print(f"\n=== elevation queue: {len(q)} molecules, top {args.per_class} per class ===\n")
     print(f"  {'ident':<20}{'class':<22}{'rk':>3}{'cond':>7}{'cons':>6}"
           f"{'d(A)':>7}{'angle':>7}{'pose':>5}  geom")
+    # THE SUMMARY PRINT MUST NOT BE ABLE TO KILL THE RUN. The queue CSV is
+    # already on disk by this point, and an unformattable cell here used to
+    # raise, exit non-zero, and take the whole overnight chain down with it --
+    # a cosmetic table aborting a stage whose real output had already succeeded.
+    # A missing value now prints as "-" and the pipeline carries on.
+    def _f(v, w, spec=""):
+        try:
+            if v is None or v != v:
+                raise TypeError
+            return f"{v:>{w}{spec}}"
+        except (TypeError, ValueError):
+            return f"{'-':>{w}}"
+
     for r in q.itertuples():
-        d = getattr(r, "pose_distance_A", np.nan)
-        a = getattr(r, "pose_angle_deg", np.nan)
-        print(f"  {r.ident:<20}{r.warhead_class:<22}{r.class_rank:>3}"
-              f"{r.enrichment_conditional:>7.2f}"
-              f"{r.consensus_gnina if r.consensus_gnina == r.consensus_gnina else float('nan'):>6.2f}"
-              f"{d:>7.2f}{a:>7.1f}{r.pose_rank if r.pose_rank==r.pose_rank else -1:>5}"
-              f"  {'OK' if r.geometry_ok else 'FAIL'}")
+        print(f"  {str(getattr(r, 'ident', '-')):<20}"
+              f"{str(getattr(r, 'warhead_class', None) or '-'):<22}"
+              f"{_f(getattr(r, 'class_rank', None), 3, '.0f')}"
+              f"{_f(getattr(r, 'enrichment_conditional', None), 7, '.2f')}"
+              f"{_f(getattr(r, 'consensus_gnina', None), 6, '.2f')}"
+              f"{_f(getattr(r, 'pose_distance_A', None), 7, '.2f')}"
+              f"{_f(getattr(r, 'pose_angle_deg', None), 7, '.1f')}"
+              f"{_f(getattr(r, 'pose_rank', None), 5, '.0f')}"
+              f"  {'OK' if getattr(r, 'geometry_ok', False) else 'FAIL'}")
     bad = q[~q.geometry_ok]
     if len(bad):
         print(f"\n  {len(bad)} queued with a FAILING geometry re-check — kept, not "

@@ -21,6 +21,54 @@ Every entry below states whether prior numbers survive it.
 Pose splitting and tooling upgrades. Outline: `docs/outline_2.2.0.md`.
 Retrospective on the release it follows: `docs/retrospective_2.1.0.md`.
 
+### The catalogue viewer — the new GUI foundation (2026-08-09)
+
+@tt8804: *"we will use this as the new gui foundation."* Adopted as the pattern
+every future results interface follows. **No measured value changes** — this is
+presentation only, so every prior number survives it.
+
+The shape: **a selector rail on the left, one viewer on the right.** Each row
+carries a 2D structure, identifier, warhead class, sustained visits, max RMSD, an
+engagement bar and a held/left tag. Selecting a row loads that molecule's full
+report beside it — 3D pose, **MD movie**, **RMSD plots** — with everything in
+collapsible panels that start closed, so the page paints immediately instead of
+after ~9 MB of movie frames.
+
+Two composable toggles, both of which encode a real distinction rather than a
+preference:
+
+- **all classes / by warhead class** — cross-class ranking is biased, because the
+  SN2 angular criterion is far stricter than the perpendicular one (#47). The
+  toggle makes that visible instead of something the reader must remember.
+- **combined / split held-left** — engagement and residence are near-independent
+  (rho = −0.007, #46), so a molecule can rank high and still leave the pocket.
+
+Light/dark toggle stamps both the shell and the framed report, and persists.
+
+Structural fixes worth carrying forward: the report writes its blocks straight
+into `<body>` with no wrapper, so the measure has to be applied to those blocks;
+`box-sizing: border-box` globally, or bordered cards and plain text resolve to
+different left edges; and a 98%-opaque surface hides anything inside it, so the
+ligand and Cys113 are **cut out of** the surface rather than merely drawn under
+it.
+
+Implementation: `scripts/mdprio_combine.py`, `scripts/mdprio_report.py`,
+`shared/report_theme.py`, `shared/md_movie.py`. Full record in issue #49.
+
+### PATCH — the movie drew the wrong residue as Cys113
+
+`shared/md_movie.py` styled `resi: 113`. The MD system renumbers from 1, so the
+crystal's Cys113 is residue **63** (`PIN1_OFFSET = 50`); residue 113 is a
+**glutamate**, and it was rendered in sticks and labelled as the target cysteine.
+`elevation_report.py` had the offset right and refuses to label a structure whose
+residue types do not match; the new styling code bypassed that guard.
+
+Same metric, same inputs, a previously wrong picture — a patch by the rule. It
+affected **no computed value**: the warhead→SG distance series is built from the
+SG atom located independently, and it was correct throughout. Only the rendering
+was wrong. `CYS113_RESI = 113 - PIN1_OFFSET` now drives the surface cut-out, the
+sticks and the sulfur sphere.
+
 ---
 
 ## 2.1.0 “Bornite” — 2026-08-07

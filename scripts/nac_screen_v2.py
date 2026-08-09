@@ -110,6 +110,13 @@ POSE_DIR = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v
 KEEP_TOP = 20        # noqa: F841  (retired -- see nac_screen_v2 docstring)
 _COORD_TOL = 0.05
 
+#: EVERY docked pose, grouped by mode. Separate from POSE_DIR because the
+#: representative files are what every downstream stage reads, and this can be
+#: populated for a subset (the molecules actually under review) without
+#: disturbing them. Poses are written in mode order and stamped with `mode`, so
+#: a reader can show one cluster at a time.
+ALL_POSE_DIR = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v3_allposes")
+
 
 def write_sdf(mol, order: list[int], dest: Path,
               modes: list[int] | None = None) -> int:
@@ -161,7 +168,7 @@ def gnina_scores(receptor: Path, sdf: Path, gpu: str) -> pd.DataFrame:
 
 
 def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
-        do_gnina: bool) -> tuple[pd.DataFrame, list[dict]]:
+        do_gnina: bool, all_poses: bool = False) -> tuple[pd.DataFrame, list[dict]]:
     """Dock one candidate; return (per-pose rows, ONE AGGREGATE ROW PER MODE).
 
     2.2.0 (@tt8804): a binding mode is a candidate, not a property of one. The
@@ -259,8 +266,26 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
                                nac.isotropic_null(cand.mechanism)) if sel.any() else 0.0,
                 "isotropic_null": nac.isotropic_null(cand.mechanism),
                 "mean_energy": float(np.nanmean(en[sel])) if sel.any() else np.nan,
+                # A MAX GROWS WITH SAMPLE SIZE; A QUANTILE DOES NOT (#43).
+                #
+                # `anchor_quality_max` is the best of the mode's poses, so the
+                # best of 402 draws beats the best of 69 by construction, with no
+                # chemistry involved. Measured on T4: rho(anchor_quality_max,
+                # mode size) = +0.740, against -0.021 for the conditional
+                # enrichment. Median max was 0.828 for mode 0 and 0.019 for
+                # mode 1 -- a 40x gap that is mostly the number of draws.
+                #
+                # The 90th percentile estimates the same property -- how good is
+                # this mode's well-anchored tail -- and converges as n grows
+                # instead of drifting upward. It is kept ALONGSIDE the max rather
+                # than replacing it, because every artefact on disk and every
+                # figure so far was computed with the max, and silently redefining
+                # a column is how two runs become incomparable with no error.
                 "anchor_quality_max": float(np.nanmax(anchor[sel])) if sel.any() else np.nan,
                 "anchor_quality_mean": float(np.nanmean(anchor[sel])) if sel.any() else np.nan,
+                "anchor_quality_p90": (float(np.nanpercentile(anchor[sel], 90))
+                                       if sel.any() and not np.all(np.isnan(anchor[sel]))
+                                       else np.nan),
                 "status": "ok",
             })
             ident_row.update(pmod.identity(feat, labels, k))
@@ -317,6 +342,27 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         if not sdf.exists():                       # append_only: never overwrite
             write_sdf(mol, reps, sdf, modes=mode_ids)
 
+        # EVERY POSE, not just each mode's representative (#41).
+        #
+        # `mol` carries all 500 docked conformers and `labels` says which mode
+        # each belongs to; both are discarded when the work directory is removed
+        # in the `finally` below. Writing only the representatives meant the
+        # score was computed from 500 poses and exactly one could ever be drawn,
+        # so a mode -- which IS a cluster of poses -- could not be inspected at
+        # all. @tt8804: "why cant i just see the poses."
+        #
+        # A SEPARATE DIRECTORY, so this can be filled in for the molecules under
+        # review without touching the representative files every downstream
+        # stage already reads.
+        if all_poses:
+            ALL_POSE_DIR.mkdir(parents=True, exist_ok=True)
+            adest = ALL_POSE_DIR / f"{cand.ident}.sdf"
+            if not adest.exists():
+                order = [int(i) for i in np.argsort(labels, kind="stable")
+                         if labels[i] in mode_ids]
+                write_sdf(mol, order, adest,
+                          modes=[int(labels[i]) for i in order])
+
         if do_gnina:
             tmp = work / "modes.sdf"
             write_sdf(mol, reps, tmp, modes=mode_ids)
@@ -368,7 +414,26 @@ def main() -> None:
     ap.add_argument("--chunk", type=int, default=100)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--no-gnina", action="store_true")
+    # WRITE EVERY POSE, not just each mode's representative (#41). Off by default
+    # because it is ~500x the SDF volume across the full library; on for the
+    # targeted runs that back the GUI's pose viewer.
+    ap.add_argument("--all-poses", action="store_true",
+                    help="also write every docked pose, grouped by mode, to "
+                         "nac_v3_allposes/")
+    # A NAMED SUBSET, so poses can be filled in for the molecules actually under
+    # review without re-docking 5,769 of them.
+    ap.add_argument("--only", default=None,
+                    help="file of candidate idents, one per line; screen only these")
+    # A TARGETED RUN WRITES TO ITS OWN TOPIC. rank_v2 concatenates every
+    # agg_s*_*.csv in a topic, so re-screening molecules into nac_v3 would put
+    # two rows on disk for the same mode and the ranking would silently count
+    # some molecules twice.
+    ap.add_argument("--topic", default="nac_v3",
+                    help="output topic; use a fresh one for targeted re-runs")
     args = ap.parse_args()
+    global OUT
+    if args.topic != "nac_v3":
+        OUT = sout.Topic("blacksmith", args.topic)
     logging.basicConfig(level=(logging.DEBUG if os.environ.get("NACV2_DEBUG") else logging.INFO),
                         format=f"%(levelname)s [s{args.shard}] %(message)s")
     os.nice(19)
@@ -379,6 +444,23 @@ def main() -> None:
     log.info("reactive receptor ready; plain %s (3IKD_ian verified)", Path(plain_rec).name)
 
     cands = nr.load_candidates()
+    # --only is applied BEFORE sharding, so a named subset run on one shard sees
+    # all of its molecules rather than every n-th one of them.
+    if args.only:
+        want = {ln.strip().split()[0] for ln in Path(args.only).read_text().splitlines()
+                if ln.strip()}
+        before = len(cands)
+        cands = [c for c in cands if c.ident in want]
+        missing = want - {c.ident for c in cands}
+        log.info("--only: %d of %d requested idents found (%d of %d candidates)",
+                 len(cands), len(want), len(cands), before)
+        if missing:
+            # Loud, because a typo'd ident silently screening nothing is the
+            # failure mode that wastes a run and reports success.
+            log.warning("--only: %d idents not in the candidate set, e.g. %s",
+                        len(missing), sorted(missing)[:3])
+        if not cands:
+            raise SystemExit("--only matched no candidates; refusing to run")
     cands = [c for i, c in enumerate(cands) if i % args.n_shards == args.shard]
     if args.limit:
         cands = cands[:args.limit]
@@ -405,6 +487,13 @@ def main() -> None:
             # frames have no `parent_ident`, so fall back to `ident` for those.
             done |= set(ok["parent_ident"] if "parent_ident" in ok.columns
                         else ok["ident"])
+    if done and args.only:
+        # AN EXPLICIT SUBSET OVERRIDES RESUME. Every molecule is already in
+        # nac_v3, so the resume filter would drop the whole named list and the
+        # run would report success having screened nothing. Naming molecules is
+        # an instruction to screen them.
+        log.info("resume: skipped — --only names the molecules to run")
+        done = set()
     if done:
         before = len(cands)
         cands = [c for c in cands if c.ident not in done]
@@ -415,7 +504,7 @@ def main() -> None:
     pose_buf, agg_buf, done = [], [], 0
     for i, c in enumerate(cands, 1):
         rows, aggs = one(c, rec_dir, Path(plain_rec), args.nrun, args.gpu,
-                         not args.no_gnina)
+                         not args.no_gnina, all_poses=args.all_poses)
         # `one` returns ONE ROW PER MODE now, so a molecule contributes several
         # candidates. `done` still counts MOLECULES -- resume and progress are
         # per-molecule, and counting modes would make the chunk size depend on

@@ -82,6 +82,13 @@ COLS = {
 #: so overwriting would move every molecule on screen with no way to see what
 #: changed or to go back. Both go on the frame; the GUI can show either.
 COLS_V3 = {
+    # THE SELECTION SCORE ITSELF, which the first cut of this table omitted --
+    # the GUI showed every ingredient of the ranking and not the quantity the
+    # rows were ordered by, so a reviewer could not check the order against the
+    # number that produced it. `conditional_lcb` is what the weekend worklist
+    # orders on, so it is what the review has to be able to see.
+    "conditional_lcb": "nac3_conditional_lcb",
+    "conditional_x_consensus": "nac3_cond_x_consensus",
     "enrichment_conditional": "nac3_enrichment_cond",
     "anchor_quality_max": "nac3_anchor_quality_max",
     "anchor_quality_mean": "nac3_anchor_quality_mean",

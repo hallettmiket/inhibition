@@ -254,8 +254,8 @@ within 24 h of being written.*
 | arm | frame | rows | docked | ranked | shortlist |
 |---|---|---:|---:|---:|---:|
 | T_1 de novo (DiffSBDD) | `D1_32.parquet` | 4,803 | 3,233 | 3,233 | 25 (`shortlist_synth`) |
-| T_3 R-group (LibInvent) | `D3_34.parquet` | 5,396 | 4,080 | 4,080 | 25 (`shortlist_synth`) |
-| T_4 warhead x R-group | `D4_46.parquet` | 1,782 | 1,683 | 1,683 | 27 (`shortlist_synth`) |
+| T_3 R-group (LibInvent) | `D3_37.parquet` | 5,396 | 4,080 | 4,080 | 25 (`shortlist_synth`) |
+| T_4 warhead x R-group | `D4_49.parquet` | 1,782 | 1,683 | 1,683 | 27 (`shortlist_synth`) |
 <!-- AUTO:arms:END -->
 
 <!-- AUTO:t2:BEGIN -->
@@ -271,7 +271,7 @@ within 24 h of being written.*
 <!-- AUTO:t2:END -->
 
 <!-- AUTO:decisions:BEGIN -->
-**72** decision records.
+**73** decision records.
 <!-- AUTO:decisions:END -->
 
 All six T_2 variants are ranked (size-decorrelated, D0049) and carry rebuilt

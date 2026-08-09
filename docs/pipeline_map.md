@@ -143,7 +143,7 @@ they are why most of this document's numbers exist.
 |---|---|
 | `pose_split_validation.py` | is the crystal pose **in** our pose set? (93.3% at 200, 100% at 500) |
 | `mode_arbitration.py` | can Boltz-2 pick the right mode? (no — consensus is at ceiling) |
-| `attack_sweep_check.py` | does 10 ns predict 100 ns? (ρ = +0.83) |
+| `attack_sweep_check.py` | does 10 ns predict 100 ns? **ρ = +0.60 on attack-readiness**, the reading the sweep actually ranks on. The ρ = +0.83 quoted here previously is for *proximity* — a different, easier quantity (#34). Under the pre-registered table +0.60 licenses rejecting the bottom, not ordering the middle. |
 | `redock_3ikd_benchmark.py` | pose recovery on 82 crystal cases |
 | `cofold_docking_comparator.py` | our docking on the co-folding benchmark's own ligands |
 | `pose_selection_bench.py` | does any cheap pose rule beat random? |

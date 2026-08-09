@@ -76,6 +76,21 @@ PY = Path.home() / ".micromamba/envs/dwi_reactive/bin/python"
 SWEEP_PS = 10_000.0        # 10 ns
 FRAMES = 500               # 20 ps resolution over the sweep
 
+#: A visit has to LAST to count as a visit (#34, adversary audit).
+#:
+#: Measured on the six 100 ns trajectories, the median attack-ready episode is
+#: one or two frames for five of the six -- 100% of two molecules' episodes are
+#: <=200 ps. Those are boundary recrossings, not resolved approaches. With a mean
+#: episode of ~1 frame the visit count is algebraically almost
+#: `frac_attack_ready x n_frames`, which is why the two ranked identically
+#: (rho = +1.000) and why calling them separate observables was not defensible.
+#:
+#: IN PICOSECONDS, NOT FRAMES, because a frame rule makes the count a function of
+#: the save interval: one molecule gave 57/26/14/7/3 visits at
+#: 100 ps/200 ps/500 ps/1 ns/2 ns. The sweep saves every 20 ps and the validation
+#: ran at 100 ps, so a frame-based count would not be comparable between them.
+MIN_DWELL_PS = 100.0
+
 
 def _mp():
     spec = importlib.util.spec_from_file_location(
@@ -93,17 +108,56 @@ def competent(angle: np.ndarray, kind: str) -> np.ndarray:
     return angle <= nac.PERPENDICULAR_MAX_OFF_NORMAL
 
 
-def geometry_stats(dist: np.ndarray, angle: np.ndarray, kind: str) -> dict:
+def _episodes(ready: np.ndarray) -> list[tuple[int, int]]:
+    """(start, length) of every contiguous run of True."""
+    out, i, n = [], 0, len(ready)
+    while i < n:
+        if ready[i]:
+            j = i
+            while j < n and ready[j]:
+                j += 1
+            out.append((i, j - i))
+            i = j
+        else:
+            i += 1
+    return out
+
+
+def geometry_stats(dist: np.ndarray, angle: np.ndarray, kind: str,
+                   frame_ps: float) -> dict:
+    """Geometry readings for one trajectory.
+
+    `frame_ps` is REQUIRED rather than defaulted: `n_visits` is meaningless
+    without it (see MIN_DWELL_PS), and a default would silently produce a number
+    that is not comparable to the one it is being validated against.
+    """
+    if not len(dist):
+        # nac_criterion raises rather than returning a false verdict when it
+        # cannot measure; this did the opposite and raised IndexError on
+        # `ready[0]` from deep inside a worker, where it reads as a crash rather
+        # than as "there is no trajectory here".
+        raise ValueError("empty trajectory: no frames to score")
     inw = (dist >= nac.NAC_DIST_MIN) & (dist <= nac.NAC_DIST_MAX)
     ready = inw & competent(angle, kind)
     # An excursion is a rising edge: not-ready -> ready. The first frame counts
     # as a visit if it is already ready, otherwise a pose that starts competent
     # and never leaves would be recorded as zero visits.
-    visits = int(np.sum(np.diff(ready.astype(int)) == 1) + (1 if ready[0] else 0))
+    raw_visits = int(np.sum(np.diff(ready.astype(int)) == 1) + (1 if ready[0] else 0))
+    min_frames = max(1, int(round(MIN_DWELL_PS / frame_ps)))
+    eps = _episodes(ready)
+    visits = sum(1 for _, ln in eps if ln >= min_frames)
     return {
         "frac_in_window": float(inw.mean()),
         "frac_attack_ready": float(ready.mean()),
         "n_visits": visits,
+        # Both are kept so the debounce is inspectable rather than assumed. A
+        # large gap between them means the molecule is skimming the boundary,
+        # not approaching.
+        "n_visits_raw": raw_visits,
+        "min_dwell_ps": MIN_DWELL_PS,
+        "frame_ps": float(frame_ps),
+        "median_episode_ps": float(np.median([ln for _, ln in eps]) * frame_ps)
+                             if eps else 0.0,
         "start_dist_a": float(dist[0]),
         "start_angle_deg": float(angle[0]),
         "start_attack_ready": bool(ready[0]),
@@ -120,10 +174,19 @@ def run_sweep(cand: str, pose: Path, pose_rank: int, gpu: int,
     # the candidate, so sweeping two modes of one molecule would put them in the
     # same place and the second would find the first's finished trajectory and
     # skip itself -- reporting mode 0's result as mode 4's.
-    root = SWEEP_ROOT / f"rank{pose_rank}"
+    # THE LENGTH IS PART OF THE PATH, not just the tag.
+    #
+    # The resume guard checked only that `prod.xtc` existed, so a finished 200 ps
+    # trajectory silently satisfied a 10 ns request -- caught tonight when a
+    # smoke test's 200 ps run was reused as if it were the real sweep. That is
+    # the same defect class the per-mode workdir fixed for pose_rank, with the
+    # length dimension left open. A 10 ns answer read off 200 ps of dynamics
+    # would be indistinguishable from a real one in every artefact downstream.
+    root = SWEEP_ROOT / f"rank{pose_rank}_{int(ps)}ps"
     rep = root / cand / "md" / "rep1"
     if (rep / "prod.xtc").is_file():
-        log.info("%s: trajectory already present, not re-running", cand)
+        log.info("%s: %d ps trajectory already present, not re-running",
+                 cand, int(ps))
         return rep
     cmd = [str(PY), str(REPO / "scripts/md_residence_3ikd.py"),
            "--candidate", cand, "--pose", str(pose),
@@ -184,7 +247,15 @@ def main() -> None:
 
         rec["status"] = "ok"
         rec["mechanism"] = s["mechanism"]
-        rec.update(geometry_stats(s["dist"], s["angle"], s["kind"]))
+        # The frame spacing is DERIVED from the run, not assumed: the movie is
+        # built with n_frames=FRAMES over `ps` picoseconds, and `n_visits` is
+        # meaningless without it (see MIN_DWELL_PS). Taking the actual series
+        # length rather than FRAMES, because build_movie_pdb can return fewer
+        # frames than asked for and a stale divisor would silently rescale every
+        # dwell time.
+        n_fr = max(1, len(s["dist"]))
+        rec.update(geometry_stats(s["dist"], s["angle"], s["kind"],
+                                  frame_ps=float(args.sweep_ps) / n_fr))
         rows.append(rec)
         log.info("%s: attack-ready %.3f over %d visits (start ready=%s)",
                  cand, rec["frac_attack_ready"], rec["n_visits"],
@@ -203,9 +274,22 @@ def main() -> None:
     cols = ["ident", "start_attack_ready", "frac_in_window",
             "frac_attack_ready", "n_visits", "min_dist_a"]
     print(t[[c for c in cols if c in t.columns]].round(4).to_string(index=False))
-    print("\n  RANKED, NOT THRESHOLDED. There is no evidence for a cut-off — one")
-    print("  molecule above 5% and five below is one molecule, not a threshold.")
-    print("  How deep to elevate is a separate decision with its own cost argument.")
+    # REJECT-ONLY, NOT A RANKING (#34).
+    #
+    # Agreement between the 10 ns sweep and the 100 ns run is rho = +0.60 on
+    # `frac_attack_ready` -- the quantity printed here -- against +0.83 for mere
+    # proximity, which is the number older docs quote. The pre-registered reading
+    # table licenses +0.60 for discarding the bottom and explicitly NOT for
+    # ordering the middle, and this printout used to announce the opposite.
+    #
+    # The order below is still by attack-readiness, because something has to be
+    # printed in some order and the elevation queue has to take a best-first
+    # view when capacity binds. What has changed is the claim attached to it.
+    print("\n  ORDERED, NOT RANKED. rho(10 ns, 100 ns) = +0.60 on this reading —")
+    print("  enough to reject the bottom, NOT enough to order the middle. Treat")
+    print("  the ordering as a queue, not as a statement that #2 beats #5.")
+    print("  A survivor is a molecule with a SUSTAINED episode (n_visits > 0);")
+    print("  a single 20 ps touch is not evidence of anything.")
     print(f"\n  readings fixed in advance: docs/prereg_attack_sweep.md")
     print(f"  -> {dest}")
 

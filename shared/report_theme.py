@@ -50,19 +50,69 @@ PALETTE = {
 CSS = """
 :root{
   --ink:#10233f; --navy:#003087; --blue:#0072ce; --blue-pale:#e8f1fb;
-  --rule:#d6dee8; --muted:#5b6b80; --paper:#ffffff; --raise:#f5f8fc;
+  --rule:#ccd6e2; --muted:#5b6b80; --paper:#eef2f7; --raise:#e3eaf2;
+  --card:#ffffff;
   --good:#0f7a54; --warn:#8a5a00; --bad:#b3261e;
   --sans:"Helvetica Neue",Helvetica,Arial,system-ui,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 }
+:root[data-theme="dark"]{
+  --ink:#dfe7f0; --navy:#8ab4e8; --blue:#6aa9e0; --blue-pale:#16283a;
+  --rule:#25333f; --muted:#93a3b4; --paper:#0e151c; --raise:#16202a;
+  --card:#131c25; --good:#4fc4a0; --warn:#e0b66a; --bad:#e08a70;
+}
+:root[data-theme="dark"] img[src^="data:image/png"]{filter:invert(1) hue-rotate(180deg)}
+:root[data-theme="dark"] .structbox{background:#fff;border-radius:4px;padding:.3rem}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
   font-size:15.5px;line-height:1.55;-webkit-font-smoothing:antialiased}
-.wrap{max-width:1140px;margin:0 auto;padding:0 30px 90px}
+.wrap{max-width:900px;margin:0 auto;padding:0 28px 70px}
+/* NO .wrap ELEMENT IS EMITTED -- the report writes its blocks straight into
+   <body>, so the measure has to be applied to those blocks or it does nothing.
+   That is why the content sat hard against the frame edge in the catalogue
+   viewer instead of centring in it. */
+*,*::before,*::after{box-sizing:border-box}
+body>*{max-width:940px;margin-left:auto;margin-right:auto;
+  padding-left:26px;padding-right:26px}
+/* The mast, the structure card and each panel are all direct children, so they
+   must resolve to the SAME left edge. Without border-box the bordered blocks
+   grew by their own padding and sat further left than the masthead text -- which
+   is what read as "the rest of the viewer is to the left". */
+body>header.mast{padding-top:26px}
+body>.structrow,body>details.panel{margin-left:auto;margin-right:auto}
+/* PANELS. In the catalogue viewer these reports are read inside a frame beside
+   a selector, so everything is collapsible and the heavy things (movie, plots)
+   start closed -- the reader opens what they want instead of scrolling past it. */
+details.panel{border:1px solid var(--rule);border-radius:5px;margin:0 0 .9rem;
+  background:var(--card);overflow:hidden}
+details.panel>summary{cursor:pointer;list-style:none;padding:.6rem .9rem;
+  font-weight:600;color:var(--navy);display:flex;align-items:center;gap:.5rem;
+  background:var(--raise);border-radius:3px}
+details.panel>summary::-webkit-details-marker{display:none}
+details.panel>summary::before{content:"";width:0;height:0;flex:none;
+  border-left:6px solid var(--blue);border-top:4.5px solid transparent;
+  border-bottom:4.5px solid transparent;transition:transform .12s ease}
+details.panel[open]>summary::before{transform:rotate(90deg)}
+details.panel>summary:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+details.panel>summary .hint{font-weight:400;color:var(--muted);font-size:.8rem;
+  margin-left:auto}
+details.panel .pbody{padding:.9rem;background:var(--card)}
+/* the molecule itself, directly under the masthead -- what the reader wants to
+   see before any number */
+.structrow{display:flex;gap:1.1rem;align-items:center;background:var(--card);
+  border:1px solid var(--rule);border-radius:5px;padding:.8rem 1rem;margin:0 0 1rem}
+.structbox{flex:none;width:300px;max-width:52%}
+.structbox svg{width:100%;height:auto;display:block}
+.structnote{color:var(--muted);font-size:.9rem}
+.structnote b{color:var(--navy);text-transform:none}
+@media(max-width:640px){.structrow{flex-direction:column;align-items:flex-start}
+  .structbox{width:100%;max-width:none}}
+details.panel .pbody>img{max-width:100%;height:auto;display:block;margin:0 auto}
+@media(prefers-reduced-motion:reduce){details.panel>summary::before{transition:none}}
 
 /* masthead ---------------------------------------------------------------- */
-.mast{border-top:5px solid var(--navy);padding:30px 0 20px;margin-bottom:28px;
+.mast{border-top:5px solid var(--navy);padding:24px 0 18px;margin-bottom:22px;
   border-bottom:1px solid var(--rule)}
 .eyebrow{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;
   text-transform:uppercase;color:var(--blue);font-weight:600;margin-bottom:.9rem}

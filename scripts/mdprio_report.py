@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import re
 import pandas as pd
 
 REPO = Path(__file__).resolve().parent.parent
@@ -282,7 +283,63 @@ def main() -> None:
     res = residence(s)
     if res["status"] != "ok":
         raise SystemExit(f"{args.candidate}: {res['status']}")
-    occ, cls, pose = PREDICTED.get(args.candidate, (None, "—", None))
+    occ, cls, pose = PREDICTED.get(args.candidate, (None, None, None))
+
+    # PREDICTED only covers the six BPMD-priority molecules. Everything swept
+    # since then fell through to "—" for class and pose, so the masthead of every
+    # newer report advertised missing data it could have looked up. Class comes
+    # from the ranking, the sweep readings from the sweep, and the SMILES gives
+    # the depiction -- all keyed on the molecule, all already on disk.
+    import glob as _g
+    smiles = None
+    for _sub, _stem in (("04_t4_combinatorial", "D4"), ("03_t3_reinvent", "D3")):
+        _fs = sorted(_g.glob(f"/data/lab_vm/append_only/inhibition/{_sub}/{_stem}_*.parquet"),
+                     key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+        if not _fs:
+            continue
+        _fr = pd.read_parquet(_fs[-1]).drop_duplicates("candidate_id").set_index("candidate_id")
+        if args.candidate in _fr.index:
+            smiles = _fr.loc[args.candidate].get("canonical_smiles")
+            if not cls:
+                cls = _fr.loc[args.candidate].get("warhead_class")
+            break
+    if not cls:
+        for _t, _sc in (("T4", "conditional_eb"), ("T3", "enrichment_conditional")):
+            _fs = sorted(_g.glob("/data/lab_vm/append_only/inhibition/00_outputs/"
+                                 f"blacksmith/rank_v2/rank_v2_{_t}_{_sc}_*.csv"))
+            if not _fs:
+                continue
+            _rk = pd.read_csv(_fs[-1]).drop_duplicates("parent_ident").set_index("parent_ident")
+            if args.candidate in _rk.index:
+                cls = _rk.loc[args.candidate, "warhead_class"]; break
+    sweep_ar = sweep_v = None
+    _fs = sorted(_g.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
+                         "attack_sweep/attack_sweep_*.csv"),
+                 key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+    if _fs:
+        _sw = pd.concat([pd.read_csv(f) for f in _fs], ignore_index=True)
+        _sw = _sw[(_sw.get("sweep_ps", 0) > 1000) & (_sw.status == "ok")
+                  & (_sw.parent_ident == args.candidate)]
+        if len(_sw):
+            _b = _sw.sort_values("frac_attack_ready").iloc[-1]
+            sweep_ar, sweep_v = float(_b.frac_attack_ready), int(_b.n_visits)
+
+    struct_svg = ""
+    if isinstance(smiles, str):
+        try:
+            from rdkit import Chem as _C, RDLogger as _R
+            from rdkit.Chem import Draw as _D, AllChem as _A
+            _R.DisableLog("rdApp.*")
+            _m = _C.MolFromSmiles(smiles)
+            if _m is not None:
+                _A.Compute2DCoords(_m)
+                _d = _D.rdMolDraw2D.MolDraw2DSVG(300, 190)
+                _D.rdMolDraw2D.PrepareAndDrawMolecule(_d, _m); _d.FinishDrawing()
+                _svg = re.sub(r"<\?xml.*?\?>", "", _d.GetDrawingText(), flags=re.S)
+                struct_svg = re.sub(r"<!--.*?-->", "", _svg, flags=re.S)
+        except Exception:                                  # noqa: BLE001
+            struct_svg = ""
+
     log.info("%s: %.1f ns, residence %.3f, dissociated=%s", args.candidate,
              res["length_ns"], res["residence_frac"], res["dissociated"])
 
@@ -319,29 +376,39 @@ def main() -> None:
         log.warning("no warhead->SG distance/angle series for %s", args.candidate)
     img = figure(args.candidate, s, res, er, nacs)
 
-    facts = [("molecule", args.candidate), ("class", cls),
-             ("pose elevated", f"rank {pose}" if pose else "—"),
-             ("BPMD occupancy", rt.num(occ, "{:.3f}")),
-             ("trajectory", f"{res['length_ns']:.1f} ns, "
-                            f"{res['n_frames']:,} frames")]
+    facts = [("molecule", args.candidate), ("warhead class", cls or "unclassified")]
+    if sweep_ar is not None:
+        facts.append(("attack-ready (10 ns)", f"{sweep_ar*100:.1f}%  ·  {sweep_v} visits"))
+    if occ is not None:
+        facts.append(("BPMD occupancy", rt.num(occ, "{:.3f}")))
+    if pose:
+        facts.append(("pose elevated", f"rank {pose}"))
+    facts.append(("trajectory", f"{res['length_ns']:.1f} ns, {res['n_frames']:,} frames"))
     body = [
         rt.masthead(
             f"{args.candidate} — 100 ns residence",
             f"{verdict}. Residence fraction {res['residence_frac']:.3f} "
             f"(frames with ligand RMSD ≤ {BOUND_NM} nm).",
             "MD-PRIORITY · 2.2.0 BORNITE", facts),
-        rt.section("1", "What this molecule did"),
+        (f'<div class="structrow"><div class="structbox">{struct_svg}</div>'
+         f'<div class="structnote"><b>{cls or "unclassified"}</b>'
+         + (f' &middot; attack-ready {sweep_ar*100:.1f}% of the 10 ns sweep'
+            f' over {sweep_v} sustained visits' if sweep_ar is not None else '')
+         + '</div></div>') if struct_svg else "",
         f'<p>{rt.pill("Held" if not res["dissociated"] else "Left")} '
-        f'Mean ligand RMSD {res["rmsd_mean_nm"]:.3f} nm, max '
-        f'{res["rmsd_max_nm"]:.3f} nm, final {res["rmsd_final_nm"]:.3f} nm.</p>',
-        f'<img src="data:image/png;base64,{img}" style="max-width:100%">',
-        (rt.section("2", "The trajectory") +
-         "<p>Surface coloured by formal charge (<span style='color:#b3261e'>red</span> "
-         "negative, <span style='color:#003087'>blue</span> positive), ligand in "
-         "yellow sticks, key residues labelled. Fitted on CA atoms, so what moves "
-         "is the ligand relative to the protein.</p>" + movie_block)
+        f'Mean RMSD {res["rmsd_mean_nm"]:.3f} nm &middot; max '
+        f'{res["rmsd_max_nm"]:.3f} nm &middot; final {res["rmsd_final_nm"]:.3f} nm.</p>',
+        f'<details class="panel"><summary>RMSD plots'
+        f'<span class="hint">RMSD, warhead&ndash;Cys113 distance, attack angle</span>'
+        f'</summary><div class="pbody">'
+        f'<img src="data:image/png;base64,{img}" alt="trajectory plots"></div></details>',
+        (f'<details class="panel"><summary>MD movie'
+         f'<span class="hint">surface by charge, ligand in yellow, CA-fitted</span>'
+         f'</summary><div class="pbody">{movie_block}</div></details>')
         if movie_block else "",
-        rt.section("3", "Against what was predicted for it"),
+        '<details class="panel"><summary>How it was selected, and what that is worth'
+        '<span class="hint">pre-registration context</span></summary>'
+        '<div class="pbody">',
         f"<p>It was selected on a BPMD occupancy of "
         f"<strong>{rt.num(occ, '{:.3f}')}</strong>, against a crystallographic "
         f"median of {REF_MEDIAN:.3f}. That number is what the pre-registration "
@@ -358,6 +425,7 @@ def main() -> None:
             "dissociation event is one draw with ~100% relative standard error, "
             "so residence is a screen and not a rate.",
             "warn"),
+        "</div></details>",
     ]
     dest = Path(args.out) if args.out else OUT.dir / f"{args.candidate}.html"
     dest.parent.mkdir(parents=True, exist_ok=True)

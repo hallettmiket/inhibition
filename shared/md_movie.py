@@ -144,6 +144,16 @@ def build_movie_pdb(rep: Path, dest: Path, total_ps: float = 100_000.0,
     return dest if n else None
 
 
+#: The MD system renumbers from 1, so the crystal's Cys113 is residue 63 in the
+#: rendered movie. `elevation_report.PIN1_OFFSET` is the same constant; it is
+#: repeated here rather than imported because this module is deliberately free of
+#: script-level imports. Selecting residue 113 instead picks up a GLUTAMATE -- a
+#: long side chain with two carboxyl oxygens that looks nothing like a cysteine,
+#: which is exactly how the wrong residue got drawn and shipped.
+PIN1_OFFSET = 50
+CYS113_RESI = 113 - PIN1_OFFSET
+
+
 def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
                 three_js: str, nac_lo: float = 2.8, nac_hi: float = 4.2,
                 elem_id: str = "gl") -> str:
@@ -188,6 +198,16 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
       viewer.setStyle({{}}, {{cartoon: {{color: '#2f3742', opacity: 1.0}}}});
       viewer.setStyle({{resn: 'MOL'}},
                       {{stick: {{radius: 0.26, colorscheme: 'yellowCarbon'}}}});
+      // CYS113 IN STICKS. It is the atom every distance in this project is
+      // measured to, and under a 90%-opaque surface it was invisible. Drawn in
+      // green carbons so it reads as protein rather than as a second ligand,
+      // and kept in front of the surface so the approach can be seen.
+      viewer.setStyle({{resi: {CYS113_RESI}}},
+                      {{stick: {{radius: 0.3, colorscheme: 'greenCarbon'}},
+                        cartoon: {{color: '#2f3742', opacity: 1.0}}}});
+      // the sulfur itself -- every distance in this project is measured to it
+      viewer.addStyle({{resi: {CYS113_RESI}, atom: 'SG'}},
+                      {{sphere: {{radius: 0.75, color: '#f0c000'}}}});
       viewer.removeAllLabels();
       if (document.getElementById('labs').checked) {{
         LABELS.forEach(function(L, i) {{
@@ -220,8 +240,24 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
     // atom is neutral -- so on a white page the surface disappeared entirely and
     // the structure read as a blank silhouette. A red-GREY-blue ramp keeps the
     // charge information and leaves the uncharged bulk visible.
+    // TWO SURFACES, AND THE LIGAND IS NOT PART OF THE PROTEIN ONE.
+    // `hetflag:false` alone did not exclude it -- the ligand is written as ATOM
+    // records in the fitted movie -- so the charge surface closed over the
+    // warhead and buried the thing the viewer exists to show. The protein is
+    // explicitly everything EXCEPT resn MOL, at half opacity so the ligand reads
+    // through it; the ligand carries its own surface in the same yellow as its
+    // sticks, so it is legible as one object rather than two.
+    // CYS113 IS CUT OUT OF THE SURFACE, not just drawn under it. At 98% opacity
+    // a stick inside the protein is invisible, so adding the residue in sticks
+    // did nothing on its own -- the surface simply covered it. Excluding both the
+    // ligand and residue 113 leaves an opening at the reaction site, which is
+    // also the one place the reader needs to see into.
     surf = viewer.addSurface(M.SurfaceType.VDW,
-      {{opacity: 0.94, colorfunc: chargeColour}}, {{hetflag: false}});
+      {{opacity: 0.98, colorfunc: chargeColour}},
+      {{not: {{or: [{{resn: 'MOL'}}, {{resi: {CYS113_RESI}}}]}}}});
+    // NO SURFACE ON THE LIGAND (@tt8804: too distracting). It is drawn as
+    // yellow sticks only, so the warhead and its approach vector stay readable
+    // against the protein surface instead of competing with it.
     viewer.zoomTo({{resn: 'MOL'}});
     viewer.zoom(0.55);
     draw();
@@ -242,7 +278,8 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
   }});
   document.getElementById('surf').addEventListener('change', function(e) {{
     if (!viewer) return;
-    viewer.setSurfaceMaterialStyle(surf.surfid, {{opacity: e.target.checked ? 0.72 : 0}});
+    viewer.setSurfaceMaterialStyle(surf.surfid, {{opacity: e.target.checked ? 0.98 : 0}});
+
     viewer.render();
   }});
   document.getElementById('labs').addEventListener('change', draw);

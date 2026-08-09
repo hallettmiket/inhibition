@@ -239,6 +239,28 @@ PANEL_SCOPE: tuple[Scope, ...] = (
           "current constraint' — a different and much weaker claim. The "
           "per-seed medians and pool sizes must describe what CReM actually "
           "generated, for the same reason a rank denominator must."),
+    Scope("Find molecules", False,
+          "You asked for these molecules BY NAME. A curation filter says which "
+          "molecules you would consider in a shortlist; it must not decide "
+          "whether a molecule you explicitly searched for is allowed to appear. "
+          "Silently returning nothing for a real identifier — because it "
+          "happens to carry a chlorine — is indistinguishable from the molecule "
+          "not existing, and this panel is where someone checks exactly that. "
+          "The stage tables it shows are also facts about what was run, which "
+          "the filter never touches anywhere else either."),
+    Scope("Ranking 2.2.0", True,
+          "A candidate list, so the chemist's constraints apply for the same "
+          "reason they do on every ranking beside it: a molecule that has been "
+          "ruled out should not be offered at the top of a fourth ranking as "
+          "though it were still in contention. Filtered, but NOTHING here is "
+          "recomputed on the filtered set — `class_rank`, the mode population "
+          "and the pose counts all describe the full docked library, because a "
+          "rank denominator narrowed by curation states a fact that is not "
+          "true. The panel's own caveats are about whether the SCORE survives a "
+          "convergence test (it has never been given one) and whether the pose "
+          "being scored is the right one at all (#39: 3.78 Å against Sulfopin's "
+          "own crystal structure) — both separate from the question of which "
+          "molecules belong in the list."),
     Scope("Ranking 2.1.0", True,
           "A candidate list, so the chemist's constraints apply for the same "
           "reason they do on Shortlists and on the 2.0.0 ranking beside it: a "

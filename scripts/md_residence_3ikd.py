@@ -90,6 +90,9 @@ PLAIN_REC = Path("/data/lab_vm/modifiable/inhibition/receptor_3ikd_plain")
 # on this branch uses, so residence is comparable with the docking that selected
 # the candidate (D0059).
 RECEPTOR_3IKD = Path("/data/lab_vm/modifiable/inhibition/receptor_3ikd_prep/3IKD_noligand.pdb")
+#: SMILES + pH 7.4 charge for poses that are not library candidates (crystal
+#: controls, references). One JSON per ident, written beside the pose.
+POSE_SIDECARS = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/pose_sidecars")
 
 PRODUCTION_PS_FULL = 100_000.0        # the chemists' 100 ns
 
@@ -170,7 +173,18 @@ def saved_pose_to_sdf(pose_sdf: Path, wd: Path, smiles: str,
 
     mols = [m for m in Chem.SDMolSupplier(str(pose_sdf), removeHs=False) if m]
     if not mols:
+        # A CRYSTAL-DERIVED POSE HAS NO HYDROGENS AND ONLY CONNECTIVITY, so a
+        # sanitising read assigns implicit hydrogens from single-bond valence --
+        # a sulfone oxygen becomes a hydroxyl, and imposing the template's double
+        # bond then exceeds its valence. Re-read unsanitised so bond orders come
+        # from the template rather than being argued with.
+        mols = [m for m in Chem.SDMolSupplier(str(pose_sdf), removeHs=False,
+                                              sanitize=False) if m]
+    if not mols:
         raise ResidenceError(f"no readable pose in {pose_sdf}")
+    if not any(a.GetAtomicNum() == 1 for a in mols[0].GetAtoms()):
+        mols = [m for m in Chem.SDMolSupplier(str(pose_sdf), removeHs=False,
+                                              sanitize=False) if m]
 
     ranked = [m for m in mols
               if m.HasProp("pose_rank") and int(m.GetProp("pose_rank")) == pose_rank]
@@ -213,23 +227,80 @@ def saved_pose_to_sdf(pose_sdf: Path, wd: Path, smiles: str,
     n_hydrogens = {a.GetIdx(): sum(1 for nb in a.GetNeighbors()
                                    if nb.GetAtomicNum() == 1)
                    for a in pose.GetAtoms() if a.GetAtomicNum() > 1}
+    # A CRYSTAL POSE CARRIES NO HYDROGENS AT ALL, and restating "zero observed"
+    # for every heavy atom is then a statement about the deposition, not about
+    # the molecule -- the rebuild comes back as C11NO3S against the template's
+    # C11H21NO3S and the formula guard correctly refuses it. Where the pose has
+    # no hydrogens anywhere, let the template supply them instead: the count is
+    # then derived from the SMILES we are matching against, which is the only
+    # source of truth available. Poses that DO carry hydrogens keep the restated
+    # counts, because that is what protects aromatic nitrogens (above).
+    crystal_like = not any(a.GetAtomicNum() == 1 for a in pose.GetAtoms())
+    if crystal_like:
+        log.info("  pose carries no hydrogens (crystal-derived); "
+                 "taking hydrogen counts from the template")
     rw = Chem.RWMol(pose)
     for idx in sorted([a.GetIdx() for a in pose.GetAtoms()
                        if a.GetAtomicNum() == 1], reverse=True):
         rw.RemoveAtom(idx)
-    for a in rw.GetAtoms():
-        a.SetNoImplicit(True)
-        a.SetNumExplicitHs(n_hydrogens[a.GetIdx()])
+    if crystal_like:
+        # The SDF write stamps `noImplicit`, so AddHs later adds nothing and the
+        # rebuild comes back as C11NO3S. Clearing it lets valence supply the
+        # hydrogens, which for a hydrogen-free deposition is the only honest
+        # source -- and the formula guard below still has to agree with the
+        # template before anything reaches antechamber.
+        for a in rw.GetAtoms():
+            a.SetNoImplicit(False)
+            a.SetNumExplicitHs(0)
+        rw.UpdatePropertyCache(strict=False)
+    else:
+        for a in rw.GetAtoms():
+            a.SetNoImplicit(True)
+            a.SetNumExplicitHs(n_hydrogens[a.GetIdx()])
     Chem.SanitizeMol(rw)
+    # THE TEMPLATE MUST BE THE SPECIES THAT WAS DOCKED, NOT THE NEUTRAL ONE.
+    #
+    # Since D0074 the screen protonates at pH 7.4 before docking, so the saved
+    # pose is the ionised form. The frame's `canonical_smiles` is still the
+    # neutral molecule, and comparing the two made the formula guard below fire
+    # on every ionisable candidate: "pose rebuilt as C18H22BrN4O3S+ but the
+    # frame's SMILES is C18H21BrN4O3S". That is a real mismatch and the guard was
+    # right to refuse -- but the fix is to compare against the right species, not
+    # to weaken the check.
+    #
+    # It cost 69 of 131 sweeps in the 2026-08-08 run, and not at random: 85% of
+    # bdhi_c5 and 68% of bdhi_c4 against 15% of acrylamide, because the
+    # bromo-dihydroisoxazoles carry an ionisable centre. Two of the three
+    # priority warhead classes were nearly erased by a units mismatch.
+    #
+    # Protonated with the SAME function the screen used, so the two cannot drift.
     template = Chem.MolFromSmiles(smiles)
     if template is None:
         raise ResidenceError(f"unparseable candidate SMILES {smiles!r}")
+    pose_charge = Chem.GetFormalCharge(rw.GetMol())
+    if pose_charge != Chem.GetFormalCharge(template):
+        try:
+            from shared import ionisation as ion
+            prot = ion.protonate({"x": smiles}).get("x")
+        except Exception as exc:                          # noqa: BLE001
+            raise ResidenceError(
+                f"pose carries charge {pose_charge:+d} but the frame's SMILES is "
+                f"neutral, and it could not be protonated to compare ({exc})"
+            ) from exc
+        cand = prot and Chem.MolFromSmiles(prot)
+        if cand is None or Chem.GetFormalCharge(cand) != pose_charge:
+            raise ResidenceError(
+                f"pose carries charge {pose_charge:+d}; protonating the frame's "
+                f"SMILES at pH 7.4 gave {prot!r}, which does not match. The pose "
+                "and the frame disagree about which species this is.")
+        template = cand
     try:
         fixed = AllChem.AssignBondOrdersFromTemplate(template, rw.GetMol())
     except Exception as exc:                              # noqa: BLE001
         raise ResidenceError(
             f"saved pose does not match the frame's SMILES ({exc})") from exc
 
+    fixed.UpdatePropertyCache(strict=False)
     fixed = Chem.AddHs(fixed, addCoords=True)
 
     # The molecule written out must be the molecule the frame names, hydrogens
@@ -421,7 +492,31 @@ def candidate_from_frames(cid: str) -> tuple[str, int]:
             q = r.get("charge_ph74", 0)
             log.info("  %s found in %s: charge_ph74=%s", cid, f.name, q)
             return str(r["canonical_smiles"]), int(0 if _pd.isna(q) else q)
-    raise ResidenceError(f"{cid} is in no current frame")
+    # REFERENCE MOLECULES ARE NOT CANDIDATES. Crystal controls (#48) and any
+    # other externally-sourced pose live in no T_3/T_4 frame by construction, so
+    # the lookup that keeps a CANDIDATE honest -- simulate what the ranking
+    # ranked -- has nothing to find. A sidecar written beside the pose carries
+    # the SMILES and pH 7.4 charge for exactly these, and is consulted only after
+    # the frames have been tried, so it can never shadow a real candidate.
+    side = _sidecar(cid)
+    if side is not None:
+        log.info("  %s from pose sidecar: charge_ph74=%s", cid, side[1])
+        return side
+    raise ResidenceError(f"{cid} is in no current frame and has no pose sidecar")
+
+
+def _sidecar(cid: str):
+    """(smiles, charge) for a non-candidate pose, or None."""
+    import json as _json
+    for d in (POSE_SIDECARS,):
+        f = d / f"{cid}.json"
+        if f.is_file():
+            try:
+                j = _json.loads(f.read_text())
+                return str(j["canonical_smiles"]), int(j.get("charge_ph74", 0))
+            except Exception as exc:                       # noqa: BLE001
+                raise ResidenceError(f"{cid}: unreadable sidecar {f} ({exc})")
+    return None
 
 
 def build_set(n_neg_per_class: int) -> list[ns.Candidate]:

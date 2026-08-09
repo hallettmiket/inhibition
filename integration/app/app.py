@@ -36,6 +36,7 @@ exist.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -466,7 +467,8 @@ def locate_pose(approach: str, frame: pd.DataFrame, row: pd.Series,
 def render_pose_viewer(approach: str, approach_name: str,
                        frame: pd.DataFrame, row: pd.Series, *,
                        key: str, height: int = 620,
-                       pose_column: str = "pose_path") -> None:
+                       pose_column: str = "pose_path",
+                       default_pose: int = 1) -> None:
     """The docked-pose viewer: labelled surface, every mode, and an export.
 
     3Dmol.js has no on-screen controls at all -- no buttons, no hint that
@@ -498,19 +500,50 @@ def render_pose_viewer(approach: str, approach_name: str,
     better = p3d.hidden_better_pose(poses, shown=1, score=aff_score)
 
     c1, c2, c3 = st.columns([3, 2, 2])
-    mode = c1.radio("which modes", ["best (pose 1)", "pick", "overlay all"],
+    mode = c1.radio("which modes", [f"best (pose {default_pose})", "pick", "overlay all"],
                     horizontal=True, key=f"posemode_{key}",
                     help="'overlay all' answers the question a single pose "
                          "cannot: do the modes agree about where the ligand "
                          "sits, or scatter across the site?")
     if mode == "pick":
-        chosen = c2.multiselect("pose(s)", [p.index for p in poses], default=[1],
-                                key=f"posepick_{key}")
-        show = tuple(chosen) or (1,)
+        # TYPED, NOT A DROPDOWN (@tt8804). A multiselect over 500 poses is a
+        # 500-row popup you have to scroll to reach pose 300; typing the number
+        # is O(1). Ranges and comma lists are accepted because overlaying a
+        # handful is the question this control exists to answer.
+        n_max = max((p.index for p in poses), default=1)
+        raw = c2.text_input(f"pose(s) — 1 to {n_max}", value=str(default_pose),
+                            key=f"posepick_{key}",
+                            help="A number (7), a list (1,4,9), or a range "
+                                 "(1-10). Out-of-range numbers are ignored.")
+        want, bad = [], []
+        for tok in str(raw).replace(" ", "").split(","):
+            if not tok:
+                continue
+            try:
+                if "-" in tok.lstrip("-"):
+                    a, b = tok.split("-", 1)
+                    want.extend(range(int(a), int(b) + 1))
+                else:
+                    want.append(int(tok))
+            except ValueError:
+                bad.append(tok)
+        valid = {p.index for p in poses}
+        show = tuple(dict.fromkeys(i for i in want if i in valid))
+        dropped = [i for i in want if i not in valid]
+        if bad or dropped:
+            note = []
+            if bad:
+                note.append(f"could not read {', '.join(bad)}")
+            if dropped:
+                note.append(f"no pose {', '.join(str(i) for i in dropped[:6])}"
+                            + ("…" if len(dropped) > 6 else ""))
+            st.caption(":orange[" + "; ".join(note) + "]")
+        if not show:
+            show = (1,)
     elif mode == "overlay all":
         show = tuple(p.index for p in poses)
     else:
-        show = (1,)
+        show = (default_pose,)
     framing = c3.selectbox(
         "framing", ["ligand", "pocket", "all"], key=f"posezoom_{key}",
         help="Changing this re-renders and RESETS the view — it is also how "
@@ -1795,13 +1828,28 @@ and every raw angle is retained so a window can be redrawn without re-docking.*
             continue
 
         have = top[top.nac_pose_path.notna()]
+        if have.empty:
+            st.info("No near-attack poses survive the current curation filter.")
+            continue
+        # THE WIDGET KEY CARRIES THE OPTION SET.
+        #
+        # Streamlit keeps a widget's selection in session state under its key. If
+        # the options change underneath it -- which is exactly what a curation
+        # filter does -- and the stored candidate is no longer among them, the
+        # rerun raises `'<candidate_id>' is not in list` and the whole panel dies.
+        # Typing a constraint that removed the selected molecule crashed this
+        # panel, and the render harness that catches it had never been run.
+        #
+        # Folding a hash of the options into the key makes a changed option set a
+        # DIFFERENT widget, which starts at its own default instead of trying to
+        # restore a selection that no longer exists.
+        opts = list(have.candidate_id.astype(str))
         pick = st.selectbox(
-            f"pose to view — {D.display_name(key)}",
-            list(have.candidate_id.astype(str)),
+            f"pose to view — {D.display_name(key)}", opts,
             format_func=lambda c: (
                 f"{c}  ·  "
                 f"{have.set_index(have.candidate_id.astype(str)).loc[c, 'nac_enrichment']:.2f}×"),
-            key=f"nacpose_{key}")
+            key=f"nacpose_{key}_{hash(tuple(opts)) & 0xffffff:06x}")
         prow = have[have.candidate_id.astype(str) == pick].iloc[0]
 
         # THE 2D STRUCTURE, BESIDE THE POSE. The 3D view answers "where does it
@@ -1866,16 +1914,23 @@ and every raw angle is retained so a window can be redrawn without re-docking.*
                    "same gate at 200 runs. A candidate above that range is not "
                    "thereby better than a known binder — see the intervals.")
 
-def _ref_table():
+def _ref_table(score: str = "weighted_score", pose_dir: str = "nac_v2_poses"):
     """Reference molecules scored by the SAME functions as the candidates.
 
     Never merged into a ranked list. @tt8804 ruled the known Pin1 binders too few
     and too poor to decide which chemistry to pursue, so they are a yardstick --
     what does the incumbent score -- and must not take a rank slot.
+
+    PINNED TO A SCORE BY NAME, not to whichever REF file is newest. 2.2.0 writes
+    its own `rank_v2_REF_<score>_<N>.csv` into the same directory with a higher
+    N, so a newest-file rule would quietly feed the 2.2.0 references into the
+    2.1.0 panel -- where every column it asks for is missing and the pose paths
+    point at a directory that does not hold those molecules. The table would
+    render, mostly empty, with no error.
     """
     import glob as _g
     fs = _g.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
-                 "rank_v2/rank_v2_REF_*_*.csv")
+                 f"rank_v2/rank_v2_REF_{score}_*.csv")
     if not fs:
         return None, None
     f = max(fs, key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
@@ -1883,7 +1938,7 @@ def _ref_table():
         d = pd.read_csv(f)
     except Exception:                                  # noqa: BLE001
         return None, None
-    pd_ = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v2_poses")
+    pd_ = Path(f"/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/{pose_dir}")
     d["pose_path"] = d.ident.map(
         lambda i: str(pd_ / f"{i}.sdf") if (pd_ / f"{i}.sdf").is_file() else None)
     return d, Path(f).name
@@ -2143,8 +2198,597 @@ def panel_nac2_ranking() -> None:
             st.info("no poses on disk for this molecule")
 
 
+#: 2.2.0 stores exactly ONE structure per molecule and it is always mode 0's
+#: representative. Every other mode is ranked, scored and selectable but has no
+#: coordinates on disk -- the screen persisted per-pose GEOMETRY (distance,
+#: angle, energy, mode) for all 500 poses and per-pose COORDINATES for one. So
+#: the viewer can show the dominant mode of any molecule and no minority mode of
+#: any molecule, which is precisely backwards for sulfopin's failure case.
+#: Surfaced in the table rather than left as an empty viewer.
+_NAC3_POSES = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v3_poses")
+
+
+@st.cache_data(show_spinner=False)
+def _nac3_rank():
+    """Every ranked MODE, straight from the rank tables.
+
+    NOT from the D3_/D4_ frames. The frames are keyed on `candidate_id`, so
+    publishing into them forces a collapse to one row per molecule -- which
+    silently discards 2,349 of 8,096 ranked rows (29%), every one of them a
+    minority binding mode. @tt8804: "each pose mode needs to be ranked
+    independently." Reading the rank table directly is the only way the panel
+    can show what the ranking actually produced.
+    """
+    import glob as _g
+    frames = []
+    for tier in ("T3", "T4"):
+        fs = _g.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
+                     f"rank_v2/rank_v2_{tier}_{_NAC3_SCORE}_*.csv")
+        if not fs:
+            continue
+        f = max(fs, key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+        d = pd.read_csv(f)
+        d["tier"] = tier
+        d["_src"] = Path(f).name
+        frames.append(d)
+    if not frames:
+        return None, None
+    d = pd.concat(frames, ignore_index=True)
+    if "parent_ident" not in d.columns:
+        d["parent_ident"] = d["ident"]
+    d["parent_ident"] = d["parent_ident"].fillna(d["ident"])
+    if "mode" not in d.columns:
+        d["mode"] = 0
+    # `curated()` matches on `canonical_smiles` and SILENTLY DECLINES TO FILTER
+    # without it -- the rank tables call the column `smiles`. The panel is
+    # declared filtered in curate.PANEL_SCOPE, so without this alias it claimed
+    # to honour the chemist's constraints while showing every molecule they had
+    # ruled out. Caught by the render harness, which had never been run.
+    if "canonical_smiles" not in d.columns and "smiles" in d.columns:
+        d["canonical_smiles"] = d["smiles"]
+    # THE MOLECULE'S STRUCTURE IS OFFERED FOR EVERY MODE, not only mode 0.
+    #
+    # `nac_v3_poses` holds one structure per molecule and it is mode 0's
+    # representative. Handing it only to mode-0 rows left every minority-mode row
+    # with an empty viewer -- and since modes are ranked independently, minority
+    # modes are half of the top ten. The viewer now always has something to draw
+    # and says plainly when what it is drawing belongs to a different mode.
+    d["pose_path"] = [
+        str(_NAC3_POSES / f"{p}.sdf")
+        if (_NAC3_POSES / f"{p}.sdf").is_file() else None
+        for p in d.parent_ident]
+
+    return d, " + ".join(sorted(d._src.unique()))
+
+
+@st.cache_data(show_spinner=False)
+def _pose_modes(parent: str) -> dict:
+    """mode -> the 1-based record numbers carrying that mode, in the pose SDF.
+
+    Read from the `mode` PROPERTY stamped on each record, never from file
+    position: the poses are written in mode order today, and a reader that
+    assumed contiguity would break silently the first time they are not.
+    """
+    f = _NAC3_POSES / f"{parent}.sdf"
+    if not f.is_file():
+        return {}
+    out: dict = {}
+    try:
+        rank = 0
+        for block in f.read_text(errors="replace").split("$$$$"):
+            if not block.strip():
+                continue
+            rank += 1
+            m = re.search(r">\s*<mode>\s*.*?\n\s*(-?\d+)", block, re.S)
+            if m:
+                out.setdefault(int(m.group(1)), []).append(rank)
+    except Exception:                                  # noqa: BLE001
+        return {}
+    return out
+
+
+@st.cache_data(show_spinner=False)
+def _nac3_pose_index() -> dict:
+    """Which per-pose shard file holds which molecule.
+
+    The per-pose geometry is 62 shard files totalling every one of the ~2.9M
+    poses. Loading all of them to answer "show me this molecule" would read
+    hundreds of MB per click, so the identity->file map is built once and each
+    lookup reads exactly one file.
+    """
+    import glob as _g
+    idx = {}
+    for f in sorted(_g.glob("/data/lab_vm/append_only/inhibition/00_outputs/"
+                            "blacksmith/nac_v3/poses_*.csv")):
+        try:
+            ids = pd.read_csv(f, usecols=["ident"]).ident.unique()
+        except Exception:                              # noqa: BLE001
+            continue
+        for i in ids:
+            idx.setdefault(str(i), f)
+    return idx
+
+
+@st.cache_data(show_spinner=False)
+def _nac3_poses(parent: str):
+    """All 500 measured poses for one molecule, geometry only.
+
+    COORDINATES ARE NOT HERE and are not anywhere: the screen persisted every
+    pose's distance, angle, energy and mode assignment, and one pose's
+    structure. So the poses can be counted, filtered and read -- which is what
+    the score is computed from -- but only mode 0 can be drawn.
+    """
+    f = _nac3_pose_index().get(str(parent))
+    if not f:
+        return None
+    try:
+        d = pd.read_csv(f)
+    except Exception:                                  # noqa: BLE001
+        return None
+    d = d[d.ident.astype(str) == str(parent)]
+    return d.copy() if len(d) else None
+
+
+def _nac3_rows(top: pd.DataFrame) -> pd.DataFrame:
+    """One display row per MODE.
+
+    `candidate_id` is the MODE ident (`<molecule>_m<k>`), not the molecule.
+    Using the molecule would make two modes of it indistinguishable to the
+    selection widget, which de-duplicates on that value -- clicking mode 1 after
+    mode 0 would register as the same click and the viewer would never move.
+    """
+    src = [("class_rank", "rank"), ("ident", "candidate_id"),
+           ("mode", "mode"), ("conditional_lcb", "LCB"),
+           ("enrichment_conditional", "conditional"),
+           ("consensus", "mode pop"), ("n_poses_mode", "poses in mode"),
+           ("anchor_quality_max", "anchor"), ("frac_in_range", "in range"),
+           ("QED", "QED"), ("pose_path", "_pose")]
+    use = [(x, y) for x, y in src if x in top.columns]
+    show = top[[x for x, _ in use]].copy()
+    show.columns = [y for _, y in use]
+    if "_pose" in show.columns:
+        show.insert(len(show.columns) - 1, "3D",
+                    ["yes" if isinstance(p, str) else "—" for p in show["_pose"]])
+    for c in ("rank", "mode", "poses in mode"):
+        if c in show.columns:
+            show[c] = show[c].astype("Int64")
+    return show.reset_index(drop=True)
+
+
+def _nac3_viewer(box_h: int) -> None:
+    """The right-hand pane: whatever was clicked on the left, in 3D.
+
+    In its OWN fixed-height scrolling container, matching the left. Sticky
+    positioning holds a short pane in view but does nothing for a tall one --
+    the control table under the viewer still pushed the page, and the two sides
+    then scrolled as one. Two panes, two scrollbars, neither moving the other.
+    """
+    cur = st.session_state.get(_SEL)
+    with st.container(height=box_h):
+        st.markdown("### Viewer")
+        if not cur:
+            st.info("Click any row on the left — candidate or reference — and "
+                    "its structure and poses appear here.")
+            return
+        # The clicked row is a MODE (`<molecule>_m<k>`); the structure, the SMILES
+        # and the pose set all belong to the MOLECULE.
+        ident = str(cur["ident"])
+        mm = re.match(r"^(.*)_m(\d+)$", ident)
+        parent, mode = (mm.group(1), int(mm.group(2))) if mm else (ident, None)
+        # THE VIEWER IS ALWAYS PER-MOLECULE, whichever view the table is in.
+        #
+        # In "dominant mode only" the table shows one row per molecule, so
+        # without this the minority modes become unreachable -- and those are
+        # the ones worth looking at (#42: they score better on the raw geometry
+        # and the bound demotes them). The clicked row sets the starting mode;
+        # this switches between that molecule's modes without leaving the row.
+        rk, _ = _nac3_rank()
+        mrows = (rk[rk.parent_ident.astype(str) == parent]
+                 .sort_values("consensus", ascending=False)
+                 if rk is not None else None)
+        if mrows is not None and len(mrows) > 1:
+            opts = [int(m) for m in mrows["mode"].tolist()]
+            lab = {int(r["mode"]): (f"mode {int(r['mode'])} · "
+                                    f"{int(r.n_poses_mode)} poses · "
+                                    f"LCB {r.conditional_lcb:.2f}")
+                   for _, r in mrows.iterrows()}
+            pickm = st.radio(
+                f"{len(opts)} binding modes for this molecule", opts,
+                index=opts.index(mode) if mode in opts else 0,
+                format_func=lambda m: lab.get(m, f"mode {m}"),
+                key=f"nac3_modepick_{parent}", horizontal=False,
+                help="Ranked independently. The row you clicked sets the "
+                     "starting mode; every mode of this molecule is reachable "
+                     "here regardless of which view the table is in.")
+            if pickm != mode:
+                mode = pickm
+        st.caption(f"**{parent}** · {cur['source']}"
+                   + (f" · **mode {mode}**" if mode is not None else ""))
+        smi = None
+        for tkey in ("t3", "t4"):
+            df, _ = D.load_frame(tkey)
+            if df is None:
+                continue
+            hit = df[df.candidate_id.astype(str) == parent]
+            if len(hit):
+                smi = hit.iloc[0].get("canonical_smiles")
+                break
+        if smi is None:
+            rdf, _ = _ref_table(_NAC3_SCORE, "nac_v3_poses")
+            if rdf is not None and "reference_name" in rdf.columns:
+                hit = rdf[rdf.reference_name.astype(str) == parent]
+                if len(hit):
+                    smi = hit.iloc[0].get("smiles")
+        if isinstance(smi, str):
+            try:
+                st.image(depict.png(smi, width=330, height=250))
+            except Exception as exc:                   # noqa: BLE001
+                st.caption(f"2D depiction unavailable: {exc}")
+        # THE SCREEN'S OWN POSES, and nothing else. A re-docked pose set is a
+        # DIFFERENT SAMPLE -- docking is stochastic and no seed is fixed -- so
+        # showing it beside this row's numbers would put structures on screen
+        # that the score was not computed from. That is this project's recurring
+        # defect, not a fix for it.
+        pose = cur.get("pose")
+        default_pose = 1          # overwritten below once the mode is located
+        if isinstance(pose, str) and Path(pose).is_file():
+            # THE FILE HOLDS ONE RECORD PER MODE, not one per molecule. Mode 3's
+            # structure IS in there -- it is simply not record 1, and defaulting
+            # to record 1 drew mode 0 while the row said mode 3. Located by the
+            # stamped `mode` property, never by position.
+            reps = _pose_modes(parent)
+            want = reps.get(mode if mode is not None else 0, [])
+            if want:
+                default_pose = want[0]
+                st.caption(
+                    f"Showing **mode {mode if mode is not None else 0}'s "
+                    f"representative** — record {default_pose} of "
+                    f"{sum(len(v) for v in reps.values())}, one per mode. "
+                    ":orange[One pose, not the whole cluster] — the mode's "
+                    "other poses were measured but not kept (#41).")
+            elif mode:
+                st.caption(f":orange[No record stamped mode {mode}] — this file "
+                           f"holds modes {sorted(reps)}.")
+            vframe = pd.DataFrame([{"candidate_id": parent,
+                                    "nac3_pose_path": pose}])
+            try:
+                render_pose_viewer(
+                    cur["source"] if cur["source"] in ("t3", "t4") else "t4",
+                    cur["source"], vframe, vframe.iloc[0],
+                    key=f"nac3_one_{ident}",
+                    pose_column="nac3_pose_path", height=440,
+                    default_pose=default_pose)
+            except Exception as exc:                   # noqa: BLE001
+                st.caption(f"pose viewer unavailable: {exc}")
+        elif mode:
+            st.warning(
+                f"**No structure on disk for mode {mode}.** The screen kept the "
+                "measurements of all 500 poses but the coordinates of only one "
+                "per molecule — always mode 0's. Every minority mode is ranked "
+                "and scored from geometry that cannot be drawn. Regenerating "
+                "them needs a re-dock (#40).")
+        else:
+            st.info("no poses on disk for this molecule")
+
+        # EVERY POSE, from the per-pose geometry the screen persisted. This is
+        # what "view all poses" can currently mean: 500 measured poses per
+        # molecule exist, 1 drawable structure does.
+        pp = _nac3_poses(parent)
+        if pp is None or pp.empty:
+            return
+        st.markdown("---")
+        modes = sorted(pp["mode"].dropna().unique().tolist())
+        default = modes.index(mode) if (mode in modes) else 0
+        pick = st.selectbox(
+            f"all {len(pp)} poses — show mode", ["all modes"] + [f"mode {int(m)}" for m in modes],
+            index=default + 1 if mode in modes else 0, key=f"nac3_modesel_{parent}")
+        sub = pp if pick == "all modes" else pp[pp["mode"] == int(pick.split()[1])]
+        viable = int(sub.viable.sum()) if "viable" in sub else 0
+        inrange = int(sub.in_range.sum()) if "in_range" in sub else 0
+        m1, m2, m3 = st.columns(3)
+        m1.metric("poses", f"{len(sub):,}")
+        m2.metric("in range", f"{inrange:,}")
+        m3.metric("attack-viable", f"{viable:,}")
+        cols = [c for c in ("pose_idx", "mode", "distance", "angle",
+                            "approach_angle", "energy", "viable", "in_range")
+                if c in sub.columns]
+        st.dataframe(sub[cols].sort_values("distance").reset_index(drop=True),
+                     width="stretch", hide_index=True, height=240,
+                     column_config={c: st.column_config.NumberColumn(format="%.2f")
+                                    for c in ("distance", "angle",
+                                              "approach_angle", "energy")
+                                    if c in cols})
+        st.caption(
+            "Sorted by warhead-to-Cys113 distance. `viable` is the pre-registered "
+            "near-attack test — in the 2.8–4.2 Å window AND at a "
+            "mechanism-appropriate angle. These are the numbers the mode's score "
+            "is computed from.")
+
+
+#: The score 2.2.0 rows are ordered by, and the one the weekend worklist takes
+#: its priority order from. Named once so the panel, the reference table and the
+#: viewer cannot drift onto three different rankings.
+_NAC3_SCORE = "conditional_eb"
+
+
+def panel_nac3_ranking() -> None:
+    """The 2.2.0 ranking: binding MODES, ranked on a lower confidence bound.
+
+    Same shape as the 2.1.0 panel -- tables left, one viewer right -- because
+    that is the layout @tt8804 asked to keep. What changed is underneath: a row
+    is a molecule shown ON ITS BEST BINDING MODE rather than averaged over every
+    pose it produced, and the score carries a confidence bound so a mode holding
+    eight poses cannot outrank one holding four hundred on the strength of a
+    proportion measured from almost nothing.
+    """
+    st.header("Ranking 2.2.0 — binding modes, Wilson-bounded conditional enrichment")
+    curation_header("Ranking 2.2.0")
+
+    with st.expander("**What the columns mean** — and what this ranking has "
+                     "NOT been shown to do", expanded=False):
+        st.markdown(
+            "Each row is **one molecule on its best binding mode**. 500 docking "
+            "runs are clustered by where the *reactive atom* sits and which way "
+            "the warhead points; each cluster is a mode, and a molecule that "
+            "binds two ways is scored separately in each.\n\n"
+            "| column | what it is |\n|---|---|\n"
+            "| **LCB** | the ranking score: the **Wilson 95% lower bound** on "
+            "P(attack angle \\| warhead in range), over the isotropic null. The "
+            "bound is what stops a mode with 8 poses beating one with 400. |\n"
+            "| **conditional** | the same quantity *without* the bound — the "
+            "point estimate. A large gap to LCB means thin evidence. |\n"
+            "| **mode pop** | the fraction of all 500 poses that fell in this "
+            "mode. Population, **not energy** — the energy ordering carries no "
+            "signal about reaction geometry (#23). |\n"
+            "| **poses in mode** | how many poses the bound was computed from. "
+            "This is the sample size; read LCB against it. |\n"
+            "| **modes** | how many distinct modes this molecule has. >1 means "
+            "the row is not the whole story. |\n"
+            "| **anchor** | best continuous anchoring geometry in the mode. |\n"
+            "| **in range** | how often the sampler put the warhead within "
+            "striking distance at all. |\n\n"
+            "**No score here has passed a convergence test.** Between 200 and "
+            "500 runs the *previous* score moved molecules a median of 853 "
+            "places (ρ = +0.395). The 500-vs-2,000 replicate that would settle "
+            "whether this one reproduces **has not been run** — see "
+            "`docs/prereg_score_selection.md`, where convergence is "
+            "disqualifying and comes first. Treat this ordering as a way to "
+            "*look at* the library, not as a result.")
+
+    c1, c2, c3 = st.columns([1, 1, 2])
+    box_h = c1.slider("pane height (px)", 400, 1400, 820, 20, key="nac3_boxh",
+                      help="Both panes are this tall and scroll independently.")
+    per_class = c2.slider("rows per class", 5, 60, 15, 5, key="nac3_rows")
+    view = c3.radio(
+        "view", ["per mode — every mode ranked separately",
+                 "per molecule — best mode only"],
+        horizontal=True, key="nac3_modeview",
+        help="A molecule that binds two ways is two candidates, and both are "
+             "ranked. Per-molecule collapses to one row each; the viewer still "
+             "reaches every mode, so nothing becomes invisible. 52% of T4 "
+             "molecules are multi-mode and for some the reactive mode is the "
+             "minority one — sulfopin's own case.")
+    dom_only = view.startswith("per molecule")
+
+    left, right = st.columns([3, 2], gap="medium")
+    picked = None
+
+    with left.container(height=box_h):
+        rdf, rname = _ref_table(_NAC3_SCORE, "nac_v3_poses")
+        if rdf is not None:
+            with st.expander("**Known Pin1 binders** — same measurement, not a "
+                             "validation set", expanded=True):
+                st.caption(
+                    "Re-screened at 500 runs through the identical 2.2.0 path, "
+                    "so the numbers are comparable to the candidates below. "
+                    "**Nothing is calibrated against them.** Sulfopin is the "
+                    "parent compound — and see #39: its stored pose sits 3.78 Å "
+                    "from its own crystal structure, so a good rank here is not "
+                    "evidence the pose is right.")
+                r = rdf.copy()
+                if dom_only and "mode" in r.columns:
+                    r = r.sort_values("consensus", ascending=False) \
+                         .drop_duplicates(["reference_name", "warhead_class"])
+                src = [("reference_name", "candidate_id"),
+                       ("warhead_class", "warhead_class"), ("mode", "mode"),
+                       ("conditional_lcb", "LCB"),
+                       ("enrichment_conditional", "conditional"),
+                       ("consensus", "mode pop"),
+                       ("n_poses_mode", "poses in mode"),
+                       ("anchor_quality_max", "anchor"),
+                       ("pose_path", "_pose")]
+                use = [(x, y) for x, y in src if x in r.columns]
+                t = r[[x for x, _ in use]].copy()
+                t.columns = [y for _, y in use]
+                num = [y for _, y in use
+                       if y in ("LCB", "conditional", "mode pop", "anchor")]
+                sort_on = "LCB" if "LCB" in t.columns else t.columns[1]
+                picked = _selectable(
+                    t.sort_values(sort_on, ascending=False).reset_index(drop=True),
+                    num, "nac3_tbl_ref", "reference") or picked
+                st.caption(f"`{rname}`")
+
+        rk, rkname = _nac3_rank()
+        if rk is None:
+            st.info("no 2.2.0 ranking on disk yet — run the re-dock chain.")
+        else:
+            for tier, label in (("T3", "T₃ REINVENT"), ("T4", "T₄ combinatorial")):
+                g0 = rk[rk.tier == tier] if "tier" in rk.columns else rk.iloc[0:0]
+                st.subheader(label)
+                if g0.empty:
+                    st.info(f"no {tier} rows in this ranking")
+                    continue
+                # CURATION FILTERS MOLECULES, AND A MODE INHERITS ITS MOLECULE'S
+                # VERDICT. Filtering is done on the mode rows directly because
+                # every one carries its parent's SMILES; `class_rank` is NOT
+                # recomputed afterwards, so "rank 3" keeps meaning third of the
+                # full docked class rather than third of what survived the filter.
+                g0, _rules = curated(g0, "Ranking 2.2.0", label=label)
+                if g0.empty:
+                    st.info("no candidates survive the current curation filter")
+                    continue
+                if dom_only:
+                    g0 = (g0.sort_values("consensus", ascending=False)
+                            .drop_duplicates("parent_ident", keep="first"))
+                st.caption(f"`{rkname}` — **{len(g0):,} rows** over "
+                           f"{g0.parent_ident.nunique():,} molecules")
+                for cls in sorted(g0.warhead_class.dropna().unique()):
+                    g = g0[g0.warhead_class == cls]
+                    top = g.nsmallest(per_class, "class_rank").copy()
+                    n_extra = int((top["mode"] != 0).sum()) if "mode" in top else 0
+                    head = f"**{cls}** — {len(g):,} ranked"
+                    if not dom_only and n_extra:
+                        head += f" · {n_extra} of these {per_class} are minority modes"
+                    with st.expander(head, expanded=True):
+                        show = _nac3_rows(top)
+                        num = [c for c in ("LCB", "conditional", "mode pop",
+                                           "anchor", "in range", "QED")
+                               if c in show.columns]
+                        picked = _selectable(show, num,
+                                             f"nac3_tbl_{tier}_{cls}",
+                                             tier.lower()) or picked
+
+    if picked:
+        st.session_state[_SEL] = picked
+
+    with right:
+        _nac3_viewer(box_h)
+
+
+@st.cache_data(show_spinner=False)
+def _lookup_sources() -> dict:
+    """Everything keyed by molecule, gathered once.
+
+    Each source is loaded independently and a failure in one must not hide the
+    others -- a molecule that has been docked but not swept should still show its
+    docking row rather than an empty result.
+    """
+    import glob as _g
+    out: dict = {}
+    B = "/data/lab_vm/append_only/inhibition/00_outputs/blacksmith"
+
+    def _cat(pattern, key=None):
+        fs = _g.glob(pattern)
+        if key:
+            fs = sorted(fs, key=key)
+        if not fs:
+            return None
+        try:
+            return pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)
+        except Exception:                              # noqa: BLE001
+            return None
+
+    out["sweep"] = _cat(f"{B}/attack_sweep/attack_sweep_*.csv",
+                        key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
+    out["md"] = _cat(f"{B}/md_residence/*.csv")
+    return out
+
+
+def panel_lookup() -> None:
+    """Find any set of molecules across EVERY stage at once.
+
+    @tt8804: *"search for mol barcodes all at once, not just one pane at a
+    time."* Every other panel answers "what is at the top of this stage"; this
+    one answers "what happened to THESE molecules", which previously meant
+    opening each panel in turn and reading past whatever it chose to show.
+
+    Paste identifiers in any shape -- newlines, commas, spaces -- because they
+    arrive pasted from a spreadsheet, a Slack message or a previous table, and
+    forcing one separator just moves the work onto the reader.
+    """
+    st.header("Find molecules — every stage, one search")
+    curation_header("Find molecules")
+
+    raw = st.text_area(
+        "molecule identifiers", height=100, key="lookup_ids",
+        placeholder="t4_7c62bc9ebf51, t4_b0a36e591bf6\nt4_caf17775e15f",
+        help="Newlines, commas or spaces. Partial identifiers match too, so "
+             "a prefix finds every mode of a molecule.")
+    ids = [t for t in re.split(r"[\s,;]+", raw.strip()) if t]
+    if not ids:
+        st.info("Paste one or more identifiers above. Everything known about "
+                "them — ranking, binding modes, sweep, 100 ns MD — appears here "
+                "together.")
+        return
+
+    def _hits(df, cols):
+        """Rows whose identity column contains any of the requested strings."""
+        if df is None or df.empty:
+            return None
+        key = next((c for c in cols if c in df.columns), None)
+        if key is None:
+            return None
+        s = df[key].astype(str)
+        m = pd.Series(False, index=df.index)
+        for t in ids:
+            m |= s.str.contains(re.escape(t), case=False, na=False)
+        return df[m] if m.any() else None
+
+    src = _lookup_sources()
+    rk, _ = _nac3_rank()
+    found_any = False
+
+    # 1. THE RANKING — every mode, not the molecule's best. A molecule whose
+    #    reactive mode is the minority one is exactly the case worth finding.
+    hit = _hits(rk, ["ident", "parent_ident"])
+    st.subheader("Ranking 2.2.0 — every binding mode")
+    if hit is None:
+        st.caption("no ranked modes match")
+    else:
+        found_any = True
+        cols = [c for c in ("ident", "warhead_class", "tier", "mode",
+                            "class_rank", _NAC3_SCORE, "enrichment_conditional",
+                            "consensus", "n_poses_mode", "frac_in_range",
+                            "anchor_quality_p90", "QED") if c in hit.columns]
+        st.dataframe(hit[cols].sort_values("class_rank").reset_index(drop=True),
+                     width="stretch", hide_index=True,
+                     column_config={c: st.column_config.NumberColumn(format="%.3f")
+                                    for c in cols if hit[c].dtype.kind == "f"})
+
+    # 2. THE 10 ns SWEEP
+    st.subheader("Attack-geometry sweep (10 ns)")
+    hit = _hits(src.get("sweep"), ["ident", "parent_ident"])
+    if hit is None:
+        st.caption("not swept")
+    else:
+        found_any = True
+        hit = hit[hit.get("sweep_ps", 0) > 1000] if "sweep_ps" in hit else hit
+        cols = [c for c in ("ident", "status", "frac_attack_ready", "n_visits",
+                            "n_visits_raw", "median_episode_ps", "frac_in_window",
+                            "start_attack_ready", "min_dist_a") if c in hit.columns]
+        st.dataframe(hit[cols].reset_index(drop=True), width="stretch",
+                     hide_index=True)
+        st.caption("A survivor has a **sustained** episode — `n_visits > 0` means "
+                   "at least one continuous ≥100 ps stretch in attack geometry. "
+                   "`n_visits_raw` counts every touch, including single frames.")
+
+    # 3. THE 100 ns RUN
+    st.subheader("100 ns molecular dynamics")
+    hit = _hits(src.get("md"), ["ident", "candidate_id"])
+    if hit is None:
+        st.caption("no 100 ns run")
+    else:
+        found_any = True
+        cols = [c for c in hit.columns
+                if c in ("ident", "status", "production_ps", "net_charge",
+                         "pose_source", "explicit_frac_frames_engaged",
+                         "residence", "mean_rmsd_nm", "max_rmsd_nm",
+                         "stat_inefficiency", "explicit_rmsd_suspect")]
+        st.dataframe(hit[cols].reset_index(drop=True), width="stretch",
+                     hide_index=True)
+
+    if not found_any:
+        st.warning(
+            f"**Nothing found for {', '.join(ids[:6])}"
+            f"{'…' if len(ids) > 6 else ''}.** Identifiers are matched as "
+            "substrings, so a typo finds nothing rather than something close — "
+            "check the prefix (`t3_` vs `t4_`).")
+
+
 PANELS = {
     "Shortlists": panel_candidates,
+    "Find molecules": panel_lookup,
+    "Ranking 2.2.0": panel_nac3_ranking,
     "Ranking 2.1.0": panel_nac2_ranking,
     "Near-attack ranking": panel_nac_ranking,
     "T₂ seed comparison": panel_seed_comparison,

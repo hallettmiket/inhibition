@@ -102,6 +102,84 @@ def load_references() -> tuple[pd.DataFrame, pd.DataFrame]:
 SRC = V2          # rebound by --topic
 
 
+def derived_scores(d: pd.DataFrame) -> pd.DataFrame:
+    """Add `conditional_x_consensus` and `conditional_lcb` to a scored frame.
+
+    A FUNCTION, AND NOT TWO COPIES, because the references go down a separate
+    path from the candidates. When this was inline on the candidate frame only,
+    the reference table came out without the very column the ranking was ordered
+    by -- so the panel that exists to answer "what does the known binder score"
+    could show every ingredient of the score and not the score. The references
+    are a yardstick, and a yardstick has to be marked in the same units.
+
+    WILSON LOWER BOUND — evidence enters as uncertainty, not as a weight.
+
+    Conditional enrichment is a PROPORTION estimated from n_in_range trials, so
+    its uncertainty is a solved problem rather than something to approximate
+    with a multiplier. Measured on this library: modes with <10 poses in the
+    window reach 12.25 while modes with >=100 top out at 7.82 -- the extremes
+    are small-sample artefacts, not molecules.
+
+    Multiplying by consensus fixes that but overcorrects: it penalises a mode
+    for being a MINORITY rather than for being thinly evidenced, and no minority
+    mode then reaches the top 40 -- which would bury sulfopin's case, where the
+    reactive mode is the minority one.
+
+    The Wilson bound penalises exactly the thing that should be penalised. A
+    60-pose minority mode with a clean signal survives it; an 8-pose one does
+    not. No weight is chosen, and the statistic is standard.
+    """
+    d = d.copy()
+    if "consensus" in d.columns and "enrichment_conditional" in d.columns:
+        d["conditional_x_consensus"] = d.enrichment_conditional * d.consensus
+    need = {"n_in_range", "n_viable_given_in_range", "isotropic_null"}
+    if not need.issubset(d.columns):
+        return d
+    n = d.n_in_range.astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        phat = d.n_viable_given_in_range / n.replace(0, np.nan)
+        z = 1.96
+        den = 1.0 + z * z / n
+        centre = (phat + z * z / (2 * n)) / den
+        half = z * np.sqrt(phat * (1 - phat) / n + z * z / (4 * n * n)) / den
+        d["conditional_lcb"] = (centre - half).clip(lower=0.0) / d.isotropic_null
+
+    # EMPIRICAL-BAYES SHRINKAGE — the same protection against thin evidence,
+    # WITHOUT the size bias (#42).
+    #
+    # A lower confidence bound is conservative in one direction: it pushes an
+    # uncertain estimate toward ZERO. Uncertainty scales with 1/sqrt(n) and n is
+    # the mode's population, so the bound systematically demotes minority modes.
+    # Measured on T4: rho(conditional_lcb, mode size) = +0.163, and mode 0 takes
+    # 68.9% of the top ten against a 63.6% base rate among scorable modes.
+    #
+    # Shrinkage pulls an uncertain estimate toward the POPULATION MEAN instead of
+    # toward zero, so a thinly-evidenced mode lands at average rather than at the
+    # bottom -- there is no systematic direction, which is the property being
+    # asked for. The prior is fitted to this library by method of moments, so it
+    # is not a tuning knob: it is whatever the population says.
+    #
+    # Measured: rho(eb, size) = -0.142 and mode 0 takes 63.3% of the top ten
+    # against the 63.6% base rate -- the dominant mode ends up represented at the
+    # rate it actually occurs, which is what "unbiased" means here.
+    ok = n > 0
+    p = (d.n_viable_given_in_range / n.replace(0, np.nan))[ok]
+    if len(p.dropna()) > 50:
+        mu, var = float(np.nanmean(p)), float(np.nanvar(p))
+        conc = max(mu * (1 - mu) / var - 1, 1e-6) if var > 0 else 1e-6
+        a0, b0 = mu * conc, (1 - mu) * conc
+        log.info("empirical-Bayes prior: alpha=%.2f beta=%.2f (mean %.4f, worth "
+                 "~%.0f poses)", a0, b0, mu, a0 + b0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            d["conditional_eb"] = (((d.n_viable_given_in_range + a0)
+                                    / (n + a0 + b0)) / d.isotropic_null)
+        # A mode with NO in-range pose has no estimate to shrink; the prior alone
+        # would hand it the population mean, which is a score invented from
+        # nothing. Those modes are unscorable, not average.
+        d.loc[~ok, "conditional_eb"] = np.nan
+    return d
+
+
 def _shards(pattern: str) -> pd.DataFrame:
     fs = sorted(glob.glob(str(SRC / pattern)))
     if not fs:
@@ -306,7 +384,8 @@ def main() -> None:
     ap.add_argument("--score", default="weighted_score",
                     choices=("weighted_score", "enrichment_conditional",
                              "enrichment_joint", "topn_viable_frac",
-                             "conditional_x_consensus", "conditional_lcb"))
+                             "conditional_x_consensus", "conditional_lcb",
+                             "conditional_eb"))
     ap.add_argument("--consensus", default="consensus_gnina",
                     choices=("consensus_gnina", "consensus_autodock"))
     ap.add_argument("--quota", type=float, default=DEFAULT_QUOTA)
@@ -379,34 +458,7 @@ def main() -> None:
     # lands at 0.74, an 86%-population mode scoring 2 lands at 1.76. No cut-off
     # is invented, and a minority mode can still win if its enrichment is high
     # ENOUGH -- which is what sulfopin's case requires.
-    if "consensus" in ok.columns:
-        ok["conditional_x_consensus"] = (ok.enrichment_conditional
-                                         * ok.consensus)
-
-    # WILSON LOWER BOUND — evidence enters as uncertainty, not as a weight.
-    #
-    # Conditional enrichment is a PROPORTION estimated from n_in_range trials, so
-    # its uncertainty is a solved problem rather than something to approximate
-    # with a multiplier. Measured on this library: modes with <10 poses in the
-    # window reach 12.25 while modes with >=100 top out at 7.82 -- the extremes
-    # are small-sample artefacts, not molecules.
-    #
-    # Multiplying by consensus fixes that but overcorrects: it penalises a mode
-    # for being a MINORITY rather than for being thinly evidenced, and no
-    # minority mode then reaches the top 40 -- which would bury sulfopin's case,
-    # where the reactive mode is the minority one.
-    #
-    # The Wilson bound penalises exactly the thing that should be penalised. A
-    # 60-pose minority mode with a clean signal survives it; an 8-pose one does
-    # not. No weight is chosen, and the statistic is standard.
-    n = ok.n_in_range.astype(float)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        phat = ok.n_viable_given_in_range / n.replace(0, np.nan)
-        z = 1.96
-        den = 1.0 + z * z / n
-        centre = (phat + z * z / (2 * n)) / den
-        half = z * np.sqrt(phat * (1 - phat) / n + z * z / (4 * n * n)) / den
-        ok["conditional_lcb"] = (centre - half).clip(lower=0.0) / ok.isotropic_null
+    ok = derived_scores(ok)
 
     wh = pd.read_csv(REPO / "data/reference/warhead_classes_10.csv")
     smarts = dict(zip(wh.class_id, wh.reactive_atom_smarts))
@@ -485,6 +537,9 @@ def main() -> None:
                 ragg[c] = np.nan
         ragg["weighted_score"] = sum(
             WEIGHTS[c] * ragg[c].fillna(0.0) for c in WEIGHTS)
+        # The SAME derived scores the candidates get, or the references cannot be
+        # read on the axis the candidates were ranked on.
+        ragg = derived_scores(ragg)
         ragg["reference_name"] = ragg.ident.str.replace("^ref_", "", regex=True) \
                                           .str.split("__").str[0]
         # Carry the SMILES and the provenance across. Without smiles the GUI can

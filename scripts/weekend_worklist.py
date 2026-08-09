@@ -76,13 +76,21 @@ def main() -> None:
                     help="acrylamide, bdhi_c4, bdhi_c5")
     ap.add_argument("--per-class-other", type=int, default=5,
                     help="the remaining classes — the top few only")
+    ap.add_argument("--tiers", nargs="+", default=["T4"], choices=["T3", "T4"],
+                    help="which arms to draw from. T4 only by default (#40).")
     ap.add_argument("--limit", type=int, default=0,
                     help="hard cap on the whole worklist, applied last")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
+    # T4 ONLY (@tt8804, 2026-08-07). T3 carries a single warhead class across all
+    # 4,065 molecules, docks each into essentially one position, and sits in
+    # range 85% of the time against T4's 44% -- the profile of a small rigid set
+    # that scores well for reasons unrelated to being a good inhibitor. Pooling
+    # the two ranks molecules drawn from different distributions against each
+    # other. See #40; T3 generation is under review.
     frames = []
-    for tier in ("T3", "T4"):
+    for tier in args.tiers:
         fs = sorted(glob.glob(str(RANK / f"rank_v2_{tier}_{args.score}_*.csv")),
                     key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
         if fs:
@@ -175,7 +183,21 @@ def main() -> None:
         dom = g.iloc[0]
         pairs.append((pid, 1))                     # mode 0 -> pose_rank 1
         for r in g.iloc[1:].itertuples():
-            if (r.anchor_quality_max - dom.anchor_quality_max) > MODE_GAIN:
+            # ON A SIZE-STABLE STATISTIC WHERE ONE EXISTS (#43).
+            #
+            # `anchor_quality_max` is a MAX over the mode's poses, so it grows
+            # with how many poses the mode has: rho(max, mode size) = +0.66
+            # against +0.54 for the 90th percentile. Comparing a 400-pose mode's
+            # max against a 60-pose mode's max understates the minority mode by
+            # construction -- and this rule decides which extra modes get GPU
+            # time, so the bias reaches selection and not just the table.
+            #
+            # `anchor_quality_p90` is backfilled for every existing mode by
+            # `backfill_anchor_p90.py`; the max is the fallback so an older
+            # aggregate without the column still produces a worklist.
+            acol = ("anchor_quality_p90"
+                    if "anchor_quality_p90" in v3.columns else "anchor_quality_max")
+            if (getattr(r, acol) - getattr(dom, acol)) > MODE_GAIN:
                 pairs.append((pid, int(r.mode) + 1))
     lst = Path(args.out_list) if args.out_list else dest.with_suffix(".txt")
     lst.write_text("\n".join(f"{a} {b}" for a, b in pairs) + "\n")
