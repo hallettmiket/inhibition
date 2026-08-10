@@ -334,53 +334,87 @@ def _stage2(pts) -> str:
 </svg>"""
 
 
-#: Illustrative pooled ranking. Three molecules, six modes between them, and the
-#: point is that the three modes of molecule 2 land at ranks 1, 3 and 6 — a mode
-#: competes on its own geometry, not on the company it keeps.
-POOL = [
-    {"mol": "mol A", "col": "#1b7f79", "modes": [("m0", 0.62), ("m1", 0.15)]},
-    {"mol": "mol B", "col": "#a63d7a",
-     "modes": [("m0", 0.71), ("m1", 0.44), ("m2", 0.08)]},
-    {"mol": "mol C", "col": "#6b7f1b", "modes": [("m0", 0.33)]},
+#: Mode colours, matching MODES above.
+MODE_COLS = {"1": "#0072ce", "2": "#7b5ea7", "3": "#c2703d"}
+#: Molecule colours, deliberately unlike the mode colours.
+MOL_COLS = {"mol A": "#1b7f79", "mol B": "#a63d7a", "mol C": "#6b7f1b"}
+
+
+def _blend(a: str, b: str, w: float = 0.55) -> str:
+    """Mix two hex colours, w of the first.
+
+    A mode of a molecule is BOTH things at once, so its colour is both: the
+    molecule's hue pulled toward the mode's. Every mode-of-molecule then has a
+    colour nothing else has, which is what lets one ranked list be carried from
+    step 4 into step 5 and still be read row by row.
+    """
+    def rgb(h):
+        h = h.lstrip("#")
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    ca, cb = rgb(a), rgb(b)
+    return "#%02x%02x%02x" % tuple(
+        round(ca[i] * w + cb[i] * (1 - w)) for i in range(3))
+
+
+#: ONE table behind step 4 and step 5. (molecule, mode, geometry score, 10 ns
+#: attack-ready, 100 ns engagement or None, held or None).
+#:
+#: Kept as a single list rather than two, because step 4's ranking and step 5's
+#: survival are the SAME rows read twice -- and two hand-maintained lists that
+#: must agree is exactly the shape this project keeps finding broken.
+ENTRIES = [
+    ("mol B", "1", 0.71, 0.52, 0.94, True),
+    ("mol A", "1", 0.62, 0.41, 0.88, True),
+    ("mol B", "2", 0.44, 0.37, 0.42, False),
+    ("mol C", "1", 0.33, 0.33, 0.79, True),
+    ("mol A", "2", 0.15, 0.21, 0.35, False),
+    ("mol B", "3", 0.08, 0.04, None, None),
+    ("mol C", "3", 0.06, 0.06, None, None),
 ]
 
 
+def _ecol(mol: str, mode: str) -> str:
+    return _blend(MOL_COLS[mol], MODE_COLS[mode])
+
+
 def _stage_pool() -> str:
-    """Every mode from every molecule, ranked in one list."""
-    rows = []
-    for g in POOL:
-        for k, v in g["modes"]:
-            rows.append((g["mol"], g["col"], k, v))
-    ranked = sorted(rows, key=lambda r: -r[3])
+    """Each molecule's modes on the left, all of them ranked together on the right."""
+    ranked = sorted(ENTRIES, key=lambda r: -r[2])
 
     left, y = [], 26
-    for g in POOL:
-        h = 18 + 20 * len(g["modes"])
+    for mol in MOL_COLS:
+        mine = [e for e in ENTRIES if e[0] == mol]
+        if not mine:
+            continue
+        h = 18 + 20 * len(mine)
         left.append(f"<rect x='10' y='{y}' width='150' height='{h}' rx='5' "
-                    f"fill='none' stroke='{g['col']}' stroke-opacity='.5'/>"
-                    f"<text x='18' y='{y + 14}' class='mtag' fill='{g['col']}'>"
-                    f"{g['mol']}</text>")
+                    f"fill='none' stroke='{MOL_COLS[mol]}' stroke-opacity='.5'/>"
+                    f"<text x='18' y='{y + 14}' class='mtag' "
+                    f"fill='{MOL_COLS[mol]}'>{mol}</text>")
         yy = y + 22
-        for k, v in g["modes"]:
+        for _m, mode, geom, *_ in mine:
+            c = _ecol(mol, mode)
             left.append(
                 f"<rect x='20' y='{yy}' width='130' height='15' rx='3' "
-                f"fill='{g['col']}' fill-opacity='.14'/>"
-                f"<text x='27' y='{yy + 11}' class='chip' fill='{g['col']}'>{k}</text>"
-                f"<text x='143' y='{yy + 11}' class='chip' fill='{g['col']}' "
-                f"text-anchor='end'>{v:.2f}</text>")
+                f"fill='{c}' fill-opacity='.22'/>"
+                f"<text x='27' y='{yy + 11}' class='chip' fill='{c}'>mode {mode}</text>"
+                f"<text x='143' y='{yy + 11}' class='chip' fill='{c}' "
+                f"text-anchor='end'>{geom:.2f}</text>")
             yy += 20
         y += h + 10
 
     right, yy = [], 26
-    for i, (mol, col, k, v) in enumerate(ranked, start=1):
+    for i, (mol, mode, geom, *_) in enumerate(ranked, start=1):
+        c = _ecol(mol, mode)
         right.append(
             f"<rect x='250' y='{yy}' width='168' height='17' rx='3' "
-            f"fill='{col}' fill-opacity='.14'/>"
+            f"fill='{c}' fill-opacity='.22'/>"
             f"<text x='243' y='{yy + 12}' class='chip' fill='var(--muted)' "
             f"text-anchor='end'>{i}</text>"
-            f"<text x='257' y='{yy + 12}' class='chip' fill='{col}'>{mol} &middot; {k}</text>"
-            f"<text x='411' y='{yy + 12}' class='chip' fill='{col}' "
-            f"text-anchor='end'>{v:.2f}</text>")
+            f"<text x='257' y='{yy + 12}' class='chip' fill='{c}'>"
+            f"{mol} &middot; mode {mode}</text>"
+            f"<text x='411' y='{yy + 12}' class='chip' fill='{c}' "
+            f"text-anchor='end'>{geom:.2f}</text>")
         yy += 21
 
     return f"""<svg viewBox="0 0 430 300" class="dia" role="img"
@@ -422,31 +456,24 @@ def _run_counts() -> dict:
     return out
 
 
-#: (label, molecule colour, 10 ns attack-ready, 100 ns engagement or None, held)
-#:
-#: Coloured by MOLECULE only. Mode colour belongs to steps 2 and 3, and reusing it
-#: here would tell the reader the two keys are one key.
-#:
-#: Ordered by the 100 ns engagement, because that IS the rank. The sweep column
-#: sits beside it as the triage that decided who earned a 100 ns run at all --
-#: and the two disagree on purpose: mol B's m1 sweeps better than mol C's m0 and
-#: still ranks below it, which is the whole reason the sweep is not the ranking.
-SURVIVE = [("mol B · m0", "#a63d7a", 0.52, 0.94, True),
-           ("mol A · m0", "#1b7f79", 0.41, 0.88, True),
-           ("mol C · m0", "#6b7f1b", 0.33, 0.79, True),
-           ("mol B · m1", "#a63d7a", 0.37, 0.42, False),
-           ("mol A · m1", "#1b7f79", 0.21, 0.35, False),
-           ("mol D · m0", "#8a5a00", 0.09, None, None),
-           ("mol E · m0", "#4a5f8a", 0.06, None, None),
-           ("mol B · m2", "#a63d7a", 0.04, None, None)]
-
-
 def _stage_survival() -> str:
-    """The ranked list, the two numbers behind the rank, and what survived."""
+    """The SAME rows step 4 ranked, carried through the sweep and the 100 ns run.
+
+    Same entries, same blended colours, so a row can be followed from one step to
+    the next by eye. Ordered by the 100 ns engagement because that is the rank;
+    the sweep column sits beside it as the triage that decided who earned a 100 ns
+    run at all, and the two disagree on purpose -- mol B mode 2 sweeps above mol C
+    mode 1 and still ranks below it, which is the whole reason the sweep is not
+    the ranking.
+    """
+    ordered = sorted(ENTRIES,
+                     key=lambda r: (r[4] is not None, r[4] or 0, r[3]),
+                     reverse=True)
     rows = []
     y, rank, ROW = 46, 0, 24
-    n_elev = sum(1 for r in SURVIVE if r[3] is not None)
-    for name, col, sweep, eng, held in SURVIVE:
+    n_elev = sum(1 for r in ENTRIES if r[4] is not None)
+    for mol, mode, _geom, sweep, eng, held in ordered:
+        name, col = f"{mol} &middot; mode {mode}", _ecol(mol, mode)
         elevated = eng is not None
         if elevated:
             rank += 1
