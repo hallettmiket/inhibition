@@ -96,6 +96,10 @@ CONTACT_A = 4.5
 #: the movie PDB carries no hydrogens, so donor geometry cannot be checked and
 #: calling it an H-bond would claim more than was measured.
 POLAR_A = 3.5
+#: Surface shell, Angstrom: residues with a heavy atom this close to the ligand
+#: get a molecular surface. Same reasoning as the movie's shell -- a whole-protein
+#: mesh is the expensive call and the far side of the protein is not the subject.
+SURF_SHELL_A = 8.0
 
 #: One key, used by both figures, so a colour cannot mean two things across the
 #: page. Wording is deliberately about what was MEASURED: "polar", not H-bond;
@@ -355,11 +359,23 @@ def interaction_3d(movie_pdb: Path, rows: list, elem_id: str,
                       "t": tag, "d": pol > 0.2})
         resis.append(int(ri))
 
+    # THE POCKET WALL. Whole-protein VDW is the expensive call in a 3Dmol viewer
+    # and nobody looks at the far side of the protein; the residues with a heavy
+    # atom within SURF_SHELL_A of the ligand are what actually forms the pocket.
+    LX = np.array([a[0] for a in lig])
+    pocket = sorted({int(p[2]) for p in prot if p[2].lstrip("-").isdigit()
+                     and np.linalg.norm(LX - np.array(p[0]), axis=1).min()
+                     <= SURF_SHELL_A})
+
     pdb = "\n".join(l for l in frame.splitlines()
                      if l.startswith(("ATOM", "HETATM")))
     return f"""
 <div class="glwrap"><div class="glbox">
 <div id="{elem_id}" style="position:absolute;inset:0"></div></div>
+<div class="vctl"><label class="sfx"><input type="checkbox" id="{elem_id}-surf"
+ checked> pocket surface</label>
+<span class="hint">{len(pocket)} residues within {SURF_SHELL_A:.0f} &#8491; of the
+ligand &#183; Cys113 and the ligand are left uncovered</span></div>
 {_LEGEND_3D}
 <p class="p3cap">Representative frame — the ligand's medoid position over
 {nfr} frames. Every line joins the actual closest pair of atoms in this frame,
@@ -371,6 +387,7 @@ contact, which for a halide-displacement warhead is the leaving group.</p></div>
 (function(){{
   const M = window.$3Dmol || window['3Dmol'];
   const L = {json.dumps(links)}, RES = {json.dumps(sorted(set(resis)))};
+  const POCKET = {json.dumps(pocket)}, CYS = {int(cys_resi)};
   // Same lazy boot as the movie: a closed <details> has no height, and a viewer
   // built into a zero-height box draws nothing.
   let built = false;
@@ -381,8 +398,18 @@ contact, which for a halide-displacement warhead is the leaving group.</p></div>
                                {{backgroundColor:'#eef1f6'}});
       v.addModel(document.getElementById('{elem_id}-pdb').textContent, 'pdb');
       v.setStyle({{}}, {{cartoon:{{color:'#c3ccd8', opacity:0.55}}}});
-      v.setStyle({{resi: RES}}, {{stick:{{radius:0.14, colorscheme:'greenCarbon'}},
+      // Contact residues are NEUTRAL. They were greenCarbon, and green is the
+      // legend's word for "polar" -- a residue drawn green for being a contact
+      // and a line drawn green for being polar cannot share a page.
+      v.setStyle({{resi: RES}}, {{stick:{{radius:0.14, colorscheme:'whiteCarbon'}},
                                  cartoon:{{color:'#c3ccd8', opacity:0.55}}}});
+      // Cys113 in its own sticks, carbons in the key's red, sulfur left at its
+      // element colour so the atom under attack is the one you can pick out.
+      const CC = Object.assign({{}}, (M.elementColors || {{}}).defaultColors || {{}},
+                               {{C: 0xb3261e}});
+      v.setStyle({{resi: [CYS]}},
+                 {{stick:{{radius:0.26, colorscheme:{{prop:'elem', map: CC}}}},
+                  cartoon:{{color:'#c3ccd8', opacity:0.55}}}});
       v.setStyle({{resn:'MOL'}}, {{stick:{{radius:0.22, colorscheme:'yellowCarbon'}}}});
       L.forEach(function(k){{
         v.addCylinder({{start:{{x:k.a[0],y:k.a[1],z:k.a[2]}},
@@ -393,6 +420,24 @@ contact, which for a halide-displacement warhead is the leaving group.</p></div>
                          fontSize:10, fontColor:k.c, backgroundColor:'white',
                          backgroundOpacity:0.72, borderThickness:0}});
       }});
+      // THE POCKET MESH. Built over the shell only, and never over the ligand or
+      // Cys113 -- a surface drawn on top of them hides the two things the figure
+      // exists to show. Translucent, so the sticks and the measured lines read
+      // through it. removeSurface before re-adding: addSurface STACKS meshes.
+      let surf = null;
+      const chk = document.getElementById('{elem_id}-surf');
+      function setSurf() {{
+        if (surf) {{ try {{ v.removeSurface(surf.surfid); }} catch (e) {{}} surf = null; }}
+        if (!chk || chk.checked) {{
+          surf = v.addSurface(M.SurfaceType.VDW,
+            {{opacity: 0.62, color: '#b9c7db'}},
+            {{and: [{{resi: POCKET}},
+                   {{not: {{or: [{{resn:'MOL'}}, {{resi: [CYS]}}]}}}}]}});
+        }}
+        v.render();
+      }}
+      if (chk) chk.addEventListener('change', setSurf);
+      setSurf();
       v.zoomTo({{resn:'MOL'}}); v.zoom(0.55); v.resize();
       // 3Dmol draws NOTHING until render() is called. The labels are DOM
       // overlays and appear without it, which is what made an unrendered
@@ -657,7 +702,7 @@ def block(ident: str, er, three: str, cls: dict) -> str:
     # protein and ligand as simulated, PBC-repaired and CA-fitted, one frame.
     # Offered as a download rather than a path, because the recipient has no
     # access to this filesystem.
-    imap, i3d, pdb_href, pdb_bytes = "", "", "", 0
+    i3d, pdb_href, pdb_bytes = "", "", 0
     if mpdb.is_file():
         raw = mpdb.read_text()
         first = raw.split("ENDMDL")[0]
@@ -675,7 +720,10 @@ def block(ident: str, er, three: str, cls: dict) -> str:
             if rx is None:
                 log.warning("%s: no reactive atom for class %r; Cys113 will be "
                             "drawn to its nearest atom", ident, cls.get(ident))
-            imap = interaction_map(lm, rows_c, nfr, dist_of=dmap, rx_atom=rx)
+            # The flat map is no longer emitted (@tt8804): the 3D view carries the
+            # same contacts in the real geometry, and two figures of one thing
+            # invite a reader to look for a difference that is only projection.
+            # interaction_map() is kept -- it is the printable version.
             i3d = interaction_3d(mpdb, rows_c, f"i3_{ident}", rx_atom=rx)
         except Exception as exc:                          # noqa: BLE001
             log.warning("%s: interaction map unavailable: %s", ident, exc)
@@ -717,20 +765,17 @@ def block(ident: str, er, three: str, cls: dict) -> str:
       {dl}
     </div>
   </div>
-  <details class="panel"><summary>Interactions in the 3D pose
-    <span class="hint">real positions, each line a measured atom pair</span></summary>
-    <div class="pbody">{i3d}</div></details>
-  <details class="panel"><summary>2D interaction map
-    <span class="hint">the same contacts, flattened</span></summary>
-    <div class="pbody">{imap}</div></details>
-  <details class="panel"><summary>MD movie
-    <span class="hint">100 ns, surface by charge, ligand in yellow</span></summary>
-    <div class="pbody">{movie}</div></details>
   <details class="panel"><summary>RMSD plots
     <span class="hint">ligand RMSD, warhead&ndash;Cys113 distance, attack angle</span></summary>
     <div class="pbody">
       <img class="plots" src="data:image/png;base64,{img}" alt="RMSD, distance and angle traces">
     </div></details>
+  <details class="panel"><summary>MD movie
+    <span class="hint">{res['length_ns']:.0f} ns, surface by charge, ligand in yellow</span></summary>
+    <div class="pbody">{movie}</div></details>
+  <details class="panel"><summary>Interactions in the 3D pose
+    <span class="hint">real positions, each line a measured atom pair</span></summary>
+    <div class="pbody">{i3d}</div></details>
 </section>"""
 
 
@@ -792,6 +837,8 @@ img.plots{{width:100%;height:auto;border:1px solid var(--rule);border-radius:5px
   background:#fff}}
 svg.imap{{width:100%;height:auto;background:var(--card);border:1px solid var(--rule);
   border-radius:5px}}
+label.sfx{{display:flex;align-items:center;gap:.4rem;font:600 12px var(--sans);
+  cursor:pointer;user-select:none}}
 .key3{{display:flex;flex-wrap:wrap;gap:.35rem 1.6rem;margin:.55rem 0 .1rem;
   font:12px var(--sans)}}
 .key3 .k{{display:flex;align-items:center;gap:.45rem;font-weight:600}}

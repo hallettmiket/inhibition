@@ -8,9 +8,14 @@ Build one:
 
 ```bash
 /data/lab_vm/envs/dwi_cheminf/bin/python3 scripts/shortlist_report.py \
-  --candidates t4_2f88a2f534fd t4_54c603efe816 t4_26002bfb953a t4_caf17775e15f \
+  --candidates t4_716800c125a7 t4_2f88a2f534fd t4_54c603efe816 \
+               t4_26002bfb953a t4_caf17775e15f \
   --name "T4 shortlist — 100 ns MD"
 ```
+
+**Order is the order you pass.** Nothing in the report sorts, and nothing in it
+prints a rank — see §2. Passing a molecule first puts it first on the page, which
+is the only ordering claim the format makes.
 
 Output lands in `00_outputs/blacksmith/shortlist/` — `shortlist_<N>.html` is the
 permanent versioned record, `shortlist.html` the stable name that the next build
@@ -35,14 +40,37 @@ Per molecule, in this order:
 5. **A download of the MD structure** — first frame of the fitted trajectory,
    protein and ligand as simulated, as a `data:` URI so it saves with one click.
    The recipient has no access to this filesystem, so a path is useless to them.
-6. **Interactions in the 3D pose**, in a panel — the real geometry, each dashed
-   line joining the actual closest pair of atoms with its distance. Drawn on the
-   ligand's **medoid** frame: not frame 1, which is where the pose started, and
-   not the last, which is wherever it stopped.
-7. **2D interaction map**, in a panel — the same contacts flattened, for a figure
-   that prints.
-8. **MD movie**, in a panel.
-9. **RMSD plots**, in a panel.
+Then three panels, in this order — **RMSD plots**, **MD movie**, **interactions in
+the 3D pose**. Traces first because they are the cheapest thing to read and they
+say whether the pose survived at all; the movie next; the pose last, because it
+is the one that rewards already knowing the other two.
+
+6. **RMSD plots** — ligand RMSD, warhead–Cys113 distance, attack angle.
+7. **MD movie**.
+8. **Interactions in the 3D pose** — the real geometry, each line joining the
+   actual closest pair of atoms with its distance, on the ligand's **medoid**
+   frame: not frame 1, which is where the pose started, and not the last, which
+   is wherever it stopped. Carries a translucent **pocket surface** over the
+   residues within 8 Å, toggleable, and never drawn over the ligand or Cys113 —
+   a mesh on top of those hides the two things the figure exists to show.
+
+**Cys113 is drawn as the reaction, not as a contact.** Every other residue is
+joined to the ligand atom it is nearest to; the catalytic cysteine is joined
+Sγ-to-electrophilic-carbon, with the carbon taken from the warhead class's own
+`reactive_atom_smarts` — the same table `shared/covalent_adduct.py` uses. Left to
+the generic rule, `bdhi_c5` drew Cys113 to its **bromide**: a true distance that
+says the halogen is the interaction, when bromide is the leaving group.
+
+**Colours mean one thing per page.** Red = catalytic Cys113, dashed green =
+polar, grey-blue = close contact with no polar partner, line width = frequency.
+The legend is generated from the same constant both figures colour from, so it
+cannot drift from what is drawn. Contact residues are rendered `whiteCarbon`
+rather than green for this reason.
+
+**The 2D map is no longer emitted.** `interaction_map()` is kept — it is the
+version that prints — but the 3D view carries the same contacts in the real
+geometry, and two figures of one thing invite a reader to hunt for a difference
+that is only projection.
 
 ## 2. What stays out
 
