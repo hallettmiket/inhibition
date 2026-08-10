@@ -873,14 +873,14 @@ def build() -> str:
 *{{box-sizing:border-box}}
 body{{margin:0;padding:24px 28px 60px;background:var(--paper);color:var(--ink);
  font-family:var(--sans);font-size:14px;line-height:1.55;
- font-variant-numeric:tabular-nums;max-width:1180px}}
+ font-variant-numeric:tabular-nums;max-width:1320px}}
 h1{{font-size:1.2rem;color:var(--navy);margin:0 0 3px}}
 .sub{{color:var(--muted);margin:0 0 4px}}
 .warnbar{{border-left:3px solid var(--warn);background:var(--raise);
  padding:9px 13px;margin:14px 0 26px;border-radius:0 4px 4px 0;font-size:13px}}
-.step{{display:grid;grid-template-columns:446px 1fr;gap:26px;align-items:start;
+.step{{display:grid;grid-template-columns:minmax(0,560px) 1fr;gap:26px;align-items:start;
  padding:22px 0;border-top:1px solid var(--rule)}}
-@media(max-width:900px){{.step{{grid-template-columns:1fr}}}}
+@media(max-width:1040px){{.step{{grid-template-columns:1fr}}}}
 .dia{{width:100%;height:auto;background:var(--card);border:1px solid var(--rule);
  border-radius:6px}}
 .mini{{width:100%;height:auto;background:var(--card);border:1px solid var(--rule);
@@ -901,18 +901,21 @@ p{{margin:.45em 0}}
 .modes{{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}}
 .mcard{{border:1px solid var(--rule);border-radius:6px;padding:12px;
  background:var(--raise);display:grid;
- grid-template-columns:minmax(0,2.1fr) minmax(0,240px);gap:16px;align-items:center}}
+ grid-template-columns:minmax(0,1.55fr) minmax(0,320px);gap:18px;align-items:center}}
 @media(max-width:820px){{.mcard{{grid-template-columns:1fr}}}}
 .mcard .crit{{margin-top:0}}
 table{{border-collapse:collapse;width:100%;font-size:12.5px}}
-.crit{{margin-top:7px}}
+.crit{{margin-top:7px;font-size:14px}}
+.crit th{{font-size:13px !important;color:var(--ink) !important}}
+.crit td.n{{font-size:15.5px;font-weight:700;color:var(--navy);padding:3px 6px}}
+.crit .v{{font-size:12px}}
 .crit th{{text-align:left;font-weight:500;color:var(--muted);padding:2px 0;
  font-size:11.5px}}
 .crit td{{padding:2px 0}}
 td.n,th.n{{text-align:right;font-family:var(--mono)}}
 .v{{text-align:right;font-size:10.5px;font-weight:700;padding-left:8px}}
 .v.ok{{color:var(--good)}} .v.no{{color:var(--bad)}}
-.mnote{{font-size:11.5px;color:var(--muted);margin:7px 0 0;line-height:1.4}}
+.mnote{{font-size:12.5px;color:var(--muted);margin:7px 0 0;line-height:1.4}}
 .rank th{{font-family:var(--mono);font-size:.58rem;letter-spacing:.1em;
  text-transform:uppercase;color:var(--muted);text-align:right;padding:5px 8px;
  border-bottom:1px solid var(--rule)}}
