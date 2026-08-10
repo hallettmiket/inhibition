@@ -194,10 +194,14 @@ def block(ident: str, er, three: str, cls: dict) -> str:
       <table class="kv">{facts}</table>
     </div>
   </div>
-  <h3>100 ns MD</h3>
-  {movie}
-  <h3>Plots</h3>
-  <img class="plots" src="data:image/png;base64,{img}" alt="RMSD, distance and angle traces">
+  <details class="panel"><summary>MD movie
+    <span class="hint">100 ns, surface by charge, ligand in yellow</span></summary>
+    <div class="pbody">{movie}</div></details>
+  <details class="panel"><summary>RMSD plots
+    <span class="hint">ligand RMSD, warhead&ndash;Cys113 distance, attack angle</span></summary>
+    <div class="pbody">
+      <img class="plots" src="data:image/png;base64,{img}" alt="RMSD, distance and angle traces">
+    </div></details>
 </section>"""
 
 
@@ -208,6 +212,14 @@ def main() -> None:
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
+    # Version from the CHANGELOG, via the GUI's own parser rather than a second
+    # copy of the logic -- one source, so the report and the GUI cannot disagree
+    # about which release produced the numbers.
+    import importlib.util as _u
+    _sp = _u.spec_from_file_location("mdprio_combine", REPO / "scripts" / "mdprio_combine.py")
+    _mc = _u.module_from_spec(_sp); _sp.loader.exec_module(_mc)
+    ver, code = _mc._version()
+
     er = _er()
     three = (REPO / "scripts/.cache_3dmol-min.js").read_text()
     cls = classes()
@@ -217,12 +229,20 @@ def main() -> None:
         raise SystemExit("nothing to report")
 
     title = f"{date.today().isoformat()} {args.name}"
+    byline_ver = " ".join(x for x in (f"version {ver}" if ver else "",
+                                      f"\u201c{code}\u201d" if code else "") if x)
     page = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title><style>{rt.CSS}{mov.VIEWER_CSS}
-body>*{{max-width:1180px}}
-section.mol{{border-top:2px solid var(--rule);padding-top:1.4rem;margin-top:1.8rem}}
-section.mol:first-of-type{{border-top:0}}
+/* CENTRED ON THE BODY, not on each child. rt.CSS centres direct children
+   individually, which leaves a page of differently-sized blocks looking
+   left-anchored; giving the body itself the measure centres the whole column and
+   every child then fills it. */
+body{{max-width:1180px;margin:0 auto;padding:0 30px 70px}}
+body>*{{max-width:none;padding-left:0;padding-right:0}}
+section.mol{{border-top:4px solid var(--rule);padding-top:1.6rem;margin-top:2rem}}
+section.mol:first-of-type{{border-top:0;margin-top:1rem}}
+header.mast{{border-bottom:4px solid var(--rule);padding-bottom:1rem}}
 h2{{font-family:var(--mono);font-size:1.05rem;color:var(--navy);margin:0 0 .8rem}}
 h3{{font-size:.66rem;font-family:var(--mono);letter-spacing:.14em;
   text-transform:uppercase;color:var(--blue);margin:1.4rem 0 .5rem}}
@@ -243,7 +263,7 @@ img.plots{{width:100%;height:auto;border:1px solid var(--rule);border-radius:5px
   background:#fff}}
 </style></head><body>
 <header class="mast"><h1>{title}</h1>
-<p class="standfirst">Timothy Wu</p></header>
+<p class="standfirst">Timothy Wu &middot; {byline_ver}</p></header>
 <script>{three}</script>
 {''.join(blocks)}
 </body></html>"""
