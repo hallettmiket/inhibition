@@ -120,6 +120,85 @@ def _md() -> pd.DataFrame:
     return d[d.get("production_ps", 0) >= 50000].drop_duplicates("ident", keep="last")
 
 
+def _sweep_all() -> pd.DataFrame:
+    """Every sweep row, INCLUDING the failures.
+
+    ``_sweep()`` drops ``status != "ok"``, which is right for candidates and wrong
+    for controls: a control that could not be swept is a result, and the reason is
+    the interesting part. Keeps the ok row per molecule when there is one, so a
+    control that succeeded on a re-run is not represented by its earlier failure.
+    """
+    fs = sorted(glob.glob(str(B / "attack_sweep/attack_sweep_*.csv")),
+                key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
+    if not fs:
+        return pd.DataFrame()
+    d = pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)
+    d = d[d.get("sweep_ps", 0) > 1000].copy()
+    d["_ok"] = (d.status == "ok").astype(int)
+    return (d.sort_values(["_ok", "frac_attack_ready"], ascending=[False, False])
+             .drop_duplicates("parent_ident"))
+
+
+def _controls() -> list[dict]:
+    """The experimentally-determined poses, put through our own criterion.
+
+    Two kinds, and the distinction is the entire point of the experiment (#47,
+    ``crystal_controls.py``):
+
+    * ``xtal_*`` — the deposited geometry, still BONDED to Cys113 SG at ~2.0 Å.
+      That is the reaction PRODUCT. The near-attack window is 2.8–4.2 Å, so a
+      bonded pose cannot be attack-ready **by construction**. These carry no
+      sweep value, and the reason is shown instead of a number.
+    * ``rx_*`` — the same crystal pose with the bond cleaved and the leaving group
+      rebuilt. That IS a pre-reaction geometry, and it sweeps.
+
+    Only the ``rx_*`` forms are commensurate with a candidate, so only those are
+    ranked beside them. Stamping the rest rather than dropping them is deliberate:
+    "could not be swept" and "swept badly" are different facts, and a control that
+    silently vanished from the page would be indistinguishable from one that was
+    never run.
+    """
+    T = sout.Topic("blacksmith", "crystal_controls")
+    out: list[dict] = []
+    swa = _sweep_all()
+    swi = swa.set_index("parent_ident") if not swa.empty else pd.DataFrame()
+
+    def _row(ident):
+        return swi.loc[ident] if ident in getattr(swi, "index", []) else None
+
+    for stem, kind in (("crystal_controls", "bonded"), ("crystal_reactant", "reactant")):
+        try:
+            p = T.latest(stem, ".csv")
+        except Exception:                                  # noqa: BLE001
+            log.warning("no %s output yet", stem)
+            continue
+        d = pd.read_csv(p)
+        for _, r in d.iterrows():
+            ident = str(r.get("ident", "") or "")
+            if not ident:
+                continue
+            s = _row(ident)
+            ar = None
+            if s is not None and "frac_attack_ready" in s and not pd.isna(s["frac_attack_ready"]):
+                ar = float(s["frac_attack_ready"])
+            out.append({
+                "ident": ident,
+                "kind": kind,
+                "pdb": str(r.get("pdb", "")),
+                "label": str(r.get("name", "") or r.get("comp_id", "") or ""),
+                "prep_status": str(r.get("status", "")),
+                "sweep_status": (str(s["status"]) if s is not None else "not swept"),
+                "frac_attack_ready": ar,
+                "n_visits": (float(s["n_visits"]) if s is not None
+                             and "n_visits" in s and not pd.isna(s["n_visits"]) else None),
+                "dist_a": (float(r["built_x_to_sg_a"]) if not pd.isna(r.get("built_x_to_sg_a", float("nan")))
+                           else (float(r["linked_atom_to_sg_a"])
+                                 if not pd.isna(r.get("linked_atom_to_sg_a", float("nan"))) else None)),
+                "fit_rmsd_a": (float(r["fit_rmsd_a"]) if not pd.isna(r.get("fit_rmsd_a", float("nan"))) else None),
+            })
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--candidates", nargs="+", required=True)
@@ -216,6 +295,161 @@ def main() -> None:
             f"<span class='bar'><i style='width:{max(1.5,ar*100):.1f}%'></i></span>"
             f"</span></button>")
 
+    # CONTROLS (#47/#48). The catalogue previously showed candidates only, so a
+    # ranking under active falsification had none of the falsifying evidence on
+    # screen. Controls that swept are ranked WITH the candidates on the identical
+    # axis; controls that could not be swept appear in the controls tab carrying
+    # the reason. Neither is given a held/left tag: no control has 100 ns, so
+    # "left" would be a fact we do not have.
+    ctl = _controls()
+    ranked_ctl = [c for c in ctl if c["frac_attack_ready"] is not None]
+    ctl_rows_html = []
+    for c in ctl:
+        ar = c["frac_attack_ready"]
+        has = ar is not None
+        cid = c["ident"]
+        nm = c["label"] or c["pdb"]
+        why = ("bonded product ~{:.2f} A from SG — outside the 2.8-4.2 A "
+               "near-attack window by construction".format(c["dist_a"])
+               if c["kind"] == "bonded" and c["dist_a"] else c["sweep_status"])
+        ctl_rows_html.append(
+            f"<button class='row ctl' data-ctl='1' data-kind='{c['kind']}' "
+            f"data-cls='control' data-eng='{(ar if has else -1):.6f}' "
+            f"data-noval='{0 if has else 1}' data-held='0' "
+            f"data-src='controls.html' "
+            f"id='b_{html.escape(cid)}' onclick=\"show('{html.escape(cid)}')\">"
+            f"<span class='rk'>&middot;</span>"
+            f"<span class='thumb tctl'>{'RX' if c['kind']=='reactant' else 'XT'}</span>"
+            f"<span class='body'>"
+            f"<span class='l1'><span class='mid-id'>{html.escape(nm)}</span>"
+            f"<span class='eng'>{(f'{ar*10:.2f} ns' if has else '—')}</span></span>"
+            f"<span class='l2'><span class='wc'>control &middot; {html.escape(c['pdb'])}</span>"
+            f"<span class='meta'>"
+            + (f"{c['n_visits']:.0f} visits" if c["n_visits"] is not None else html.escape(why))
+            + "</span>"
+            f"<span class='tag t-ctl'>{'reactant' if c['kind']=='reactant' else 'bonded'}</span>"
+            f"</span>"
+            f"<span class='bar'><i style='width:{max(1.5, (ar or 0)*100):.1f}%'></i></span>"
+            f"</span></button>")
+
+    # The controls page the iframe loads. Self-contained, same palette, and it
+    # states the interpretation rather than leaving the reader to infer it.
+    def _crow(c):
+        def num(v, fmt="{:.4f}"):
+            return fmt.format(v) if v is not None else "&mdash;"
+        return ("<tr>"
+                f"<td class='id'>{html.escape(c['label'] or c['pdb'])}</td>"
+                f"<td>{html.escape(c['pdb'])}</td>"
+                f"<td>{html.escape(c['kind'])}</td>"
+                f"<td class='n'>{num(c['dist_a'], '{:.2f}')}</td>"
+                f"<td class='n'>{num(c['frac_attack_ready'])}</td>"
+                f"<td class='n'>{num(c['n_visits'], '{:.0f}')}</td>"
+                f"<td class='st'>{html.escape(c['sweep_status'])}</td>"
+                "</tr>")
+
+    # Read the candidate range off the DATA, not by parsing it back out of the
+    # markup we just wrote -- a string splice on generated HTML is precisely the
+    # take-it-by-position defect this project keeps finding.
+    cand_ar = []
+    for t in tabs:
+        s_ = swi.loc[t] if t in getattr(swi, "index", []) else None
+        if s_ is not None and "frac_attack_ready" in s_ and not pd.isna(s_["frac_attack_ready"]):
+            cand_ar.append(float(s_["frac_attack_ready"]))
+    best_cand = max(cand_ar, default=0.0)
+    worst_cand = min(cand_ar, default=0.0)
+    # Look the controls up BY IDENT. Indexing ranked_ctl[0]/[-1] happened to give
+    # the right pair only because of the order the two source files are read in --
+    # a positional read of an identity, which is the defect this repo is named for.
+    by_ident = {c["ident"]: c for c in ctl}
+    ctl_best = max((c["frac_attack_ready"] for c in ranked_ctl), default=None)
+    above = sum(1 for a in cand_ar if ctl_best is not None and a > ctl_best)
+
+    def _ctl_ar(ident):
+        c = by_ident.get(ident)
+        v = c["frac_attack_ready"] if c else None
+        return f"{v:.4f}" if v is not None else "&mdash;"
+    ctl_table = "".join(_crow(c) for c in ctl)
+    ctl_page = f"""<!doctype html><html><head><meta charset="utf-8">
+<title>controls</title><style>
+:root{{--ink:#10233f;--navy:#003087;--blue:#0072ce;--rule:#d6dee8;--muted:#5b6b80;
+ --paper:#fff;--raise:#f5f8fc;--bad:#b3261e;
+ --sans:"Helvetica Neue",Helvetica,Arial,system-ui,sans-serif;
+ --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}}
+:root[data-theme="dark"]{{--ink:#dfe7f0;--navy:#8ab4e8;--blue:#6aa9e0;--rule:#25333f;
+ --muted:#93a3b4;--paper:#0e151c;--raise:#16202a;--bad:#e08a70}}
+*{{box-sizing:border-box}}
+body{{margin:0;padding:22px 26px;background:var(--paper);color:var(--ink);
+ font-family:var(--sans);font-size:14px;line-height:1.55;
+ font-variant-numeric:tabular-nums;max-width:62rem}}
+h1{{font-size:1.15rem;color:var(--navy);margin:0 0 2px}}
+h2{{font-size:.62rem;font-family:var(--mono);letter-spacing:.14em;text-transform:uppercase;
+ color:var(--blue);margin:26px 0 8px}}
+p{{margin:.5em 0}}
+table{{border-collapse:collapse;width:100%;margin-top:6px;font-size:13px}}
+th,td{{text-align:left;padding:6px 9px;border-bottom:1px solid var(--rule)}}
+th{{font-family:var(--mono);font-size:.58rem;letter-spacing:.1em;text-transform:uppercase;
+ color:var(--muted);font-weight:700}}
+td.n{{text-align:right;font-family:var(--mono)}}
+td.id{{font-family:var(--mono);font-weight:600}}
+td.st{{color:var(--muted);font-size:12px}}
+.lead{{color:var(--muted);margin-bottom:4px}}
+.box{{border-left:3px solid var(--bad);background:var(--raise);padding:10px 14px;
+ margin:14px 0;border-radius:0 4px 4px 0}}
+code{{font-family:var(--mono);font-size:12.5px}}
+</style></head><body>
+<h1>Controls — the experimentally-determined poses, through our own criterion</h1>
+<p class="lead">Deposited Pin1 complexes with a covalent bond to Cys113, scored by the
+same near-attack criterion that ranks every candidate in this catalogue.</p>
+
+<h2>Why this exists</h2>
+<p><a href="https://github.com/hallettmiket/inhibition/issues/47">#47</a> measured that
+the warhead classes with crystal structures and measured kinetics score <em>last</em>
+on our near-attack criterion, while a class with no measured Pin1 activity scores
+first. Two explanations fit that equally well: our <strong>docking</strong> puts
+those molecules in the wrong place so the criterion never sees the real geometry,
+or our <strong>criterion</strong> is wrong and would reject the real geometry too.
+Only one experiment separates them — take the pose the crystallographer determined
+and score it.</p>
+
+<h2>Two forms, and the difference matters</h2>
+<p><strong>bonded</strong> — the deposited geometry, still attached to Cys113 SG at
+~2 Å. That is the reaction <em>product</em>. The near-attack window is 2.8–4.2 Å, so
+a bonded pose cannot be attack-ready <em>by construction</em>; it produces no
+attack-geometry series and no number. That is a property of the experiment, not a
+failure of the molecule.</p>
+<p><strong>reactant</strong> — the same crystal pose with the bond cleaved and the
+leaving group rebuilt. This is a genuine pre-reaction geometry and it sweeps, so it
+is directly comparable to a candidate and is ranked beside them.</p>
+
+<table><tr><th>molecule</th><th>pdb</th><th>form</th><th>d(X&rarr;SG) &Aring;</th>
+<th>attack-ready</th><th>visits</th><th>sweep status</th></tr>
+{ctl_table}</table>
+
+<div class="box">
+<p><strong>What the reactant controls say.</strong> The two rebuildable controls are
+Sulfopin (6VAJ) and Liu-2022-ZL-Pin13 (7F0M) — both crystallographically bound to
+Cys113, both with measured potency. Through our criterion they score
+<code>{_ctl_ar('rx_6VAJ')}</code> and <code>{_ctl_ar('rx_7F0M')}</code>
+attack-ready, with <strong>zero sustained visits</strong>.</p>
+<p>The candidates in this catalogue run from <code>{best_cand:.4f}</code> down to
+<code>{worst_cand:.4f}</code>, and <strong>{above} of {len(cand_ar)}</strong> of them
+score above the better of the two controls. So the criterion ranks most of our
+generated matter ahead of chemistry that is known to react with Cys113.</p>
+<p>Read against #47, that points away from "docking mislocates these molecules" and
+toward the criterion itself rejecting geometry that is known to react. It does not
+settle it — the reactant forms are <em>rebuilt</em>, not observed, and the rebuild
+places the leaving group. But a criterion that scores the answer key near zero is
+not yet evidence that the molecules above it are better.</p>
+</div>
+
+<h2>What would settle it</h2>
+<p>More rebuildable controls. Only 2 of the 6 covalent complexes carry a halogen
+leaving group the reactant builder can restore; the other four are recorded above
+with their bonded distance and no sweep. Extending the builder to the remaining
+chemistries is the cheapest way to turn two points into a distribution.</p>
+</body></html>"""
+    (REPORTS / "controls.html").write_text(ctl_page)
+
     page = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(args.title)}</title><style>
@@ -251,6 +485,9 @@ h1{{margin:0;font-size:.86rem;font-weight:600;letter-spacing:-.01em;color:var(--
  position:sticky;top:0;z-index:2}}
 .o-held{{background:#e6f4ee;color:var(--good)}}
 .o-left{{background:#fbeae8;color:var(--bad)}}
+.o-ctl{{background:#fdf0dc;color:#8a5a00}}
+:root[data-theme="dark"] .o-ctl{{background:#3a2c14;color:#e0b070}}
+.mbtn:disabled{{opacity:.4;cursor:default}}
 main{{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}}
 @media(max-width:880px){{main{{grid-template-columns:1fr;grid-template-rows:250px 1fr}}}}
 #rail{{overflow-y:auto;border-right:1px solid var(--rule);background:var(--rail)}}
@@ -282,6 +519,19 @@ main{{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}}
  padding:1px 6px;border-radius:99px;flex:none}}
 .t-held{{background:#e6f4ee;color:var(--good)}}
 .t-left{{background:#fbeae8;color:var(--bad)}}
+/* Controls read as a different KIND of row, not a better or worse one: an amber
+   accent and a monospace badge instead of a structure thumbnail, because the
+   thing to notice is where they land in the ranking, not what they look like. */
+.t-ctl{{background:#fdf0dc;color:#8a5a00}}
+.row.ctl{{background:#fffaf2;box-shadow:inset 3px 0 0 #d99a2b}}
+.row.ctl:hover{{background:#fdf3e4}}
+.thumb.tctl{{display:flex;align-items:center;justify-content:center;
+ font-family:var(--mono);font-size:10px;font-weight:700;color:#8a5a00;
+ background:#fdf0dc;border-color:#e8cfa5}}
+:root[data-theme="dark"] .t-ctl{{background:#3a2c14;color:#e0b070}}
+:root[data-theme="dark"] .row.ctl{{background:#1b1710}}
+:root[data-theme="dark"] .row.ctl:hover{{background:#241d13}}
+:root[data-theme="dark"] .thumb.tctl{{background:#3a2c14;color:#e0b070;border-color:#4a3a1e}}
 .bar{{height:3px;background:var(--rule);border-radius:2px;overflow:hidden;margin-top:2px}}
 .bar i{{display:block;height:100%;background:var(--blue)}}
 #viewer{{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--paper)}}
@@ -305,11 +555,13 @@ iframe{{flex:1;width:100%;border:0;background:var(--paper)}}
  <span class="msep"></span>
  <button id="o-mix" class="mbtn on" onclick="setSplit(0)">combined</button>
  <button id="o-spl" class="mbtn" onclick="setSplit(1)">split held / left</button>
+ <span class="msep"></span>
+ <button id="c-tab" class="mbtn" onclick="setTab()" title="the crystallographic controls, scored by the same criterion">controls</button>
  <span class="mhint" id="mhint"></span>
  <button id="theme" class="mbtn tbtn" onclick="toggleTheme()" title="light / dark">dark</button>
 </div>
 <main>
- <div id="rail">{''.join(rows_html)}</div>
+ <div id="rail">{''.join(rows_html)}{''.join(ctl_rows_html)}</div>
  <div id="viewer">
   <div id="vhead"><span id="vname">&mdash;</span>
    <a id="vopen" href="#" target="_blank" rel="noopener">open full report &#8599;</a></div>
@@ -319,7 +571,7 @@ iframe{{flex:1;width:100%;border:0;background:var(--paper)}}
 <script>
 var RAIL=document.getElementById('rail');
 var ROWS=Array.prototype.slice.call(RAIL.querySelectorAll('.row'));
-var MODE='all', SPLIT=0;
+var MODE='all', SPLIT=0, TAB=false;
 function renumber(l){{l.forEach(function(b,i){{b.querySelector('.rk').textContent=i+1}});}}
 function hdr(cls,txt){{var h=document.createElement('div');h.className=cls;h.textContent=txt;
   RAIL.appendChild(h);}}
@@ -335,19 +587,57 @@ function layoutGroup(rows){{
 }}
 function relayout(){{
   RAIL.querySelectorAll('.chd,.ohd').forEach(function(h){{h.remove()}});
-  var all=ROWS.slice().sort(byEng);
-  if(!SPLIT){{ layoutGroup(all); }}
+  // A control with no sweep value cannot be RANKED -- there is no number to sort
+  // it by -- but it must still be visible somewhere, so it lives in the controls
+  // tab. Dropping it entirely would make "could not be swept" look identical to
+  // "was never run".
+  var pool=ROWS.filter(function(b){{
+    return TAB ? b.dataset.ctl==='1' : b.dataset.noval!=='1';
+  }});
+  ROWS.forEach(function(b){{b.style.display='none'}});
+  pool.forEach(function(b){{b.style.display=''}});
+  var all=pool.slice().sort(byEng);
+  if(TAB){{ all.forEach(function(b){{RAIL.appendChild(b)}}); renumber(all); }}
+  else if(!SPLIT){{ layoutGroup(all); }}
   else{{
-    var held=all.filter(function(b){{return b.dataset.held==='1'}});
-    var gone=all.filter(function(b){{return b.dataset.held!=='1'}});
+    // Controls carry no held/left verdict -- none has a 100 ns trajectory -- so
+    // they get their own band rather than being swept into "dissociated", which
+    // would assert a measurement we never made.
+    var ctls=all.filter(function(b){{return b.dataset.ctl==='1'}});
+    var cand=all.filter(function(b){{return b.dataset.ctl!=='1'}});
+    var held=cand.filter(function(b){{return b.dataset.held==='1'}});
+    var gone=cand.filter(function(b){{return b.dataset.held!=='1'}});
     if(held.length){{hdr('ohd o-held','held the pocket  ('+held.length+')'); layoutGroup(held);}}
     if(gone.length){{hdr('ohd o-left','dissociated  ('+gone.length+')'); layoutGroup(gone);}}
+    if(ctls.length){{hdr('ohd o-ctl','controls \u2014 no 100 ns run  ('+ctls.length+')');
+      ctls.forEach(function(b){{RAIL.appendChild(b)}}); renumber(ctls);}}
   }}
-  var bits=[ROWS.length+' molecules'];
-  bits.push(MODE==='all'?'one ranking across all classes'
-    :'ranked within warhead class \u2014 cross-class comparison is biased (#47)');
-  if(SPLIT) bits.push('held and dissociated shown separately');
+  var bits;
+  if(TAB){{
+    bits=[pool.length+' controls','crystallographic poses through the same criterion'];
+  }} else {{
+    var nc=pool.filter(function(b){{return b.dataset.ctl==='1'}}).length;
+    bits=[(pool.length-nc)+' molecules'];
+    if(nc) bits.push(nc+' controls ranked alongside');
+    bits.push(MODE==='all'?'one ranking across all classes'
+      :'ranked within warhead class \u2014 cross-class comparison is biased (#47)');
+    if(SPLIT) bits.push('held and dissociated shown separately');
+  }}
   document.getElementById('mhint').textContent=bits.join(' \u00b7 ');
+}}
+function setTab(){{TAB=!TAB;
+  document.getElementById('c-tab').classList.toggle('on',TAB);
+  ['m-all','m-cls','o-mix','o-spl'].forEach(function(i){{
+    document.getElementById(i).disabled=TAB;
+  }});
+  relayout();
+  if(TAB){{
+    var f=document.getElementById('v');
+    f.onload=function(){{applyTheme(f.contentDocument)}};
+    f.src='controls.html';
+    document.getElementById('vname').textContent='controls';
+    document.getElementById('vopen').href='controls.html';
+  }}
 }}
 function setMode(m){{MODE=m;
   document.getElementById('m-all').classList.toggle('on',m==='all');
@@ -379,10 +669,14 @@ function toggleTheme(){{
 }})();
 function show(t){{
   var f=document.getElementById('v');
+  var el0=document.getElementById('b_'+t);
+  // Controls have no per-molecule report; route them to the controls page rather
+  // than letting the iframe 404 into a blank pane.
+  var src=(el0&&el0.dataset.src)?el0.dataset.src:t+'.html';
   f.onload=function(){{applyTheme(f.contentDocument)}};
-  f.src=t+'.html';
+  f.src=src;
   document.getElementById('vname').textContent=t;
-  document.getElementById('vopen').href=t+'.html';
+  document.getElementById('vopen').href=src;
   document.querySelectorAll('.row').forEach(function(b){{b.classList.remove('on')}});
   var el=document.getElementById('b_'+t); if(el){{el.classList.add('on');}}
 }}
