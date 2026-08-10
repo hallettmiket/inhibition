@@ -809,9 +809,16 @@ def build() -> str:
         # it actually is, before anything has been grouped.
         real_mess = _pose_svg(_p, _b, colour="#4a6885", w=250, h=190,
                               stroke=0.45, op=0.30, pocket=True)
-        _md = _medoid(_p, _order[0])
-        real_one = _pose_svg(_p, _b, colour=_cols[_order[0]], w=250, h=190,
-                             stroke=1.5, op=1.0, pocket=True, one=_md)
+        # ALL THREE MEDOIDS, EACH IN ITS OWN MODE COLOUR. One medoid in one colour
+        # said "the cloud reduces to this pose"; the actual claim is that it
+        # reduces to one pose PER MODE, and the three sit in different places.
+        _meds = "".join(
+            _pose_svg(_p, _b, colour=_cols[m], w=250, h=190, stroke=1.7, op=1.0,
+                      one=_medoid(_p, m))
+            .replace("<svg", "<svg style='position:absolute;inset:0'", 1)
+            for m in _order)
+        real_one = (f"<div class='ovl' style='padding-bottom:{190 / 250 * 100:.1f}%'>"
+                    f"{_bg}{_meds}</div>")
         # Every mode: its cloud in the pocket, with its own medoid picked out on
         # top, and a second panel showing that medoid alone.
         for m in _order:
@@ -1047,7 +1054,7 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
  <div><div class="trio">
    <figure>{_stage2(pts)}<figcaption>schematic &mdash; one dot per pose</figcaption></figure>
    <figure>{real_all}<figcaption>real &mdash; all {real.get('n', 0)} poses, by mode</figcaption></figure>
-   <figure>{real_one}<figcaption>one pose &mdash; the medoid of the biggest mode</figcaption></figure>
+   <figure>{real_one}<figcaption>one pose per mode &mdash; the three medoids</figcaption></figure>
   </div></div>
  <div><p class="n0">Step 2 &middot; pose splitting</p>
   <h2>Pose splitting &mdash; the mess is several binding modes</h2>
