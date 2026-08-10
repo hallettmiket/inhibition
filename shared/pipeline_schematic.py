@@ -140,6 +140,25 @@ def _medoid(poses, mode=None):
     return sel[int(np.argmin(((c - c.mean(axis=0)) ** 2).sum(axis=1)))]
 
 
+def _sg_coord():
+    """Cys113's sulfur, from the receptor, found by residue identity.
+
+    Every distance in this project is measured to this atom, so the picture that
+    shows the poses should show what they are aimed at. Matched on residue name,
+    number and atom name rather than a line offset -- the same file also carries
+    Cys57's SG, and taking the first SG in the file would silently anchor the
+    whole diagram to the wrong cysteine.
+    """
+    p = Path(RECEPTOR)
+    if not p.is_file():
+        return None
+    for ln in p.read_text(errors="ignore").splitlines():
+        if (ln.startswith(("ATOM", "HETATM")) and ln[12:16].strip() == "SG"
+                and ln[17:20].strip() == "CYS" and ln[22:26].strip() == "113"):
+            return (float(ln[30:38]), float(ln[38:46]), float(ln[46:54]))
+    return None
+
+
 def _pocket_bg(w, h) -> str:
     """A schematic pocket behind the poses, so they read as sitting IN something.
 
@@ -187,25 +206,35 @@ def _pose_svg(poses, basis, only=None, colour="#0072ce",
             d.append(f"M{x1:.1f} {y1:.1f}L{x2:.1f} {y2:.1f}")
         if d:
             paths.append(f"<path d='{''.join(d)}'/>")
+    # THE ANCHOR. Cys113's sulfur, projected through the same basis as the poses,
+    # so its position on the picture is measured rather than placed.
+    anchor = ""
+    sg = _sg_coord()
+    if sg is not None:
+        gx, gy = xy(sg)
+        anchor = (f"<circle cx='{gx:.1f}' cy='{gy:.1f}' r='4' fill='#f0c000' "
+                  f"stroke='#8a6d00' stroke-width='.7'/>"
+                  f"<text x='{gx + 7:.1f}' y='{gy + 3.5:.1f}' class='sglbl'>"
+                  f"Cys113 S&gamma;</text>")
     return (f"<svg viewBox='0 0 {w} {h}' class='psvg' role='img' "
-            f"aria-label='{len(sel)} docked poses drawn flat'>"
+            f"aria-label='{len(sel)} docked poses drawn flat around Cys113'>"
             + (_pocket_bg(w, h) if pocket else "")
             + f"<g fill='none' stroke='{colour}' stroke-width='{stroke}' "
             f"stroke-opacity='{op}' stroke-linecap='round'>"
-            + "".join(paths) + "</g></svg>")
+            + "".join(paths) + "</g>" + anchor + "</svg>")
 
 #: The three illustrative modes: share of the 500, centre, spread, and the story
 #: each one tells. Sizes are deliberately uneven — a dominant mode plus two
 #: minority modes is the common real shape, and a molecule promoted on a minority
 #: mode is a different claim from one promoted on its dominant mode.
 MODES = [
-    {"key": "A", "n": 246, "cx": 214, "cy": 150, "sx": 34, "sy": 25,
+    {"key": "1", "n": 246, "cx": 214, "cy": 150, "sx": 34, "sy": 25,
      "col": "#0072ce", "d": 3.4, "ang": 168, "ar": 0.41, "note":
      "warhead on the sulfur, roughly in line — inside the window and near-linear"},
-    {"key": "B", "n": 158, "cx": 292, "cy": 186, "sx": 27, "sy": 20,
+    {"key": "2", "n": 158, "cx": 292, "cy": 186, "sx": 27, "sy": 20,
      "col": "#7b5ea7", "d": 4.9, "ang": 141, "ar": 0.06, "note":
      "sits deeper in the pocket, warhead too far out to react"},
-    {"key": "C", "n": 96, "cx": 176, "cy": 208, "sx": 22, "sy": 17,
+    {"key": "3", "n": 96, "cx": 176, "cy": 208, "sx": 22, "sy": 17,
      "col": "#c2703d", "d": 3.1, "ang": 96, "ar": 0.02, "note":
      "close enough, but approaching side-on — distance alone would pass it"},
 ]
@@ -295,10 +324,10 @@ def _stage2(pts) -> str:
 #: point is that the three modes of molecule 2 land at ranks 1, 3 and 6 — a mode
 #: competes on its own geometry, not on the company it keeps.
 POOL = [
-    {"mol": "molecule 1", "col": "#0072ce", "modes": [("m0", 0.62), ("m1", 0.15)]},
-    {"mol": "molecule 2", "col": "#7b5ea7",
+    {"mol": "mol A", "col": "#0072ce", "modes": [("m0", 0.62), ("m1", 0.15)]},
+    {"mol": "mol B", "col": "#7b5ea7",
      "modes": [("m0", 0.71), ("m1", 0.44), ("m2", 0.08)]},
-    {"mol": "molecule 3", "col": "#c2703d", "modes": [("m0", 0.33)]},
+    {"mol": "mol C", "col": "#c2703d", "modes": [("m0", 0.33)]},
 ]
 
 
@@ -348,6 +377,88 @@ def _stage_pool() -> str:
 <path d="M175 150 L238 150" stroke="var(--blue)" stroke-width="1.4" fill="none"/>
 <path d="M232 145 L240 150 L232 155 Z" fill="var(--blue)"/>
 {''.join(right)}
+</svg>"""
+
+
+def _run_counts() -> dict:
+    """How far the real run actually got — swept, elevated, held.
+
+    Read from the outputs rather than typed in, so the arrow on the page cannot
+    drift away from the tree the way a hand-written number would.
+    """
+    import glob as _g
+    out = {"swept": 0, "md": 0, "held": 0}
+    B = "/data/lab_vm/append_only/inhibition/00_outputs/blacksmith"
+    try:
+        import pandas as _pd
+        sw = _pd.concat([_pd.read_csv(f) for f in
+                         sorted(_g.glob(B + "/attack_sweep/attack_sweep_*.csv"))],
+                        ignore_index=True)
+        sw = sw[(sw.get("sweep_ps", 0) > 1000) & (sw.status == "ok")]
+        out["swept"] = int(sw.parent_ident.nunique())
+        md = _pd.concat([_pd.read_csv(f) for f in
+                         _g.glob(B + "/md_residence/*.csv")], ignore_index=True)
+        m = md[md.production_ps >= 50000].drop_duplicates("ident", keep="last")
+        c = "explicit_ligand_rmsd_nm_max"
+        m = m[m[c].notna()]
+        out["md"] = int(len(m))
+        out["held"] = int((m[c] < 1.2).sum())
+    except Exception:                                      # noqa: BLE001
+        pass
+    return out
+
+
+#: Illustrative survival: eight ranked modes, which clear the 10 ns sweep, and
+#: which of those are still in the pocket at 100 ns. Deliberately NOT monotonic --
+#: the top of the ranking is not guaranteed to survive, and that is the point.
+SURVIVE = [("mol B · m0", "#7b5ea7", True, True),
+           ("mol A · m0", "#0072ce", True, True),
+           ("mol B · m1", "#7b5ea7", True, False),
+           ("mol C · m0", "#c2703d", True, True),
+           ("mol D · m0", "#0f7a54", False, None),
+           ("mol A · m1", "#0072ce", True, False),
+           ("mol E · m0", "#b3261e", False, None),
+           ("mol B · m2", "#7b5ea7", False, None)]
+
+
+def _stage_survival() -> str:
+    rows = []
+    y = 34
+    for name, col, swept, held in SURVIVE:
+        rows.append(
+            f"<rect x='8' y='{y}' width='150' height='17' rx='3' fill='{col}' "
+            f"fill-opacity='.14'/>"
+            f"<text x='15' y='{y + 12}' class='chip' fill='{col}'>{name}</text>")
+        if swept:
+            rows.append(
+                f"<line x1='162' y1='{y + 8}' x2='196' y2='{y + 8}' "
+                f"stroke='var(--blue)' stroke-width='1' opacity='.55' "
+                f"marker-end='url(#ah2)'/>"
+                f"<rect x='200' y='{y}' width='96' height='17' rx='3' "
+                f"fill='{col}' fill-opacity='.14'/>"
+                f"<text x='207' y='{y + 12}' class='chip' fill='{col}'>100 ns</text>")
+            tag, tc = ("held", "var(--good)") if held else ("left", "var(--bad)")
+            rows.append(
+                f"<line x1='300' y1='{y + 8}' x2='334' y2='{y + 8}' "
+                f"stroke='var(--blue)' stroke-width='1' opacity='.55' "
+                f"marker-end='url(#ah2)'/>"
+                f"<rect x='338' y='{y}' width='60' height='17' rx='3' "
+                f"fill='{tc}' fill-opacity='.15'/>"
+                f"<text x='368' y='{y + 12}' class='chip' fill='{tc}' "
+                f"text-anchor='middle'>{tag}</text>")
+        else:
+            rows.append(
+                f"<text x='168' y='{y + 12}' class='chip' fill='var(--muted)'>"
+                f"&mdash; not swept far enough to elevate</text>")
+        y += 22
+    return f"""<svg viewBox="0 0 430 230" class="dia" role="img"
+ aria-label="Ranked modes going through the sweep and the 100 ns run">
+<defs><marker id="ah2" markerWidth="6" markerHeight="6" refX="5" refY="3"
+ orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="var(--blue)" opacity=".6"/></marker></defs>
+<text x="8" y="18" class="cap">ranked modes</text>
+<text x="200" y="18" class="cap">elevated</text>
+<text x="338" y="18" class="cap">outcome</text>
+{''.join(rows)}
 </svg>"""
 
 
@@ -439,21 +550,59 @@ def _chemspace(n: int = 8) -> str:
             import pandas as _pd
             d = _pd.read_parquet(fs[-1]).drop_duplicates("candidate_id")
             d = d[d.canonical_smiles.notna()]
+            # ONE PER WARHEAD CLASS (@tt8804). Taking the first n rows returned
+            # nine chloroacetamides, which showed the R-group axis and hid the
+            # warhead axis -- and T_4 is a warhead x R-group enumeration, so half
+            # the design space was invisible.
+            if "warhead_class" in d.columns:
+                d = d.drop_duplicates("warhead_class")
             for _, r in d.head(n).iterrows():
                 u = _svg(str(r.canonical_smiles), 132, 92)
                 if u:
-                    sats.append((str(r.candidate_id), u))
+                    sats.append((str(r.get("warhead_class") or r.candidate_id), u))
         except Exception:                                  # noqa: BLE001
             pass
     if not sats:
         return ""
-    cells = "".join(f"<div class='sat'><img alt='' src=\"{u}\">"
-                    f"<span>{cid}</span></div>" for cid, u in sats)
+    # RADIAL, WITH ARROWS OUT OF THE MIDDLE (@tt8804). A grid put the parent in a
+    # cell like any other and the growth relationship disappeared -- the reader
+    # could not tell which molecule everything else came from.
+    W, H, CX, CY = 440, 330, 220, 165
+    RX, RY = 152, 118
+    sw, sh = 76, 54
+    parts = []
+    n = len(sats)
+    for i, (cid, u) in enumerate(sats):
+        a = -math.pi / 2 + 2 * math.pi * i / n
+        x, y = CX + RX * math.cos(a), CY + RY * math.sin(a)
+        # start/end the arrow outside each box so it never crosses a structure
+        x0, y0 = CX + 66 * math.cos(a), CY + 52 * math.sin(a)
+        x1, y1 = x - (sw / 2 + 5) * math.cos(a), y - (sh / 2 + 5) * math.sin(a)
+        parts.append(
+            f"<line x1='{x0:.1f}' y1='{y0:.1f}' x2='{x1:.1f}' y2='{y1:.1f}' "
+            f"stroke='var(--blue)' stroke-width='1' opacity='.5' "
+            f"marker-end='url(#ah)'/>")
+        parts.append(
+            f"<image href='{u}' x='{x - sw/2:.1f}' y='{y - sh/2:.1f}' "
+            f"width='{sw}' height='{sh}' preserveAspectRatio='xMidYMid meet'/>"
+            f"<rect x='{x - sw/2:.1f}' y='{y - sh/2:.1f}' width='{sw}' "
+            f"height='{sh}' rx='3' fill='none' stroke='var(--rule)'/>"
+            f"<text x='{x:.1f}' y='{y + sh/2 + 9:.1f}' class='wlbl' "
+            f"text-anchor='middle'>{cid}</text>")
     return f"""
-<div class="cs">
-  <div class="csmid"><img alt="Sulfopin" src="{core}"><span>Sulfopin &mdash; the parent</span></div>
-  <div class="csgrid">{cells}</div>
-</div>"""
+<svg viewBox="0 0 {W} {H}" class="dia" role="img"
+ aria-label="Sulfopin at the centre with generated derivatives around it">
+<defs><marker id="ah" markerWidth="7" markerHeight="7" refX="6" refY="3.5"
+ orient="auto"><path d="M0 0 L7 3.5 L0 7 z" fill="var(--blue)" opacity=".6"/></marker></defs>
+{''.join(parts)}
+<rect x="{CX-64}" y="{CY-46}" width="128" height="92" rx="5"
+ fill="var(--card)" stroke="var(--navy)" stroke-width="1.4"/>
+<image href="{core}" x="{CX-60}" y="{CY-44}" width="120" height="74"
+ preserveAspectRatio="xMidYMid meet"/>
+<text x="{CX}" y="{CY+40}" class="mtag" fill="var(--navy)"
+ text-anchor="middle">Sulfopin</text>
+<text x="10" y="{H-8}" class="cap">the parent, and {n} of the molecules grown from it</text>
+</svg>"""
 
 
 def _n_candidates() -> str:
@@ -591,11 +740,12 @@ def build() -> str:
     pts = _points(rng)
     chem = _chemspace()
     n_cand = _n_candidates()
+    rc = _run_counts()
 
     # Real poses, drawn flat. Static by design (@tt8804): the interactive viewer
     # cost 2.5 MB and a hairball; what the page needs is a picture you can put
     # beside the schematic and compare.
-    real, real_all, real_by, real_one = {}, "", {}, ""
+    real, real_all, real_by, real_one, real_mess = {}, "", {}, "", ""
     try:
         _p = _read_sdf(Path(ALLPOSES) / f"{EXAMPLE}.sdf")
     except Exception:                                      # noqa: BLE001
@@ -615,6 +765,10 @@ def build() -> str:
                f"style='position:absolute;inset:0'>{_pocket_bg(250, 190)}</svg>")
         real_all = (f"<div class='ovl' style='padding-bottom:{190 / 250 * 100:.1f}%'>"
                     f"{_bg}{real_all}</div>")
+        # Step 1's picture: every pose, one colour, in the pocket -- the mess as
+        # it actually is, before anything has been grouped.
+        real_mess = _pose_svg(_p, _b, colour="#4a6885", w=250, h=190,
+                              stroke=0.45, op=0.30, pocket=True)
         _md = _medoid(_p, _order[0])
         real_one = _pose_svg(_p, _b, colour=_cols[_order[0]], w=250, h=190,
                              stroke=1.5, op=1.0, pocket=True, one=_md)
@@ -710,11 +864,18 @@ p{{margin:.45em 0}}
 .lbl{{font:600 10px var(--mono);fill:var(--muted)}}
 .cap{{font:10.5px var(--sans);fill:var(--muted)}}
 .mtag{{font:700 11px var(--mono);letter-spacing:.06em}}
+.sglbl{{font:600 8.5px var(--mono);fill:#8a6d00}}
+.wlbl{{font:600 8px var(--mono);fill:var(--muted)}}
 .chip{{font:10.5px var(--mono)}}
-.modes{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}
-@media(max-width:760px){{.modes{{grid-template-columns:1fr}}}}
-.mcard{{border:1px solid var(--rule);border-radius:6px;padding:9px;
- background:var(--raise)}}
+/* One mode per ROW (@tt8804): three columns squeezed the diagrams to thumbnails.
+   Stacked, each mode gets the schematic, the real poses and its numbers side by
+   side at a size you can actually read. */
+.modes{{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}}
+.mcard{{border:1px solid var(--rule);border-radius:6px;padding:12px;
+ background:var(--raise);display:grid;
+ grid-template-columns:minmax(0,1.5fr) minmax(0,260px);gap:16px;align-items:center}}
+@media(max-width:820px){{.mcard{{grid-template-columns:1fr}}}}
+.mcard .crit{{margin-top:0}}
 table{{border-collapse:collapse;width:100%;font-size:12.5px}}
 .crit{{margin-top:7px}}
 .crit th{{text-align:left;font-weight:500;color:var(--muted);padding:2px 0;
@@ -813,11 +974,14 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
 <div class="arrow"><span>{n_cand} candidates &darr;</span></div>
 
 <div class="step">
- <div>{_stage1(pts)}</div>
+ <div>{_paired(_stage1(pts), real_mess, 'schematic — one dot per pose',
+               f"real — all {real.get('n', 0)} poses in the pocket")}</div>
  <div><p class="n0">Step 1 &middot; dock</p>
   <h2>500 poses, one molecule</h2>
-  <p>We dock each molecule into Pin1 <strong>500 separate times</strong>. Every run
-  searches independently, so we get a cloud of possible placements, not one answer.</p>
+  <p>We dock each molecule into the Pin1 pocket <strong>500 separate times</strong>,
+  anchored on the catalytic <strong>Cys113</strong> &mdash; the sulfur every
+  distance in this project is measured to. Every run searches independently, so we
+  get a mess of possible placements, not one answer.</p>
   <p>500 because we measured it: ~300 runs covers 95% of the poses. 500 leaves margin.</p>
   <p>The search works. The right pose is somewhere in this cloud <strong>93.3%</strong>
   of the time. It gets lost later.</p></div>
@@ -829,8 +993,8 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
    <figure>{real_all}<figcaption>real &mdash; all {real.get('n', 0)} poses, by mode</figcaption></figure>
    <figure>{real_one}<figcaption>one pose &mdash; the medoid of the biggest mode</figcaption></figure>
   </div></div>
- <div><p class="n0">Step 2 &middot; split</p>
-  <h2>The cloud is several binding modes</h2>
+ <div><p class="n0">Step 2 &middot; pose splitting</p>
+  <h2>Pose splitting &mdash; the mess is several binding modes</h2>
   <p>We group the poses into <strong>modes</strong> by where the reactive atom sits
   and which way the warhead points.</p>
   <p>Not by whole-molecule shape — two poses can differ in a far-off ring and still
@@ -838,20 +1002,21 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
   <p>Each mode then becomes its own row in the GUI.</p></div>
 </div>
 
-<div class="step">
- <div class="modes">{panels}</div>
- <div><p class="n0">Step 3 &middot; criteria</p>
+<div class="step wide">
+ <div class="full"><p class="n0">Step 3 &middot; criteria</p>
   <h2>Can this mode actually react?</h2>
   <p>Two checks, both must pass. <strong>Distance</strong>: the reactive carbon has
   to sit <code>2.8&ndash;4.2 &Aring;</code> from the sulfur. Closer means the bond
   already formed; further means no reaction.</p>
   <p><strong>Angle</strong>: it has to come in roughly head-on.</p>
-  <p>Mode C shows why you need both — right distance, wrong angle. Distance alone
-  would have passed it.</p></div>
+  <p>Mode 3 shows why you need both — right distance, wrong angle. Distance alone
+  would have passed it.</p>
+  <div class="modes">{panels}</div></div>
 </div>
 
 <div class="step">
- <div><table class="rank">
+ <div>{_stage_pool()}
+  <table class="rank" style="margin-top:12px">
   <tr><th class="n">#</th><th>mode</th><th class="n">poses</th>
       <th class="n">d &Aring;</th><th class="n">angle</th><th class="n">ready</th></tr>
   {rank_rows}</table>
@@ -859,30 +1024,21 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
   docking energy — energy correlates with reaction competence at
   &rho;&nbsp;=&nbsp;+0.009 across 115,300 poses, which is noise.</p></div>
  <div><p class="n0">Step 4 &middot; rank</p>
-  <h2>The biggest mode does not automatically win</h2>
-  <p>We rank on geometry, not on how many poses landed in a mode. The two can
-  disagree, and when they do we carry which mode was picked on the row.</p>
+  <h2>Modes compete, not molecules</h2>
+  <p>We rank on geometry, not on how many poses landed in a mode. Every mode from
+  every molecule goes into <strong>one ranked list</strong>, so the modes of a
+  single molecule are not kept together &mdash; mol B here lands at ranks
+  <strong>1, 3 and 6</strong>.</p>
   <p>Picking this way finds the right pose <strong>93.3%</strong> of the time.
   Picking by docking energy: <strong>60.0%</strong>.</p>
-  <p>Every ranking is still stamped <code>rank_validated = False</code>. It is an
-  ordering we produced, not proof the top molecules bind.</p></div>
+  <p>Each row carries <em>which</em> mode was picked, and every ranking is stamped
+  <code>rank_validated = False</code> &mdash; an ordering we produced, not proof
+  the top molecules bind.</p></div>
 </div>
 
 <div class="step">
- <div>{_stage_pool()}</div>
- <div><p class="n0">Step 4b &middot; pool</p>
-  <h2>Modes compete, not molecules</h2>
-  <p>Every mode from every molecule goes into <strong>one ranked list</strong>. A
-  mode is judged on its own geometry, so the modes of one molecule are not kept
-  together.</p>
-  <p>Molecule 2 here lands at ranks <strong>1, 3 and 6</strong>. Its best mode
-  tells you nothing about its worst.</p>
-  <p>That is why each row carries <em>which</em> mode was picked: promoted on its
-  dominant mode is a different claim from promoted on a minority one.</p></div>
-</div>
-
-<div class="step">
- <div><svg viewBox="0 0 700 150" class="tl" role="img"
+ <div>{_stage_survival()}
+ <svg viewBox="0 0 700 150" class="tl" role="img"
   aria-label="A 10 ns sweep with attack-ready episodes marked">
   <text x="40" y="18" class="cap">10 ns sweep &middot; attack-ready episodes</text>
   <rect x="40" y="26" width="630" height="26" rx="2" fill="var(--cav-out)"/>
@@ -908,7 +1064,8 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
   100 ns facing the wrong way.</p></div>
 </div>
 
-<div class="arrow"><span>survivors &darr;</span></div>
+<div class="arrow"><span>{rc['swept']} swept &rarr; {rc['md']} elevated to 100 ns
+ &rarr; {rc['held']} still on target &darr;</span></div>
 
 <div class="step wide">
  <div class="full"><p class="n0">Elevation</p>
