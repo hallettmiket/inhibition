@@ -422,56 +422,78 @@ def _run_counts() -> dict:
     return out
 
 
-#: Illustrative survival: eight ranked modes, which clear the 10 ns sweep, and
-#: which of those are still in the pocket at 100 ns. Deliberately NOT monotonic --
-#: the top of the ranking is not guaranteed to survive, and that is the point.
-SURVIVE = [("mol B · m0", "#a63d7a", True, True),
-           ("mol A · m0", "#1b7f79", True, True),
-           ("mol B · m1", "#a63d7a", True, False),
-           ("mol C · m0", "#6b7f1b", True, True),
-           ("mol D · m0", "#8a5a00", False, None),
-           ("mol A · m1", "#1b7f79", True, False),
-           ("mol E · m0", "#4a5f8a", False, None),
-           ("mol B · m2", "#a63d7a", False, None)]
+#: (label, molecule colour, 10 ns attack-ready, 100 ns engagement or None, held)
+#:
+#: Coloured by MOLECULE only. Mode colour belongs to steps 2 and 3, and reusing it
+#: here would tell the reader the two keys are one key.
+#:
+#: Ordered by the 100 ns engagement, because that IS the rank. The sweep column
+#: sits beside it as the triage that decided who earned a 100 ns run at all --
+#: and the two disagree on purpose: mol B's m1 sweeps better than mol C's m0 and
+#: still ranks below it, which is the whole reason the sweep is not the ranking.
+SURVIVE = [("mol B · m0", "#a63d7a", 0.52, 0.94, True),
+           ("mol A · m0", "#1b7f79", 0.41, 0.88, True),
+           ("mol C · m0", "#6b7f1b", 0.33, 0.79, True),
+           ("mol B · m1", "#a63d7a", 0.37, 0.42, False),
+           ("mol A · m1", "#1b7f79", 0.21, 0.35, False),
+           ("mol D · m0", "#8a5a00", 0.09, None, None),
+           ("mol E · m0", "#4a5f8a", 0.06, None, None),
+           ("mol B · m2", "#a63d7a", 0.04, None, None)]
 
 
 def _stage_survival() -> str:
+    """The ranked list, the two numbers behind the rank, and what survived."""
     rows = []
-    y = 34
-    for name, col, swept, held in SURVIVE:
+    y, rank, ROW = 46, 0, 24
+    n_elev = sum(1 for r in SURVIVE if r[3] is not None)
+    for name, col, sweep, eng, held in SURVIVE:
+        elevated = eng is not None
+        if elevated:
+            rank += 1
+            rn = str(rank)
+        else:
+            rn = "&mdash;"
         rows.append(
-            f"<rect x='8' y='{y}' width='150' height='17' rx='3' fill='{col}' "
-            f"fill-opacity='.14'/>"
-            f"<text x='15' y='{y + 12}' class='chip' fill='{col}'>{name}</text>")
-        if swept:
+            f"<text x='34' y='{y + 13}' class='rnum' fill='var(--muted)' "
+            f"text-anchor='end'>{rn}</text>"
+            f"<rect x='42' y='{y}' width='118' height='18' rx='3' fill='{col}' "
+            f"fill-opacity='.16'/>"
+            f"<text x='50' y='{y + 13}' class='chip' fill='{col}'>{name}</text>"
+            f"<text x='232' y='{y + 13}' class='stat' fill='var(--muted)' "
+            f"text-anchor='end'>{sweep:.2f}</text>")
+        if elevated:
             rows.append(
-                f"<line x1='162' y1='{y + 8}' x2='196' y2='{y + 8}' "
-                f"stroke='var(--blue)' stroke-width='1' opacity='.55' "
-                f"marker-end='url(#ah2)'/>"
-                f"<rect x='200' y='{y}' width='96' height='17' rx='3' "
-                f"fill='{col}' fill-opacity='.14'/>"
-                f"<text x='207' y='{y + 12}' class='chip' fill='{col}'>100 ns</text>")
+                f"<text x='320' y='{y + 13}' class='stat' fill='var(--navy)' "
+                f"text-anchor='end'>{eng * 100:.0f}%</text>")
             tag, tc = ("held", "var(--good)") if held else ("left", "var(--bad)")
             rows.append(
-                f"<line x1='300' y1='{y + 8}' x2='334' y2='{y + 8}' "
-                f"stroke='var(--blue)' stroke-width='1' opacity='.55' "
-                f"marker-end='url(#ah2)'/>"
-                f"<rect x='338' y='{y}' width='60' height='17' rx='3' "
-                f"fill='{tc}' fill-opacity='.15'/>"
-                f"<text x='368' y='{y + 12}' class='chip' fill='{tc}' "
+                f"<rect x='336' y='{y}' width='56' height='18' rx='3' "
+                f"fill='{tc}' fill-opacity='.16'/>"
+                f"<text x='364' y='{y + 13}' class='chip' fill='{tc}' "
                 f"text-anchor='middle'>{tag}</text>")
         else:
             rows.append(
-                f"<text x='168' y='{y + 12}' class='chip' fill='var(--muted)'>"
-                f"&mdash; not swept far enough to elevate</text>")
-        y += 22
-    return f"""<svg viewBox="0 0 430 230" class="dia" role="img"
- aria-label="Ranked modes going through the sweep and the 100 ns run">
-<defs><marker id="ah2" markerWidth="6" markerHeight="6" refX="5" refY="3"
- orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="var(--blue)" opacity=".6"/></marker></defs>
-<text x="8" y="18" class="cap">ranked modes</text>
-<text x="200" y="18" class="cap">elevated</text>
-<text x="338" y="18" class="cap">outcome</text>
+                f"<text x='250' y='{y + 13}' class='chip' fill='var(--muted)'>"
+                f"below the cut &mdash; no 100 ns run</text>")
+        y += ROW
+    cut = 46 + n_elev * ROW - 3
+    return f"""<svg viewBox="0 0 430 {y + 16}" class="dia" role="img"
+ aria-label="Ranked modes with the sweep and 100 ns numbers behind the rank">
+<defs><marker id="ah2" markerWidth="7" markerHeight="7" refX="6" refY="3.5"
+ orient="auto"><path d="M0 0 L7 3.5 L0 7 z" fill="var(--blue)" opacity=".7"/></marker></defs>
+<text x="42" y="20" class="cap">mode</text>
+<text x="232" y="20" class="cap" text-anchor="end">10 ns</text>
+<text x="320" y="20" class="cap" text-anchor="end">100 ns</text>
+<text x="336" y="20" class="cap">outcome</text>
+<text x="232" y="33" class="cap2" text-anchor="end">attack-ready</text>
+<text x="320" y="33" class="cap2" text-anchor="end">engaged</text>
+<!-- the sweep runs DOWN the list: it decides how far down the cut falls -->
+<line x1="14" y1="46" x2="14" y2="{cut}" stroke="var(--blue)" stroke-width="1.2"
+ opacity=".65" marker-end="url(#ah2)"/>
+<text x="10" y="{(46 + cut) / 2:.0f}" class="cap2" fill="var(--blue)"
+ transform="rotate(-90 10 {(46 + cut) / 2:.0f})" text-anchor="middle">10 ns sweep</text>
+<line x1="26" y1="{cut + 3}" x2="400" y2="{cut + 3}" stroke="var(--rule)"
+ stroke-dasharray="3 3"/>
 {''.join(rows)}
 </svg>"""
 
@@ -895,6 +917,9 @@ p{{margin:.45em 0}}
 .sglbl{{font:600 8.5px var(--mono);fill:#8a6d00}}
 .wlbl{{font:600 8px var(--mono);fill:var(--muted)}}
 .chip{{font:10.5px var(--mono)}}
+.rnum{{font:700 11px var(--mono)}}
+.stat{{font:700 11.5px var(--mono)}}
+.cap2{{font:9px var(--sans);fill:var(--muted)}}
 /* One mode per ROW (@tt8804): three columns squeezed the diagrams to thumbnails.
    Stacked, each mode gets the schematic, the real poses and its numbers side by
    side at a size you can actually read. */
