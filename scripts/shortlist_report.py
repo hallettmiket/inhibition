@@ -97,6 +97,37 @@ CONTACT_A = 4.5
 POLAR_A = 3.5
 
 
+def ligand_mol(movie_pdb: Path, smi: str):
+    """The ligand as an RDKit mol whose atom order matches the PDB's.
+
+    Built FROM the PDB block, then given bond orders from the SMILES template, so
+    atom index i here is atom i in the trajectory. That correspondence is what
+    lets a contact be attributed to a specific ATOM rather than to the molecule
+    as a whole -- which is the difference between an interaction diagram and a
+    list of nearby residues.
+    """
+    from rdkit import Chem, RDLogger
+    from rdkit.Chem import AllChem
+    RDLogger.DisableLog("rdApp.*")
+    first = movie_pdb.read_text().split("ENDMDL")[0]
+    blk = "\n".join(l for l in first.splitlines()
+                    if l.startswith(("ATOM", "HETATM")) and l[17:20].strip() == "MOL")
+    m = Chem.MolFromPDBBlock(blk, removeHs=True, sanitize=False)
+    if m is None:
+        return None
+    tpl = Chem.MolFromSmiles(smi) if smi else None
+    if tpl is not None and tpl.GetNumAtoms() == m.GetNumAtoms():
+        try:
+            m = AllChem.AssignBondOrdersFromTemplate(tpl, m)
+        except Exception:                                  # noqa: BLE001
+            pass
+    try:
+        Chem.SanitizeMol(m)
+    except Exception:                                      # noqa: BLE001
+        pass
+    return m
+
+
 def contacts(movie_pdb: Path, max_frames: int = 40) -> tuple[list, int]:
     """Per-residue contact frequency across the trajectory.
 
@@ -145,73 +176,127 @@ def contacts(movie_pdb: Path, max_frames: int = 40) -> tuple[list, int]:
                 if d[i][lig_pol].min() <= POLAR_A:
                     pol_res.add((rn, ri))
         for k in hit_res:
-            seen.setdefault(k, [0, 0])
+            seen.setdefault(k, [0, 0, {}])
             seen[k][0] += 1
             if k in pol_res:
                 seen[k][1] += 1
+        # WHICH ATOM. For each contacting residue, the ligand atom it is nearest
+        # to in this frame; the mode over frames is the atom the interaction is
+        # attributed to. A residue's closest atom can move, so one frame is not
+        # enough to name it.
+        for i, ok in enumerate(near):
+            if not ok:
+                continue
+            _, rn, ri, _el = prot[i]
+            j = int(d[i].argmin())
+            tally = seen[(rn, ri)][2]
+            tally[j] = tally.get(j, 0) + 1
     n = len(models)
-    rows = [(rn, ri, c / n, p / n) for (rn, ri), (c, p) in seen.items()]
+    rows = [(rn, ri, c / n, p / n,
+             max(t, key=t.get) if t else None)
+            for (rn, ri), (c, p, t) in seen.items()]
     rows.sort(key=lambda r: -r[2])
     return rows, n
 
 
-def interaction_map(smi: str, rows: list, n_frames: int, cys_resi: int = 63,
+def interaction_map(mol, rows: list, n_frames: int, cys_resi: int = 63,
                     offset: int = 50) -> str:
-    """Ligand in the middle, contacting residues around it by frequency.
+    """A real interaction diagram: each residue drawn against the atom it contacts.
 
-    A contact SUMMARY, not a LigPlot: the residues are placed for legibility, not
-    at their real positions, and no line claims to join a particular ligand atom
-    to a particular residue atom. Saying so on the figure is the point — a diagram
-    that looks like a LigPlot will be read as one.
+    The ligand is rendered by RDKit, and RDKit is then asked where it PUT each
+    atom (`GetDrawCoords`). Residues are placed on that same canvas, along the
+    ray from the molecule's centre through their contact atom, and joined to that
+    atom by a line. The previous version arranged residues on a ring in arbitrary
+    order and joined nothing to anything -- it looked like an interaction map and
+    carried none of the information one has.
 
-    NUMBERED AS THE CRYSTAL, NOT AS THE MD SYSTEM. GROMACS renumbers from 1, so
-    the catalytic cysteine is residue 63 in the trajectory and Cys113 in every
-    paper and every PDB entry. This report leaves the project, and a chemist
-    reading "Cys63" would either not recognise it or would look up the wrong
-    residue — the same offset that once had us draw a glutamate and label it
-    Cys113.
+    Still not a LigPlot in one respect, stated on the figure: the residue's
+    position is a projection along that ray, not its real 3D position. The ATOM
+    it is joined to is measured.
     """
     import math
-    keep = [r for r in rows if r[2] >= 0.20][:12]
+    from rdkit import Chem, RDLogger
+    from rdkit.Chem import Draw, rdCoordGen
+    RDLogger.DisableLog("rdApp.*")
+    if mol is None:
+        return ""
+    keep = [r for r in rows if r[2] >= 0.20 and r[4] is not None][:12]
     if not keep:
         return ""
-    W, H, CX, CY = 720, 470, 360, 235
-    core = depiction(smi, 250, 175) if smi else ""
+
+    W, H = 860, 620
+    m = Chem.Mol(mol)
+    m.RemoveAllConformers()
+    rdCoordGen.AddCoords(m)
+    d = Draw.rdMolDraw2D.MolDraw2DSVG(W, H)
+    o = d.drawOptions()
+    o.bondLineWidth = 2
+    o.additionalAtomLabelPadding = 0.15
+    # the ligand occupies the middle; the ring outside it is for residues
+    Draw.rdMolDraw2D.PrepareAndDrawMolecule(d, m)
+    d.FinishDrawing()
+    svg = d.GetDrawingText()
+    inner = svg[svg.index(">", svg.index("<svg")) + 1: svg.rindex("</svg>")]
+    inner = re.sub(r"<rect[^>]*>", "", inner, count=1)     # drop its white backdrop
+
+    pos = {}
+    for i in range(m.GetNumAtoms()):
+        pt = d.GetDrawCoords(i)
+        pos[i] = (pt.x, pt.y)
+    cx = sum(p[0] for p in pos.values()) / len(pos)
+    cy = sum(p[1] for p in pos.values()) / len(pos)
+
+    # Place each residue outward along its own ray, then spread any that collide.
+    placed = []
+    for rn, ri, frac, pol, ai in sorted(keep, key=lambda r: -r[2]):
+        ax, ay = pos.get(ai, (cx, cy))
+        vx, vy = ax - cx, ay - cy
+        L = math.hypot(vx, vy) or 1.0
+        vx, vy = vx / L, vy / L
+        r = 96.0
+        for _ in range(28):
+            x, y = ax + vx * r, ay + vy * r
+            x = min(max(x, 58), W - 58)
+            y = min(max(y, 34), H - 46)
+            if all((x - px) ** 2 + (y - py) ** 2 > 68 ** 2 for px, py, *_ in placed):
+                break
+            r += 26.0
+        placed.append((x, y, ax, ay, rn, ri, frac, pol))
+
     parts = []
-    for i, (rn, ri, frac, pol) in enumerate(keep):
-        a = -math.pi / 2 + 2 * math.pi * i / len(keep)
-        x, y = CX + 250 * math.cos(a), CY + 158 * math.sin(a)
+    for x, y, ax, ay, rn, ri, frac, pol in placed:
         is_cys = (rn == "CYS" and str(ri) == str(cys_resi))
+        col = "#b3261e" if is_cys else ("#0f7a54" if pol > 0.2 else "#4a6885")
+        dash = " stroke-dasharray='5 4'" if pol > 0.2 else ""
         try:
             shown = f"{rn}{int(ri) + offset}"
         except ValueError:
             shown = f"{rn}{ri}"
-        col = "#b3261e" if is_cys else ("#0f7a54" if pol > 0.2 else "#4a6885")
-        x0, y0 = CX + 120 * math.cos(a), CY + 84 * math.sin(a)
-        dash = " stroke-dasharray='4 3'" if pol > 0.2 else ""
         parts.append(
-            f"<line x1='{x0:.0f}' y1='{y0:.0f}' x2='{x:.0f}' y2='{y:.0f}' "
-            f"stroke='{col}' stroke-width='{0.8 + 2.6 * frac:.1f}' opacity='.5'"
-            f"{dash}/>"
-            f"<circle cx='{x:.0f}' cy='{y:.0f}' r='25' fill='{col}' fill-opacity='.12' "
-            f"stroke='{col}' stroke-width='1.2'/>"
-            f"<text x='{x:.0f}' y='{y - 2:.0f}' class='rl' fill='{col}'>"
-            f"{shown}</text>"
-            f"<text x='{x:.0f}' y='{y + 11:.0f}' class='rf' fill='{col}'>"
-            f"{frac*100:.0f}%</text>")
-    return f"""<svg viewBox="0 0 {W} {H}" class="imap" role="img"
- aria-label="residues contacting the ligand, by fraction of frames">
-<style>.rl{{font:600 11px ui-monospace,monospace;text-anchor:middle}}
-.rf{{font:9.5px ui-monospace,monospace;text-anchor:middle;opacity:.85}}
-.ik{{font:10px Helvetica,Arial,sans-serif;fill:#5b6b80}}</style>
+            f"<line x1='{ax:.0f}' y1='{ay:.0f}' x2='{x:.0f}' y2='{y:.0f}' "
+            f"stroke='{col}' stroke-width='{0.9 + 2.4 * frac:.1f}' "
+            f"opacity='.55'{dash}/>"
+            f"<circle cx='{ax:.0f}' cy='{ay:.0f}' r='3.4' fill='{col}'/>"
+            f"<rect x='{x-40:.0f}' y='{y-15:.0f}' width='80' height='30' rx='6' "
+            f"fill='{col}' fill-opacity='.13' stroke='{col}' stroke-width='1.2'/>"
+            f"<text x='{x:.0f}' y='{y-2:.0f}' class='rl' fill='{col}'>{shown}</text>"
+            f"<text x='{x:.0f}' y='{y+10:.0f}' class='rf' fill='{col}'>"
+            f"{frac*100:.0f}% of frames</text>")
+
+    return f"""<svg viewBox="0 0 {W} {H + 34}" class="imap" role="img"
+ aria-label="each contacting residue joined to the ligand atom it contacts">
+<style>.rl{{font:600 11.5px ui-monospace,monospace;text-anchor:middle}}
+.rf{{font:8.5px ui-monospace,monospace;text-anchor:middle;opacity:.85}}
+.ik{{font:10.5px Helvetica,Arial,sans-serif;fill:#5b6b80}}</style>
+{inner}
 {''.join(parts)}
-<image href="{core}" x="{CX-125}" y="{CY-88}" width="250" height="175"/>
-<text x="10" y="{H-24}" class="ik">line width = fraction of frames in contact
-&#183; dashed + green = polar contact (N/O within {POLAR_A} &#8491;)
-&#183; red = catalytic Cys113 &#183; crystal numbering</text>
-<text x="10" y="{H-10}" class="ik">Contact = any heavy atom within {CONTACT_A} &#8491;,
-over {n_frames} frames of the run. Residues are placed for legibility, not at
-their real positions.</text>
+<text x="10" y="{H + 12}" class="ik">Each residue is joined to the ligand atom it
+is nearest to, over {n_frames} frames. Line width = fraction of frames in contact
+&#183; dashed green = polar (N/O within {POLAR_A} &#8491;) &#183; red = catalytic Cys113
+&#183; crystal numbering.</text>
+<text x="10" y="{H + 26}" class="ik">Contact = any heavy atom within {CONTACT_A}
+&#8491;. The ATOM each residue joins is measured; the residue's position on the page
+is projected along that direction, not its real 3D position.</text>
 </svg>"""
 
 
@@ -304,7 +389,8 @@ def block(ident: str, er, three: str, cls: dict) -> str:
                     + base64.b64encode(frame1.encode()).decode())
         try:
             rows_c, nfr = contacts(mpdb)
-            imap = interaction_map(smiles_of(ident) or "", rows_c, nfr)
+            lm = ligand_mol(mpdb, smiles_of(ident) or "")
+            imap = interaction_map(lm, rows_c, nfr)
         except Exception as exc:                          # noqa: BLE001
             log.warning("%s: interaction map unavailable: %s", ident, exc)
 

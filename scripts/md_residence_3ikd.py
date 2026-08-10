@@ -438,7 +438,7 @@ def ga_read(path: Path) -> np.ndarray:
 def run_one(ident: str, smiles: str, label: str, *, production_ps: float,
             nrun: int, gpu: str, keep: bool, pose: Path | None = None,
             pose_rank: int = 1, net_charge: int = 0,
-            work_root: Path | None = None) -> dict:
+            work_root: Path | None = None, replicate: int = 1) -> dict:
     wd = (work_root or WORK) / ident.replace(":", "_")
     wd.mkdir(parents=True, exist_ok=True)
     row = {"ident": ident, "label": label, "smiles": smiles,
@@ -453,7 +453,7 @@ def run_one(ident: str, smiles: str, label: str, *, production_ps: float,
         gx.solvate(wd, md_wd)
         log.info("  solvated")
         res = gx.run_pipeline(wd, md_wd, gpu_id=int(gpu),
-                              production_ps=production_ps, replicate=1,
+                              production_ps=production_ps, replicate=replicate,
                               candidate_id=ident)
         row.update({k: v for k, v in res.items() if isinstance(v, (int, float, str))})
         log.info("  production done (%.0f ps)", production_ps)
@@ -559,6 +559,13 @@ def main() -> None:
     ap.add_argument("--net-charge", type=int, default=None,
                     help="ligand formal charge for antechamber; default is the "
                          "frame's charge_ph74 in --candidate mode, else 0")
+    # REPLICATE IS A REAL PARAMETER, NOT A DIRECTORY. gromacs_explicit derives a
+    # distinct, reproducible velocity seed per (candidate, replicate); the runner
+    # hardcoded replicate=1, so re-running into a different --work-root would have
+    # reproduced the SAME trajectory bit for bit and called it a replicate. A
+    # sibling that cannot differ is not a replicate, it is a copy.
+    ap.add_argument("--replicate", type=int, default=1,
+                    help="replicate index; selects the velocity seed (D0038)")
     ap.add_argument("--tag", default=None, help="output stem suffix")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -577,7 +584,8 @@ def main() -> None:
                       production_ps=args.production_ps, nrun=args.nrun,
                       gpu=args.gpu, keep=args.keep, pose=pose,
                       pose_rank=args.pose_rank, net_charge=nc,
-                      work_root=Path(args.work_root) if args.work_root else None)
+                      work_root=Path(args.work_root) if args.work_root else None,
+                      replicate=args.replicate)
         df = pd.DataFrame([row])
         dest = OUT.write(f"md_residence_{args.tag or args.candidate}", ".csv")
         df.to_csv(dest, index=False)

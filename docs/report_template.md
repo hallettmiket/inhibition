@@ -68,9 +68,19 @@ from 1, so the catalytic cysteine is residue 63 in the trajectory and Cys113
 everywhere else. A chemist reading "Cys63" would look up the wrong residue — the
 same offset that once had this project draw a glutamate and label it Cys113.
 
-It is a contact **summary**, not a LigPlot. Residues are placed for legibility,
-not at their real positions, and no line claims to join a particular ligand atom
-to a particular residue atom. The figure says so.
+**Each residue is joined to the ligand ATOM it contacts.** The ligand is rendered
+by RDKit and RDKit is then asked where it put each atom (`GetDrawCoords`);
+residues are placed on that same canvas, along the ray from the molecule's centre
+through their contact atom. The atom is the one the residue is nearest to in the
+most frames — a residue's closest atom moves, so one frame cannot name it.
+
+Atom correspondence is exact: the mol is built **from the PDB block** and given
+bond orders from the SMILES template, so atom *i* in the drawing is atom *i* in
+the trajectory.
+
+One thing it still is not, and the figure says so: the residue's **position** is a
+projection along that ray, not its real 3D position. The atom it joins is
+measured; where the label sits is for legibility.
 
 ## 3. Rules the format keeps
 
