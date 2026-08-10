@@ -304,7 +304,8 @@ def _pocket(idp: str) -> str:
 <ellipse cx='232' cy='176' rx='96' ry='60' fill='none' stroke='var(--rule)'
          stroke-width='.7' stroke-dasharray='2 4' opacity='.65'/>
 <circle cx='{SG[0]}' cy='{SG[1]}' r='11' fill='url(#sg{idp})'/>
-<text x='{SG[0] + 16}' y='{SG[1] + 4}' class='lbl'>Cys113 S&gamma;</text>
+<!-- ABOVE the sulfur, not beside it: to the right it collided with mode 2's tag -->
+<text x='{SG[0]}' y='{SG[1] - 15}' class='lbl' text-anchor='middle'>Cys113 S&gamma;</text>
 """
 
 
@@ -848,7 +849,7 @@ def _real_poses() -> tuple[str, dict]:
     return block, {"n": len(poses), "modes": len(order), "counts": dict(counts)}
 
 
-def build(title: str = "DWI Derivative Screen") -> str:
+def build(title: str = "DWI Derivative Screen", built: str = "") -> str:
     rng = random.Random(SEED)
     pts = _points(rng)
     chem = _chemspace()
@@ -1095,8 +1096,7 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
 </style></head><body>
 
 <h1>{title}</h1>
-<p class="sub">Schematic panels are illustrative; the pose panels and every named
-parameter are real.</p>
+<p class="sub">Ranking schematic &middot; Timothy Wu{f" &middot; {built}" if built else ""}</p>
 
 <div class="step">
  <div>{chem}</div>

@@ -527,7 +527,12 @@ chemistries is the cheapest way to turn two points into a distribution.</p>
     (REPORTS / "controls.html").write_text(ctl_page)
     # The schematic carries the SAME title as the GUI it explains, rather than a
     # heading of its own that drifts the moment the release name changes.
-    (REPORTS / "pipeline.html").write_text(schematic.build(_full_title))
+    # pipeline.html is written to a STABLE name, not through outputs.py's
+    # versioned writer, so stamping the build date here does not spawn a new
+    # versioned file per day the way it would for the frames.
+    from datetime import date as _date
+    (REPORTS / "pipeline.html").write_text(
+        schematic.build(_full_title, _date.today().isoformat()))
 
     page = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
