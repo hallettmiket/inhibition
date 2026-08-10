@@ -67,13 +67,13 @@ CSS = """
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
   font-size:15.5px;line-height:1.55;-webkit-font-smoothing:antialiased}
-.wrap{max-width:900px;margin:0 auto;padding:0 28px 70px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 28px 70px}
 /* NO .wrap ELEMENT IS EMITTED -- the report writes its blocks straight into
    <body>, so the measure has to be applied to those blocks or it does nothing.
    That is why the content sat hard against the frame edge in the catalogue
    viewer instead of centring in it. */
 *,*::before,*::after{box-sizing:border-box}
-body>*{max-width:940px;margin-left:auto;margin-right:auto;
+body>*{max-width:1220px;margin-left:auto;margin-right:auto;
   padding-left:26px;padding-right:26px}
 /* The mast, the structure card and each panel are all direct children, so they
    must resolve to the SAME left edge. Without border-box the bordered blocks
@@ -135,7 +135,15 @@ section{margin:0 0 2.8rem}
 h2{font-size:1.35rem;margin:0;font-weight:600;color:var(--navy);letter-spacing:-.01em}
 h3{font-size:1rem;margin:1.6rem 0 .4rem;font-weight:600;color:var(--ink)}
 .sub{color:var(--muted);font-size:.9rem;margin:.15rem 0 0}
-p{margin:0 0 .85rem;max-width:78ch}
+/* SHORTHAND MARGIN WAS RESETTING THE CENTRING. `margin:0 0 .85rem` sets
+   margin-left/right to 0, and this rule sits after `body>*{margin-left:auto}`
+   at equal specificity -- so every top-level paragraph, including the verdict
+   line, jumped to the far left while the masthead and the panels stayed
+   centred. Longhand keeps the side margins alone. */
+p{margin-top:0;margin-bottom:.85rem;max-width:78ch}
+/* A paragraph that IS a direct child is a layout block, not prose: it takes the
+   page measure so it lines up with the mast and the panels above and below it. */
+body>p{max-width:1220px;margin-left:auto;margin-right:auto}
 a{color:var(--blue)}
 code{font-family:var(--mono);font-size:.87em;background:var(--raise);
   padding:.08em .34em;border-radius:2px;border:1px solid var(--rule)}

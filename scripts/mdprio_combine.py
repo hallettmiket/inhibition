@@ -98,6 +98,31 @@ def _thumbs(idents) -> dict:
         if isinstance(v, str):
             smi.setdefault(Path(p).stem, v)
 
+    # And the reference set itself, for controls with no sidecar -- ref_ATRA had
+    # none, so it sat in the rail as a blank tile while every candidate beside it
+    # showed a structure. A control that looks like a different KIND of object is
+    # harder to compare against, which is the whole reason it is on the rail.
+    # Keyed on `ref_<Name>` and on `ref_<Name>__<warhead>`, since the screen
+    # writes the mechanism into the ident.
+    rs = sorted(glob.glob(str(REPO / "data/reference/pin1_reference_binders_*.csv")),
+                key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+    if rs:
+        try:
+            rd = pd.read_csv(rs[-1])
+            name_col = rd.columns[0]
+            for _, r in rd.iterrows():
+                got = [v for v in r.values
+                       if isinstance(v, str) and len(v) > 8 and Chem.MolFromSmiles(v)]
+                if not got:
+                    continue
+                key = f"ref_{str(r[name_col]).strip()}"
+                smi.setdefault(key, got[0])
+                for i in idents:
+                    if str(i).startswith(key + "__"):
+                        smi.setdefault(i, got[0])
+        except Exception as exc:                           # noqa: BLE001
+            log.warning("reference depictions unavailable: %s", exc)
+
     out = {}
     for i in idents:
         v = smi.get(i)
@@ -113,6 +138,47 @@ def _thumbs(idents) -> dict:
         svg = _re.sub(r"<!--.*?-->", "", svg, flags=_re.S)
         out[i] = "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
     return out
+
+
+def _qualifying_controls() -> set[str]:
+    """Reference molecules that earn a place on the rail as controls.
+
+    @tt8804: *"for controls we just need confirmed pin1 inhibitors with the
+    warheads used"*. Two conditions, both read from the reference table rather
+    than hand-listed here:
+
+    * ``mechanism == covalent_cys113`` — a confirmed covalent inhibitor of the
+      residue this project targets. That drops ATRA, EGCG, PiB and every
+      non-covalent peptide/phosphonate: they are Pin1 binders, but they cannot be
+      compared against a near-attack criterion because they have nothing to
+      attack with.
+    * a ``warhead_class`` naming chemistry the screen actually enumerates. A
+      control carrying a warhead we never make cannot tell us whether our screen
+      would have found our own chemistry.
+
+    Matched on the class VOCABULARY, not on the prose string: the table's
+    warhead_class is written for a human ("1;4-naphthoquinone (Michael
+    acceptor)"), and only a couple of rows would match a class id verbatim.
+    """
+    ours = {"chloroacetamide", "sulfamate", "sulfonate", "bdhi", "naphthoquinone",
+            "acrylamide", "cinnamamide", "snar", "chloropyrimidine", "isoxazole"}
+    fs = sorted(glob.glob(str(REPO / "data/reference/pin1_reference_binders_*.csv")),
+                key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+    if not fs:
+        return set()
+    keep = set()
+    try:
+        d = pd.read_csv(fs[-1])
+        for _, r in d.iterrows():
+            if str(r.get("mechanism", "")).strip() != "covalent_cys113":
+                continue
+            w = str(r.get("warhead_class", "")).lower()
+            if w in ("", "nan", "unverified") or not any(k in w for k in ours):
+                continue
+            keep.add(f"ref_{str(r['name']).strip()}")
+    except Exception as exc:                               # noqa: BLE001
+        log.warning("could not read the reference table: %s", exc)
+    return keep
 
 
 def _classes() -> dict:
@@ -265,6 +331,7 @@ def main() -> None:
     # construction, and tagging only the crystal ones left Juglone ranked but
     # absent from the controls tab.
     ctl_idents = {c['ident'] for c in ctl} | {t for t in args.candidates if t.startswith('ref_')}
+    # (args.candidates is already filtered to qualifying controls above)
     _ver, _code = _version()
     # The version AND its codename belong in the title (@tt8804): a page saved,
     # screenshotted or pasted into a thread carries its release with it rather
@@ -275,6 +342,41 @@ def main() -> None:
         f"“{_code}”" if _code else "") if x)
     swi = sw.set_index("parent_ident") if not sw.empty else pd.DataFrame()
     mdi = md.set_index("ident") if not md.empty else pd.DataFrame()
+
+    # WHAT EARNS A ROW. Three kinds qualify and nothing else:
+    #   * a candidate (t3_/t4_) that has a measurement -- a sweep or a 100 ns run;
+    #   * a crystal control (rx_/xtal_);
+    #   * a reference that is a confirmed covalent Cys113 inhibitor carrying a
+    #     warhead we enumerate (_qualifying_controls).
+    #
+    # This drops two things that were cluttering the rail. Reference molecules
+    # that are not comparable -- ATRA and the non-covalent binders, which have no
+    # warhead to aim -- and rows carrying no number at all, like a 190 ns variant
+    # whose trajectory is long gone: it showed a blank tile, an em-dash and
+    # "awaiting 100 ns" for a run that is never coming.
+    qual = _qualifying_controls()
+    swept_ids = set(swi.index.astype(str)) if len(swi.index) else set()
+    md_ids = set(mdi.index.astype(str)) if len(mdi.index) else set()
+
+    def keep(c: str) -> tuple[bool, str]:
+        if c.startswith(("rx_", "xtal_")):
+            return True, ""
+        if c.startswith("ref_"):
+            base = c.split("__")[0]
+            return (base in qual), "not a covalent control with a warhead we use"
+        if c in swept_ids or c in md_ids:
+            return True, ""
+        return False, "no sweep and no 100 ns run"
+
+    dropped = []
+    kept = []
+    for c in args.candidates:
+        ok, why = keep(c)
+        (kept if ok else dropped).append(c if ok else (c, why))
+    if dropped:
+        for c, why in dropped:
+            log.info("dropped %s — %s", c, why)
+    args.candidates = kept
 
     rows, tabs, missing = [], [], []
     for c in args.candidates:

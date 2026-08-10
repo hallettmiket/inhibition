@@ -482,7 +482,7 @@ def _run_counts() -> dict:
     drift away from the tree the way a hand-written number would.
     """
     import glob as _g
-    out = {"swept": 0, "md": 0, "held": 0}
+    out = {"swept": 0, "survivors": 0, "md": 0, "held": 0}
     B = "/data/lab_vm/append_only/inhibition/00_outputs/blacksmith"
     try:
         import pandas as _pd
@@ -491,6 +491,13 @@ def _run_counts() -> dict:
                         ignore_index=True)
         sw = sw[(sw.get("sweep_ps", 0) > 1000) & (sw.status == "ok")]
         out["swept"] = int(sw.parent_ident.nunique())
+        # SURVIVORS = the sweep's own rule, a sustained episode. D0076 records
+        # that this filter discards the brief approaches n_visits exists to
+        # count, so the number is reported as what the sweep DID, not as a
+        # statement that the rest are unreactive.
+        if "n_visits" in sw.columns:
+            out["survivors"] = int(sw.drop_duplicates("parent_ident")
+                                     .n_visits.gt(0).sum())
         md = _pd.concat([_pd.read_csv(f) for f in
                          _g.glob(B + "/md_residence/*.csv")], ignore_index=True)
         m = md[md.production_ps >= 50000].drop_duplicates("ident", keep="last")
@@ -1238,8 +1245,8 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
   100 ns facing the wrong way.</p></div>
 </div>
 
-<div class="arrow"><span>{rc['swept']} swept &rarr; {rc['md']} elevated to 100 ns
- &rarr; {rc['held']} still on target &darr;</span></div>
+<div class="arrow"><span>{rc['swept']} swept &rarr; {rc['survivors']} survived the sweep
+ &rarr; {rc['md']} ran 100&nbsp;ns &rarr; {rc['held']} still on target &darr;</span></div>
 
 <div class="step wide">
  <div class="full"><p class="n0">Elevation</p>
