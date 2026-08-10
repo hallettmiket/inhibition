@@ -234,7 +234,16 @@ def _real_poses() -> tuple[str, dict]:
                     key=lambda kv: -kv[1])]
     cols = {m: c for m, c in zip(order, ["#0072ce", "#7b5ea7", "#c2703d",
                                          "#0f7a54", "#b3261e"])}
-    dots = [{"c": [round(v, 2) for v in p["c"]], "m": p["mode"]} for p in poses]
+    # EVERY POSE AS A STRUCTURE, NOT A DOT. A centroid says where a pose sat and
+    # nothing about how it sat, which is the thing the modes actually differ in.
+    # Grouped into one multi-molecule SDF per mode so each group can be styled and
+    # hidden on its own -- and so 3Dmol reads the explicit bond block rather than
+    # inferring bonds by distance, which across 491 overlapping poses would wire
+    # neighbouring molecules to each other.
+    by_mode: dict[str, list[str]] = {}
+    for p in poses:
+        by_mode.setdefault(p["mode"], []).append(p["blk"])
+    sdf_by = {m: "".join(v) for m, v in by_mode.items()}
     reps = {}
     for p in poses:
         reps.setdefault(p["mode"], p["blk"])
@@ -250,39 +259,42 @@ def _real_poses() -> tuple[str, dict]:
   {btns}
   <label class="p3l"><input id="p3rep" type="checkbox" checked> show one full pose</label>
  </div>
- <div class="p3box"><div id="p3"></div></div>
- <p class="p3cap">Real output for <code>{EXAMPLE}</code> — {len(poses)} poses,
- {len(order)} modes, in 3IKD. Each dot is one pose at its heavy-atom centroid,
- coloured by the mode the screen assigned. The sticks are one real pose from the
- selected mode.</p>
+ <div class="p3box"><div id="p3"></div>
+   <div id="p3wait" class="p3wait">building {len(poses)} poses&hellip;</div></div>
+ <p class="p3cap">Real output for <code>{EXAMPLE}</code> — all {len(poses)} poses,
+ {len(order)} modes, in 3IKD. Every pose is drawn as a structure, coloured by the
+ mode the screen assigned. Tick <em>one full pose</em> to pick a single one out in
+ sticks.</p>
 </div>
 <script>{js.read_text(errors='ignore')}</script>
 <script type="text/plain" id="p3rec">{rec.read_text(errors='ignore')}</script>
+<script type="text/plain" id="p3sdf">{json.dumps(sdf_by)}</script>
 <script type="text/plain" id="p3reps">{json.dumps(reps)}</script>
 <script>
 (function(){{
   const M = window.$3Dmol || window['3Dmol'];
-  const DOTS = {json.dumps(dots)}, COLS = {json.dumps(cols)};
+  const COLS = {json.dumps(cols)};
+  const SDF = JSON.parse(document.getElementById('p3sdf').textContent);
   const REPS = JSON.parse(document.getElementById('p3reps').textContent);
-  let v = null, cur = 'all', repModel = null;
-  function drawDots(){{
-    v.removeAllShapes();
-    DOTS.forEach(function(d){{
-      if (cur !== 'all' && d.m !== cur) return;
-      v.addSphere({{center:{{x:d.c[0],y:d.c[1],z:d.c[2]}}, radius:0.34,
-                    color: COLS[d.m] || '#888',
-                    opacity: cur === 'all' ? 0.55 : 0.85}});
+  let v = null, cur = 'all', groups = {{}}, repModel = null;
+  function style(){{
+    Object.keys(groups).forEach(function(m){{
+      const on = (cur === 'all' || cur === m);
+      groups[m].forEach(function(mod){{
+        mod.setStyle({{}}, on ? {{line:{{colorscheme: 'default', color: COLS[m],
+                                       linewidth: cur === 'all' ? 1.0 : 1.6}}}} : {{}});
+      }});
     }});
   }}
   function drawRep(){{
-    if (repModel !== null) {{ v.removeModel(repModel); repModel = null; }}
+    if (repModel) {{ try {{ v.removeModel(repModel); }} catch(e) {{}} repModel = null; }}
     if (!document.getElementById('p3rep').checked) return;
     const m = cur === 'all' ? Object.keys(REPS)[0] : cur;
     if (!REPS[m]) return;
     repModel = v.addModel(REPS[m], 'sdf');
-    repModel.setStyle({{}}, {{stick:{{radius:0.16, colorscheme:'yellowCarbon'}}}});
+    repModel.setStyle({{}}, {{stick:{{radius:0.17, colorscheme:'yellowCarbon'}}}});
   }}
-  function render(){{ drawDots(); drawRep(); v.render(); }}
+  function render(){{ style(); drawRep(); v.render(); }}
   window.pmode = function(m){{
     cur = m;
     document.querySelectorAll('.p3b').forEach(function(b){{
@@ -294,8 +306,16 @@ def _real_poses() -> tuple[str, dict]:
       v = M.createViewer(document.getElementById('p3'), {{backgroundColor:'#eef1f6'}});
       v.addModel(document.getElementById('p3rec').textContent, 'pdb');
       v.setStyle({{}}, {{cartoon:{{color:'#9fb0c4', opacity:0.72}}}});
+      // addModels returns the models it made in most builds and a single model in
+      // some; normalise rather than trusting one shape.
+      Object.keys(SDF).forEach(function(m){{
+        const r = v.addModels(SDF[m], 'sdf');
+        groups[m] = Array.isArray(r) ? r : [r];
+      }});
       render();
-      v.zoomTo(); v.zoom(1.5); v.resize();
+      v.zoomTo({{model: groups[Object.keys(groups)[0]][0]}});
+      v.zoom(0.8); v.resize();
+      const w = document.getElementById('p3wait'); if (w) w.style.display = 'none';
       document.getElementById('p3rep').addEventListener('change', render);
     }}); }});
   }});
@@ -430,6 +450,9 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
 .dotc{{width:9px;height:9px;border-radius:50%;display:inline-block}}
 .p3l{{font-size:11.5px;color:var(--muted);margin-left:4px}}
 .p3cap{{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.45}}
+.p3wait{{position:absolute;inset:0;display:flex;align-items:center;
+ justify-content:center;font:12px var(--mono);color:var(--muted);
+ background:#eef1f6;z-index:2}}
 .foot{{margin-top:30px;padding-top:14px;border-top:1px solid var(--rule);
  font-size:12.5px;color:var(--muted)}}
 </style></head><body>
