@@ -1,14 +1,16 @@
 # 2.2.0 “Chalcopyrite” retrospective
 
-*Written at the close of the 2.2.0 pose-splitting work, 2026-08-09. Companion to
+*Closed 2026-08-10. Companion to
 [`outline_2.2.0.md`](outline_2.2.0.md) (what was promised),
 [`framework_2.2.0.md`](framework_2.2.0.md) (what was built, canonically) and
 [`retrospective_2.1.0.md`](retrospective_2.1.0.md) (the version it follows).*
 
 **The one-line version: 2.1.0 ended by discovering that its score ranked poses on
 a quantity carrying no information. 2.2.0 replaced the unit of work — a mode, not
-a molecule — and in doing so found that the crystallographic pose was in our
-output all along and the selection step was throwing it away.**
+a molecule — found that the crystallographic pose was in our output all along and
+the selection step was throwing it away, and then, on its last night, ran the
+positive control and discovered that the chemistry had been sound the whole time
+and it was the READOUT rejecting it, in three independent ways.**
 
 Forty commits. The version's own founding premise did not survive it.
 
@@ -196,19 +198,31 @@ catalogue viewer as the interface pattern; measure-on-this-target.
 
 **Fix, in order:**
 
-1. **The receptor split (§3.3).** Accept or reject D0059, then make
+0. **Run the docked Sulfopin at 100 ns.** D0077 shows the `rx_*` crystal-reactant
+   controls model an adduct as a Michaelis complex, so they cannot answer the
+   positive-control question. The docked pose enters at a valid near-attack
+   geometry and can. This is the first experiment of the next version.
+1. **The dwell filter (D0076).** Re-derive `n_visits` at the save interval and
+   report the raw count beside it. Costs no GPU — the raw number is already in
+   every row. Pre-register the new reading first: it is being changed after
+   seeing which molecules it rejected.
+2. **Never rank across mechanisms.** The 58-survivor list is a cross-mechanism
+   ranking and 56 of the 58 come from the two laxer criteria. Within SN2 the
+   controls top their own chemistry.
+3. **The receptor split (§3.3).** Accept or reject D0059, then make
    `config/receptor.yaml` and `noncovalent_dock_run.py` agree with the decision.
    Nothing else should be run until this is settled.
-2. **A stage that yields nothing must fail the run.** Twice recorded, not yet
+4. **A stage that yields nothing must fail the run.** Twice recorded, not yet
    implemented.
-3. **Route every renderer through the guard that already knows the residue
+5. **Route every renderer through the guard that already knows the residue
    offset**, rather than trusting each new styling path.
 
 **Test:** whether mode assignment is stable across re-runs of the same molecule —
 the outline named unstable mode counts as a failure condition, and 500 runs was
 chosen for coverage, not yet demonstrated for reproducibility.
 
-**Unresolved, carried in and still carried:** the SN2 150° threshold; the
+**Unresolved, carried in and still carried:** the SN2 150° threshold — now with
+evidence on both sides, since the controls clear it repeatedly and never hold it; the
 secondary pocket Reddi 2023 reports; N-activated acrylamides at 97% of T₃
 (D0066), still without a chemist's ruling; the within-class rigidity confound.
 
@@ -272,7 +286,7 @@ advance is what makes that sentence possible.
 
 ---
 
-## 7. Two numbers worth remembering
+## 7. Numbers worth remembering
 
 **93.3%** — how often the crystallographic pose is somewhere in our 200.
 **33.3%** — how often it is somewhere the score would let anyone see it.
@@ -281,3 +295,29 @@ advance is what makes that sentence possible.
 how often we *keep* it. The gap moved from the instrument to our own handling of
 its output, which is the more embarrassing place for it to be and the easier one
 to fix.
+
+And two more, from the last night, which say the same thing again:
+
+**13** — independent approaches Liu-2022-ZL-Pin13 made into attack geometry.
+**0** — the number our own readout scored it.
+
+## 8. Where 2.2.0 leaves the project
+
+Every defect this version found was in the reading, not the chemistry. Pose
+splitting works; the screen puts a known covalent inhibitor into a valid
+near-attack geometry; the crystal pose is in the output. What kept failing was
+each successive attempt to *summarise* that into a number — an energy window
+(#23/#30), a dwell filter (D0076), a control built in the wrong state (D0077),
+and a ranking pooled across incomparable mechanisms.
+
+That is a better position than 2.1.0 ended in, and it is worth saying plainly
+because the negative results make it easy to read the opposite. 2.1.0 closed not
+knowing whether anything in the pipeline discriminated. 2.2.0 closes knowing the
+pipeline finds the right chemistry and that the instruments pointed at it have
+been measuring the wrong quantity — which is a fixable problem, and four of the
+fixes cost no GPU at all.
+
+**Not stamped with a successor.** Whether the next version is 2.3.0 or 3.0.0 is
+[#46](https://github.com/hallettmiket/inhibition/issues/46) and turns on whether
+"the ranking predicts nothing" invalidates measurements or their interpretation.
+Nothing in this retrospective settles it.

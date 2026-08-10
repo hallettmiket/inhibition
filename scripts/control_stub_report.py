@@ -106,44 +106,61 @@ def main() -> None:
         rows.append(("10 ns sweep, attack-ready", f"{float(s.frac_attack_ready):.4f}"))
         rows.append(("10 ns sweep, sustained visits", f"{float(s.n_visits):.0f}"))
 
-    facts = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in rows)
-    sweep_line = ""
+    # THE SAME LAYOUT AS EVERY OTHER REPORT (@tt8804). A control that renders
+    # differently from a candidate is harder to compare against, which is the only
+    # reason it is on the rail. Same masthead, same verdict line, same panels --
+    # what this page lacks is a trajectory, and that belongs in a panel of its
+    # own rather than in a different page design.
+    mast_facts = [(args.candidate, "molecule"),
+                  ("control", "role"),
+                  (f"{eng * 100:.2f}%", "100 ns engagement"),
+                  (f"{rmax:.3f} nm", "max ligand RMSD")]
+    if s is not None:
+        mast_facts.append((f"{float(s.frac_attack_ready)*100:.1f}%  ·  "
+                           f"{float(s.n_visits):.0f} visits", "attack-ready (10 ns)"))
+    mast_facts.append((f"{float(m['production_ps']) / 1000:.0f} ns", "trajectory"))
+
+    stand = (f"{'Held' if held else 'Left'}. Engaged the target in "
+             f"{eng * 100:.2f}% of the 100 ns run.")
+
+    detail = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in rows)
+    sweep_panel = ""
     if s is not None and float(s.n_visits) == 0:
-        sweep_line = (
-            "<p class='bad'><strong>This control was rejected by the 10 ns sweep</strong> "
-            f"— {float(s.frac_attack_ready):.4f} attack-ready, zero sustained visits — "
-            "and would never have been elevated. It then produced the 100 ns result "
-            "above. See <code>D0075</code>.</p>")
+        sweep_panel = (
+            '<details class="panel"><summary>Rejected by the 10 ns sweep'
+            '<span class="hint">and then produced the result above</span></summary>'
+            '<div class="pbody"><p>'
+            f"{float(s.frac_attack_ready):.4f} attack-ready, "
+            f"<strong>zero sustained visits</strong>, so it would never have been "
+            "elevated. D0076 shows the dwell filter discards exactly the brief "
+            "approaches the observable was chosen to count; D0077 shows the "
+            "crystal-reactant controls model an adduct as a Michaelis complex."
+            "</p></div></details>")
 
-    body = f"""
-<h1>{args.candidate}</h1>
-<p class="lead">{args.note or 'Control, 100 ns.'}</p>
+    body = (
+        rt.masthead(f"{args.candidate} — 100 ns residence", stand,
+                    "CONTROL · 2.2.0 CHALCOPYRITE", mast_facts)
+        + f'<p>{rt.pill("Held" if held else "Left")} '
+          f'Max ligand RMSD {rmax:.3f} nm against the {BOUND_NM} nm bar '
+          f'&middot; {args.note}</p>'
+        + '<details class="panel" open><summary>Measured values'
+          '<span class="hint">the same readings every candidate carries</span>'
+          f'</summary><div class="pbody"><table class="kv">{detail}</table></div></details>'
+        + sweep_panel
+        + '<details class="panel"><summary>No trajectory on this run'
+          '<span class="hint">why there is no movie or RMSD plot</span></summary>'
+          '<div class="pbody"><p>The 100 ns run completed and its measured row is '
+          'intact, but it was launched without <code>--keep</code>, so the GROMACS '
+          'working directory was cleaned up on completion. Every number on this '
+          'page is read from the surviving row; none of it is inferred. Rebuild '
+          'with <code>mdprio_report.py</code> once the run is repeated with '
+          '<code>--keep</code> and this page becomes a full report.</p></div></details>')
 
-<div class="stub"><strong>Numbers only — this is not a full report.</strong>
-The 100 ns run completed and its measured row is intact, but it was launched
-without <code>--keep</code>, so the GROMACS working directory was cleaned up on
-completion. <strong>There is no trajectory, so there is no movie, no RMSD plot and
-no pose here.</strong> Everything below is read from the surviving row. Rebuild
-with <code>mdprio_report.py</code> once the run is repeated with
-<code>--keep</code>.</p></div>
-
-{sweep_line}
-
-<table class="facts">{facts}</table>
-
-<p class="note">Held/left uses the same {BOUND_NM} nm maximum-ligand-RMSD bar as
-every candidate, so this row is directly comparable in the ranking.</p>
-"""
     html = ("<!doctype html><html><head><meta charset='utf-8'>"
             f"<title>{args.candidate}</title><style>{rt.CSS}"
-            ".stub{border-left:4px solid #8a5a00;background:#fdf0dc;padding:10px 14px;"
-            "border-radius:0 4px 4px 0;margin:1rem 0}"
-            ".bad{border-left:4px solid #b3261e;background:#fbeae8;padding:10px 14px;"
-            "border-radius:0 4px 4px 0}"
-            "table.facts{border-collapse:collapse;margin-top:1rem}"
-            "table.facts th{text-align:left;padding:5px 14px 5px 0;color:#5b6b80;"
-            "font-weight:500}table.facts td{padding:5px 0;font-family:ui-monospace,monospace}"
-            ".lead{color:#5b6b80}.note{color:#5b6b80;font-size:.9rem}"
+            "table.kv{border-collapse:collapse}"
+            "table.kv th{text-align:left;padding:4px 16px 4px 0;color:var(--muted);"
+            "font-weight:500}table.kv td{padding:4px 0;font-family:var(--mono)}"
             "</style></head><body>" + body + "</body></html>")
 
     dest = REPORTS / f"{args.candidate}.html"
