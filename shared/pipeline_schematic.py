@@ -362,14 +362,19 @@ def _blend(a: str, b: str, w: float = 0.55) -> str:
 #: Kept as a single list rather than two, because step 4's ranking and step 5's
 #: survival are the SAME rows read twice -- and two hand-maintained lists that
 #: must agree is exactly the shape this project keeps finding broken.
+#: MOST MODES NEVER REACH 100 ns. The real run elevated 58 of 226 swept, so a
+#: picture where nearly everything gets a 100 ns run misdescribes the funnel --
+#: 4 of these 9 are elevated, and the rest stop at the sweep.
 ENTRIES = [
     ("mol B", "1", 0.71, 0.52, 0.94, True),
     ("mol A", "1", 0.62, 0.41, 0.88, True),
     ("mol B", "2", 0.44, 0.37, 0.42, False),
     ("mol C", "1", 0.33, 0.33, 0.79, True),
-    ("mol A", "2", 0.15, 0.21, 0.35, False),
-    ("mol B", "3", 0.08, 0.04, None, None),
-    ("mol C", "3", 0.06, 0.06, None, None),
+    ("mol A", "2", 0.15, 0.21, None, None),
+    ("mol B", "3", 0.12, 0.11, None, None),
+    ("mol C", "2", 0.09, 0.08, None, None),
+    ("mol A", "3", 0.07, 0.05, None, None),
+    ("mol C", "3", 0.04, 0.02, None, None),
 ]
 
 
@@ -488,8 +493,13 @@ def _stage_survival() -> str:
             f"<text x='50' y='{y + 13}' class='chip' fill='{col}'>{name}</text>"
             f"<text x='232' y='{y + 13}' class='stat' fill='var(--muted)' "
             f"text-anchor='end'>{sweep:.2f}</text>")
+        # THE GATE, DRAWN PER ROW. Whether a mode was sent to 100 ns at all is a
+        # decision, and most modes lose it -- so it gets its own mark between the
+        # two columns instead of being implied by an empty cell.
         if elevated:
             rows.append(
+                f"<line x1='244' y1='{y + 9}' x2='268' y2='{y + 9}' "
+                f"stroke='{col}' stroke-width='1.3' marker-end='url(#ah2)'/>"
                 f"<text x='320' y='{y + 13}' class='stat' fill='var(--navy)' "
                 f"text-anchor='end'>{eng * 100:.0f}%</text>")
             tag, tc = ("held", "var(--good)") if held else ("left", "var(--bad)")
@@ -500,8 +510,12 @@ def _stage_survival() -> str:
                 f"text-anchor='middle'>{tag}</text>")
         else:
             rows.append(
-                f"<text x='250' y='{y + 13}' class='chip' fill='var(--muted)'>"
-                f"below the cut &mdash; no 100 ns run</text>")
+                f"<line x1='246' y1='{y + 4}' x2='258' y2='{y + 15}' "
+                f"stroke='var(--muted)' stroke-width='1.4' opacity='.7'/>"
+                f"<line x1='258' y1='{y + 4}' x2='246' y2='{y + 15}' "
+                f"stroke='var(--muted)' stroke-width='1.4' opacity='.7'/>"
+                f"<text x='268' y='{y + 13}' class='chip' fill='var(--muted)'>"
+                f"stops at the sweep</text>")
         y += ROW
     cut = 46 + n_elev * ROW - 3
     return f"""<svg viewBox="0 0 430 {y + 16}" class="dia" role="img"
@@ -510,9 +524,11 @@ def _stage_survival() -> str:
  orient="auto"><path d="M0 0 L7 3.5 L0 7 z" fill="var(--blue)" opacity=".7"/></marker></defs>
 <text x="42" y="20" class="cap">mode</text>
 <text x="232" y="20" class="cap" text-anchor="end">10 ns</text>
+<text x="244" y="20" class="cap">sent on?</text>
 <text x="320" y="20" class="cap" text-anchor="end">100 ns</text>
 <text x="336" y="20" class="cap">outcome</text>
 <text x="232" y="33" class="cap2" text-anchor="end">attack-ready</text>
+<text x="244" y="33" class="cap2">{n_elev} of {len(ENTRIES)}</text>
 <text x="320" y="33" class="cap2" text-anchor="end">engaged</text>
 <!-- the sweep runs DOWN the list: it decides how far down the cut falls -->
 <line x1="14" y1="46" x2="14" y2="{cut}" stroke="var(--blue)" stroke-width="1.2"
