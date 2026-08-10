@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import base64
 import glob
+import json
 import logging
 import re
 import sys
@@ -197,6 +198,120 @@ def contacts(movie_pdb: Path, max_frames: int = 40) -> tuple[list, int]:
             for (rn, ri), (c, p, t) in seen.items()]
     rows.sort(key=lambda r: -r[2])
     return rows, n
+
+
+def representative_frame(movie_pdb: Path):
+    """The frame whose ligand sits closest to the ligand's mean position.
+
+    Not frame 1, which is where the pose STARTED, and not the last, which is
+    wherever it happened to stop. A medoid frame is the one a reader is least
+    likely to be misled by, and the interaction lines drawn on it are the ones
+    that hold for most of the run.
+    """
+    import numpy as np
+    models = movie_pdb.read_text().split("ENDMDL")
+    cent, keep = [], []
+    for mdl in models:
+        lig = [l for l in mdl.splitlines()
+               if l.startswith(("ATOM", "HETATM")) and l[17:20].strip() == "MOL"
+               and (l[76:78].strip() or l[12:16].strip()[:1]) != "H"]
+        if not lig:
+            continue
+        xyz = np.array([[float(l[30:38]), float(l[38:46]), float(l[46:54])] for l in lig])
+        cent.append(xyz.mean(axis=0))
+        keep.append(mdl)
+    if not keep:
+        return None, 0
+    c = np.array(cent)
+    return keep[int(np.argmin(((c - c.mean(axis=0)) ** 2).sum(axis=1)))], len(keep)
+
+
+def interaction_3d(movie_pdb: Path, rows: list, elem_id: str,
+                   cys_resi: int = 63, offset: int = 50) -> str:
+    """The same contacts, drawn on the real 3D pose.
+
+    Everything here is measured: the residues sit where they sit, and each dashed
+    line joins the actual pair of atoms -- one ligand, one protein -- that are
+    closest in this frame. The 2D map projects; this does not.
+    """
+    import numpy as np
+    frame, nfr = representative_frame(movie_pdb)
+    if frame is None:
+        return ""
+    keep = [r for r in rows if r[2] >= 0.20 and r[4] is not None][:12]
+    if not keep:
+        return ""
+
+    lig, prot = [], []
+    for l in frame.splitlines():
+        if not l.startswith(("ATOM", "HETATM")):
+            continue
+        el = (l[76:78].strip() or l[12:16].strip()[:1])
+        if el == "H":
+            continue
+        rec = ((float(l[30:38]), float(l[38:46]), float(l[46:54])),
+               l[17:20].strip(), l[22:26].strip(), el)
+        (lig if rec[1] == "MOL" else prot).append(rec)
+    if not lig or not prot:
+        return ""
+
+    # the measured pair per residue: its atom nearest that residue's contact atom
+    links, resis = [], []
+    for rn, ri, frac, pol, ai in keep:
+        if ai >= len(lig):
+            continue
+        la = np.array(lig[ai][0])
+        cand = [(np.linalg.norm(np.array(p[0]) - la), p) for p in prot
+                if p[1] == rn and p[2] == ri]
+        if not cand:
+            continue
+        dist, pa = min(cand, key=lambda t: t[0])
+        try:
+            shown = f"{rn}{int(ri) + offset}"
+        except ValueError:
+            shown = f"{rn}{ri}"
+        is_cys = (rn == "CYS" and str(ri) == str(cys_resi))
+        col = "0xb3261e" if is_cys else ("0x0f7a54" if pol > 0.2 else "0x4a6885")
+        links.append({"a": list(la), "b": list(pa[0]), "c": col,
+                      "t": f"{shown}  {dist:.1f} A", "d": pol > 0.2})
+        resis.append(int(ri))
+
+    pdb = "\n".join(l for l in frame.splitlines()
+                     if l.startswith(("ATOM", "HETATM")))
+    return f"""
+<div class="glwrap"><div class="glbox"><div id="{elem_id}"></div></div>
+<p class="p3cap">Representative frame — the ligand's medoid position over
+{nfr} frames. Dashed green = polar, red = catalytic Cys113, grey-blue =
+hydrophobic; each line joins the actual closest pair of atoms in this frame, with
+the distance. Residues are where they are.</p></div>
+<script type="text/plain" id="{elem_id}-pdb">{pdb}</script>
+<script>
+(function(){{
+  const M = window.$3Dmol || window['3Dmol'];
+  const L = {json.dumps(links)}, RES = {json.dumps(sorted(set(resis)))};
+  window.addEventListener('load', function(){{
+    requestAnimationFrame(function(){{ requestAnimationFrame(function(){{
+      const v = M.createViewer(document.getElementById('{elem_id}'),
+                               {{backgroundColor:'#eef1f6'}});
+      v.addModel(document.getElementById('{elem_id}-pdb').textContent, 'pdb');
+      v.setStyle({{}}, {{cartoon:{{color:'#c3ccd8', opacity:0.55}}}});
+      v.setStyle({{resi: RES}}, {{stick:{{radius:0.14, colorscheme:'greenCarbon'}},
+                                 cartoon:{{color:'#c3ccd8', opacity:0.55}}}});
+      v.setStyle({{resn:'MOL'}}, {{stick:{{radius:0.22, colorscheme:'yellowCarbon'}}}});
+      L.forEach(function(k){{
+        v.addCylinder({{start:{{x:k.a[0],y:k.a[1],z:k.a[2]}},
+                       end:{{x:k.b[0],y:k.b[1],z:k.b[2]}},
+                       radius:0.045, color:k.c, dashed:k.d, fromCap:1, toCap:1}});
+        v.addLabel(k.t, {{position:{{x:(k.a[0]+k.b[0])/2, y:(k.a[1]+k.b[1])/2,
+                                    z:(k.a[2]+k.b[2])/2}},
+                         fontSize:10, fontColor:k.c, backgroundColor:'white',
+                         backgroundOpacity:0.72, borderThickness:0}});
+      }});
+      v.zoomTo({{resn:'MOL'}}); v.zoom(0.55); v.resize();
+    }}); }});
+  }});
+}})();
+</script>"""
 
 
 def interaction_map(mol, rows: list, n_frames: int, cys_resi: int = 63,
@@ -377,7 +492,7 @@ def block(ident: str, er, three: str, cls: dict) -> str:
     # protein and ligand as simulated, PBC-repaired and CA-fitted, one frame.
     # Offered as a download rather than a path, because the recipient has no
     # access to this filesystem.
-    imap, pdb_href, pdb_bytes = "", "", 0
+    imap, i3d, pdb_href, pdb_bytes = "", "", "", 0
     if mpdb.is_file():
         raw = mpdb.read_text()
         first = raw.split("ENDMDL")[0]
@@ -391,6 +506,7 @@ def block(ident: str, er, three: str, cls: dict) -> str:
             rows_c, nfr = contacts(mpdb)
             lm = ligand_mol(mpdb, smiles_of(ident) or "")
             imap = interaction_map(lm, rows_c, nfr)
+            i3d = interaction_3d(mpdb, rows_c, f"i3_{ident}")
         except Exception as exc:                          # noqa: BLE001
             log.warning("%s: interaction map unavailable: %s", ident, exc)
 
@@ -431,8 +547,11 @@ def block(ident: str, er, three: str, cls: dict) -> str:
       {dl}
     </div>
   </div>
+  <details class="panel"><summary>Interactions in the 3D pose
+    <span class="hint">real positions, each line a measured atom pair</span></summary>
+    <div class="pbody">{i3d}</div></details>
   <details class="panel"><summary>2D interaction map
-    <span class="hint">residues contacting the ligand, by fraction of frames</span></summary>
+    <span class="hint">the same contacts, flattened</span></summary>
     <div class="pbody">{imap}</div></details>
   <details class="panel"><summary>MD movie
     <span class="hint">100 ns, surface by charge, ligand in yellow</span></summary>

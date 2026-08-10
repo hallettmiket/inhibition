@@ -35,10 +35,14 @@ Per molecule, in this order:
 5. **A download of the MD structure** — first frame of the fitted trajectory,
    protein and ligand as simulated, as a `data:` URI so it saves with one click.
    The recipient has no access to this filesystem, so a path is useless to them.
-6. **2D interaction map**, in a panel — residues contacting the ligand, sized and
-   coloured by the fraction of frames they are in contact.
-7. **MD movie**, in a panel.
-8. **RMSD plots**, in a panel.
+6. **Interactions in the 3D pose**, in a panel — the real geometry, each dashed
+   line joining the actual closest pair of atoms with its distance. Drawn on the
+   ligand's **medoid** frame: not frame 1, which is where the pose started, and
+   not the last, which is wherever it stopped.
+7. **2D interaction map**, in a panel — the same contacts flattened, for a figure
+   that prints.
+8. **MD movie**, in a panel.
+9. **RMSD plots**, in a panel.
 
 ## 2. What stays out
 
