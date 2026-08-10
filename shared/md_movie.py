@@ -153,6 +153,11 @@ def build_movie_pdb(rep: Path, dest: Path, total_ps: float = 100_000.0,
 PIN1_OFFSET = 50
 CYS113_RESI = 113 - PIN1_OFFSET
 
+#: Radius of the surface shell around Cys113, Angstrom. The mesh is rebuilt every
+#: frame, so it has to be small enough to be built ~10x a second; this covers the
+#: pocket the movie exists to show and leaves the rest to the cartoon.
+SURF_SHELL_A = 14
+
 
 def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
                 three_js: str, nac_lo: float = 2.8, nac_hi: float = 4.2,
@@ -198,41 +203,43 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
     const c = document.getElementById('surf');
     return !c || c.checked;
   }}
-  // Rebuild the mesh at whatever frame is showing now. removeSurface first --
-  // addSurface stacks meshes, and stacking 126 of them is how the viewer dies.
+  // THE SURFACE IS REBUILT ON EVERY FRAME (@tt8804), so it moves with the
+  // backbone under it and the ligand can never clip through a wall belonging to
+  // a different frame.
+  //
+  // What makes that affordable is the SHELL: the mesh covers only residues
+  // within {SURF_SHELL_A} A of Cys113, not the whole protein. A full-protein VDW
+  // mesh is the expensive call in this viewer and rebuilding it 126 times is not
+  // watchable; the pocket shell is a small fraction of the atoms and is the only
+  // part anyone looks at. Everything outside it is carried by the cartoon, which
+  // tracks every frame for free.
+  //
+  // removeSurface FIRST -- addSurface stacks meshes, and stacking one per frame
+  // is how the viewer dies.
   function buildSurface() {{
     if (!viewer) return;
     if (surf) {{ try {{ viewer.removeSurface(surf.surfid); }} catch (e) {{}} surf = null; }}
+    if (!surfaceOn()) {{ surfFrame = frame; return; }}
     surf = viewer.addSurface(M.SurfaceType.VDW,
-      {{opacity: surfaceOn() ? 0.98 : 0, colorfunc: chargeColour}},
-      {{not: {{or: [{{resn: 'MOL'}}, {{resi: {CYS113_RESI}}}]}}}});
+      {{opacity: 0.97, colorfunc: chargeColour}},
+      {{within: {{distance: {SURF_SHELL_A}, sel: {{resi: {CYS113_RESI}}}}},
+        not: {{or: [{{resn: 'MOL'}}, {{resi: {CYS113_RESI}}}]}}}});
     surfFrame = frame;
-    markStale();
-    viewer.render();
   }}
-  // A SHELL FROM ANOTHER FRAME IS WORSE THAN NO SHELL. Labelling it was not
-  // enough: the ligand moves and the surface does not, so it drives straight
-  // through a wall built for a different frame, and the picture is simply wrong.
-  // While the mesh does not match the frame on screen it is HIDDEN, and the
-  // cartoon and sticks -- which do track every frame -- carry the view. It comes
-  // back the moment the two agree again.
+  // Nothing to warn about any more: the mesh is rebuilt with the frame, so it
+  // can never describe a different one. The readout just says what it covers.
   function markStale() {{
     const el = document.getElementById('sstat');
-    const stale = surfFrame !== frame;
-    if (surf && viewer) {{
-      try {{
-        viewer.setSurfaceMaterialStyle(surf.surfid,
-          {{opacity: (surfaceOn() && !stale) ? 0.98 : 0}});
-      }} catch (e) {{}}
-    }}
     if (!el) return;
-    el.textContent = (surfaceOn() && stale) ? 'surface hidden — rebuilds on release' : '';
-    el.className = (surfaceOn() && stale) ? 'mono stale' : 'mono';
+    el.textContent = surfaceOn() ? 'surface: {SURF_SHELL_A} A around Cys113' : '';
+    el.className = 'mono';
   }}
 
   function draw() {{
-    markStale();
     viewer.setFrame(frame).then(function() {{
+      // WITH the frame, not after it: the coordinates have just changed, so the
+      // mesh is rebuilt here before the render below.
+      buildSurface(); markStale();
       viewer.setStyle({{}}, {{cartoon: {{color: '#2f3742', opacity: 1.0}}}});
       viewer.setStyle({{resn: 'MOL'}},
                       {{stick: {{radius: 0.26, colorscheme: 'yellowCarbon'}}}});
@@ -318,25 +325,20 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
     frame = +e.target.value; draw();
   }});
   document.getElementById('frame').addEventListener('change', function(e) {{
-    frame = +e.target.value; draw(); if (!timer) buildSurface();
+    frame = +e.target.value; draw();
   }});
   document.getElementById('play').addEventListener('click', function(e) {{
-    if (timer) {{ clearInterval(timer); timer = null; e.target.innerHTML = '&#9654; play';
-                  buildSurface(); return; }}
+    if (timer) {{ clearInterval(timer); timer = null; e.target.innerHTML = '&#9654; play'; return; }}
     e.target.innerHTML = '&#10073;&#10073; pause';
     timer = setInterval(function() {{
       frame = (frame + 1) % DSG.length;
       document.getElementById('frame').value = frame;
       draw();
-    }}, 70);
+    }}, 110);
   }});
   document.getElementById('surf').addEventListener('change', function(e) {{
-    if (!viewer || !surf) return;
-    // Turning it back on should show THIS frame, not the one it was built at.
-    if (e.target.checked && surfFrame !== frame) {{ buildSurface(); return; }}
-    viewer.setSurfaceMaterialStyle(surf.surfid, {{opacity: e.target.checked ? 0.98 : 0}});
-    markStale();
-    viewer.render();
+    if (!viewer) return;
+    buildSurface(); markStale(); viewer.render();
   }});
   document.getElementById('labs').addEventListener('change', draw);
   // 3Dmol absolutely-positions its canvas, so the container must already have a
