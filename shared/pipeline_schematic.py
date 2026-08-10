@@ -362,19 +362,26 @@ def _blend(a: str, b: str, w: float = 0.55) -> str:
 #: Kept as a single list rather than two, because step 4's ranking and step 5's
 #: survival are the SAME rows read twice -- and two hand-maintained lists that
 #: must agree is exactly the shape this project keeps finding broken.
-#: MOST MODES NEVER REACH 100 ns. The real run elevated 58 of 226 swept, so a
-#: picture where nearly everything gets a 100 ns run misdescribes the funnel --
-#: 4 of these 9 are elevated, and the rest stop at the sweep.
+#: THREE GATES, NOT ONE, and a row can stop at any of them:
+#:   sweep None           -- ranked too low to be swept at all. No 10 ns figure,
+#:                           because nothing was run. A sweep number on a row that
+#:                           was never swept is a value with no measurement under
+#:                           it, which is the defect this repo is named for.
+#:   sweep set, eng None  -- swept, and the sweep did not earn it a 100 ns run.
+#:   both set             -- ran 100 ns, then either held or left.
+#:
+#: Proportions follow the real funnel rather than flattering it: 226 swept, 58
+#: elevated, so most rows here stop before 100 ns.
 ENTRIES = [
-    ("mol B", "1", 0.71, 0.52, 0.94, True),
-    ("mol A", "1", 0.62, 0.41, 0.88, True),
-    ("mol B", "2", 0.44, 0.37, 0.42, False),
-    ("mol C", "1", 0.33, 0.33, 0.79, True),
-    ("mol A", "2", 0.15, 0.21, None, None),
-    ("mol B", "3", 0.12, 0.11, None, None),
-    ("mol C", "2", 0.09, 0.08, None, None),
-    ("mol A", "3", 0.07, 0.05, None, None),
-    ("mol C", "3", 0.04, 0.02, None, None),
+    ("mol B", "1", 0.71, 0.52, 0.94, True),    # held, engaged nearly throughout
+    ("mol A", "1", 0.62, 0.41, 0.88, True),    # held
+    ("mol B", "2", 0.44, 0.37, 0.31, False),   # ran, left, low engagement
+    ("mol C", "1", 0.33, 0.33, None, None),    # swept, not elevated
+    ("mol A", "2", 0.15, 0.21, None, None),    # swept, not elevated
+    ("mol B", "3", 0.12, 0.11, None, None),    # swept, not elevated
+    ("mol C", "2", 0.09, 0.08, None, None),    # swept, not elevated
+    ("mol A", "3", 0.07, None, None, None),    # never swept
+    ("mol C", "3", 0.04, None, None, None),    # never swept
 ]
 
 
@@ -471,64 +478,65 @@ def _stage_survival() -> str:
     mode 1 and still ranks below it, which is the whole reason the sweep is not
     the ranking.
     """
-    ordered = sorted(ENTRIES,
-                     key=lambda r: (r[4] is not None, r[4] or 0, r[3]),
-                     reverse=True)
+    # Kept in the step-4 ranking order, numbered the same way, so the list the
+    # reader just watched being built is the list they now watch being filtered.
+    ordered = sorted(ENTRIES, key=lambda r: -r[2])
     rows = []
-    y, rank, ROW = 46, 0, 24
-    n_elev = sum(1 for r in ENTRIES if r[4] is not None)
-    for mol, mode, _geom, sweep, eng, held in ordered:
+    y, ROW = 46, 24
+    n_swept = sum(1 for r in ENTRIES if r[3] is not None)
+
+    def x_mark(yy, note):
+        return (f"<line x1='246' y1='{yy + 4}' x2='258' y2='{yy + 15}' "
+                f"stroke='var(--muted)' stroke-width='1.4' opacity='.65'/>"
+                f"<line x1='258' y1='{yy + 4}' x2='246' y2='{yy + 15}' "
+                f"stroke='var(--muted)' stroke-width='1.4' opacity='.65'/>"
+                f"<text x='268' y='{yy + 13}' class='chip' fill='var(--muted)'>"
+                f"{note}</text>")
+
+    for rank, (mol, mode, _geom, sweep, eng, held) in enumerate(ordered, start=1):
         name, col = f"{mol} &middot; mode {mode}", _ecol(mol, mode)
-        elevated = eng is not None
-        if elevated:
-            rank += 1
-            rn = str(rank)
-        else:
-            rn = "&mdash;"
         rows.append(
             f"<text x='34' y='{y + 13}' class='rnum' fill='var(--muted)' "
-            f"text-anchor='end'>{rn}</text>"
+            f"text-anchor='end'>{rank}</text>"
             f"<rect x='42' y='{y}' width='118' height='18' rx='3' fill='{col}' "
             f"fill-opacity='.16'/>"
-            f"<text x='50' y='{y + 13}' class='chip' fill='{col}'>{name}</text>"
-            f"<text x='232' y='{y + 13}' class='stat' fill='var(--muted)' "
-            f"text-anchor='end'>{sweep:.2f}</text>")
-        # THE GATE, DRAWN PER ROW. Whether a mode was sent to 100 ns at all is a
-        # decision, and most modes lose it -- so it gets its own mark between the
-        # two columns instead of being implied by an empty cell.
-        if elevated:
+            f"<text x='50' y='{y + 13}' class='chip' fill='{col}'>{name}</text>")
+        if sweep is None:
+            # Never swept: no 10 ns figure, because no 10 ns run happened.
             rows.append(
-                f"<line x1='244' y1='{y + 9}' x2='268' y2='{y + 9}' "
-                f"stroke='{col}' stroke-width='1.3' marker-end='url(#ah2)'/>"
-                f"<text x='320' y='{y + 13}' class='stat' fill='var(--navy)' "
-                f"text-anchor='end'>{eng * 100:.0f}%</text>")
-            tag, tc = ("held", "var(--good)") if held else ("left", "var(--bad)")
-            rows.append(
-                f"<rect x='336' y='{y}' width='56' height='18' rx='3' "
-                f"fill='{tc}' fill-opacity='.16'/>"
-                f"<text x='364' y='{y + 13}' class='chip' fill='{tc}' "
-                f"text-anchor='middle'>{tag}</text>")
+                f"<text x='232' y='{y + 13}' class='stat' fill='var(--rule)' "
+                f"text-anchor='end'>&mdash;</text>"
+                + x_mark(y, "ranked too low to sweep"))
         else:
             rows.append(
-                f"<line x1='246' y1='{y + 4}' x2='258' y2='{y + 15}' "
-                f"stroke='var(--muted)' stroke-width='1.4' opacity='.7'/>"
-                f"<line x1='258' y1='{y + 4}' x2='246' y2='{y + 15}' "
-                f"stroke='var(--muted)' stroke-width='1.4' opacity='.7'/>"
-                f"<text x='268' y='{y + 13}' class='chip' fill='var(--muted)'>"
-                f"stops at the sweep</text>")
+                f"<text x='232' y='{y + 13}' class='stat' fill='var(--muted)' "
+                f"text-anchor='end'>{sweep:.2f}</text>")
+            if eng is None:
+                rows.append(x_mark(y, "swept, not elevated"))
+            else:
+                tag, tc = ("held", "var(--good)") if held else ("left", "var(--bad)")
+                rows.append(
+                    f"<line x1='244' y1='{y + 9}' x2='268' y2='{y + 9}' "
+                    f"stroke='{col}' stroke-width='1.3' marker-end='url(#ah2)'/>"
+                    f"<text x='320' y='{y + 13}' class='stat' fill='var(--navy)' "
+                    f"text-anchor='end'>{eng * 100:.0f}%</text>"
+                    f"<rect x='336' y='{y}' width='56' height='18' rx='3' "
+                    f"fill='{tc}' fill-opacity='.16'/>"
+                    f"<text x='364' y='{y + 13}' class='chip' fill='{tc}' "
+                    f"text-anchor='middle'>{tag}</text>")
         y += ROW
-    cut = 46 + n_elev * ROW - 3
+    # The dashed line is the SWEEP's reach: everything below it was never swept.
+    cut = 46 + n_swept * ROW - 3
     return f"""<svg viewBox="0 0 430 {y + 16}" class="dia" role="img"
  aria-label="Ranked modes with the sweep and 100 ns numbers behind the rank">
 <defs><marker id="ah2" markerWidth="7" markerHeight="7" refX="6" refY="3.5"
  orient="auto"><path d="M0 0 L7 3.5 L0 7 z" fill="var(--blue)" opacity=".7"/></marker></defs>
-<text x="42" y="20" class="cap">mode</text>
+<text x="42" y="20" class="cap">the ranked list from step 4</text>
 <text x="232" y="20" class="cap" text-anchor="end">10 ns</text>
-<text x="244" y="20" class="cap">sent on?</text>
+<text x="244" y="20" class="cap">100 ns?</text>
 <text x="320" y="20" class="cap" text-anchor="end">100 ns</text>
 <text x="336" y="20" class="cap">outcome</text>
 <text x="232" y="33" class="cap2" text-anchor="end">attack-ready</text>
-<text x="244" y="33" class="cap2">{n_elev} of {len(ENTRIES)}</text>
 <text x="320" y="33" class="cap2" text-anchor="end">engaged</text>
 <!-- the sweep runs DOWN the list: it decides how far down the cut falls -->
 <line x1="14" y1="46" x2="14" y2="{cut}" stroke="var(--blue)" stroke-width="1.2"
