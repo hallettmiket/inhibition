@@ -67,27 +67,132 @@ def _read_sdf(path):
             n = int(lines[ci][:3])
         except ValueError:
             continue
-        xs = ys = zs = 0.0
-        k = 0
-        for ln in lines[ci + 1:ci + 1 + n]:
+        try:
+            nb = int(lines[ci][3:6])
+        except ValueError:
+            nb = 0
+        # Keep every atom's coordinate AND its original index, because the bond
+        # block numbers atoms including hydrogens. Filtering H first and then
+        # reading the bond block would silently shift every bond by however many
+        # hydrogens preceded it -- bonds drawn between the wrong atoms, which
+        # still looks like a molecule.
+        allpos, heavy = [], {}
+        for ai, ln in enumerate(lines[ci + 1:ci + 1 + n], start=1):
             try:
                 x, y, z = float(ln[0:10]), float(ln[10:20]), float(ln[20:30])
             except ValueError:
+                allpos.append(None)
                 continue
-            sym = ln[31:34].strip()
-            if sym == "H":
-                continue
-            xs += x; ys += y; zs += z; k += 1
-        if not k:
+            allpos.append((x, y, z))
+            if ln[31:34].strip() != "H":
+                heavy[ai] = (x, y, z)
+        if not heavy:
             continue
+        bonds = []
+        for ln in lines[ci + 1 + n:ci + 1 + n + nb]:
+            try:
+                a, b = int(ln[0:3]), int(ln[3:6])
+            except ValueError:
+                continue
+            if a in heavy and b in heavy:
+                bonds.append((a, b))
+        xs = sum(p[0] for p in heavy.values())
+        ys = sum(p[1] for p in heavy.values())
+        zs = sum(p[2] for p in heavy.values())
+        k = len(heavy)
         mode = "0"
         for i, ln in enumerate(lines):
             if ln.startswith(">") and "<mode>" in ln and i + 1 < len(lines):
                 mode = lines[i + 1].strip()
                 break
         out.append({"mode": mode, "c": [xs / k, ys / k, zs / k],
+                    "atoms": heavy, "bonds": bonds,
                     "blk": "\n".join(lines) + "\n$$$$\n"})
     return out
+
+
+def _basis(poses):
+    """One shared 2D viewing frame for every panel.
+
+    Computed over ALL poses at once so the panels are comparable: a per-panel
+    projection would give each mode its own axes and the reader would be
+    comparing pictures taken from different angles.
+    """
+    import numpy as np
+    pts = np.array([p for q in poses for p in q["atoms"].values()], dtype=float)
+    ctr = pts.mean(axis=0)
+    u, s, vt = np.linalg.svd(pts - ctr, full_matrices=False)
+    return ctr, vt[0], vt[1]
+
+
+def _medoid(poses, mode=None):
+    """The pose sitting closest to the middle of its group.
+
+    A representative chosen by geometry rather than by file order — `poses[0]`
+    would be whichever the docking happened to write first, which is the
+    take-it-by-position habit this project keeps paying for.
+    """
+    import numpy as np
+    sel = [p for p in poses if mode is None or p["mode"] == mode]
+    if not sel:
+        return None
+    c = np.array([p["c"] for p in sel], dtype=float)
+    return sel[int(np.argmin(((c - c.mean(axis=0)) ** 2).sum(axis=1)))]
+
+
+def _pocket_bg(w, h) -> str:
+    """A schematic pocket behind the poses, so they read as sitting IN something.
+
+    Drawn, not measured — it is an outline at the extent of the cloud, not the
+    molecular surface, and the caption says so.
+    """
+    return (f"<ellipse cx='{w/2:.0f}' cy='{h/2:.0f}' rx='{w*0.44:.0f}' "
+            f"ry='{h*0.42:.0f}' fill='var(--cav-out)' stroke='var(--rule)' "
+            f"stroke-width='.8'/>"
+            f"<ellipse cx='{w/2:.0f}' cy='{h/2:.0f}' rx='{w*0.33:.0f}' "
+            f"ry='{h*0.31:.0f}' fill='none' stroke='var(--rule)' "
+            f"stroke-width='.6' stroke-dasharray='2 4' opacity='.7'/>")
+
+
+def _pose_svg(poses, basis, only=None, colour="#0072ce",
+              w=250, h=190, stroke=0.55, op=0.5, pocket=False, one=None) -> str:
+    """Every pose drawn flat: one <path> per pose, not one line per bond.
+
+    491 poses at ~32 bonds each is ~15,000 elements as lines and 491 as paths,
+    for the same picture and a fraction of the document.
+    """
+    import numpy as np
+    ctr, e1, e2 = basis
+    sel = [one] if one is not None else \
+        [p for p in poses if only is None or p["mode"] == only]
+    if not sel:
+        return ""
+    allxy = np.array([[(np.array(v) - ctr) @ e1, (np.array(v) - ctr) @ e2]
+                      for q in poses for v in q["atoms"].values()])
+    lo, hi = allxy.min(axis=0), allxy.max(axis=0)
+    pad = 8.0
+    sx = (w - 2 * pad) / max(1e-6, hi[0] - lo[0])
+    sy = (h - 2 * pad) / max(1e-6, hi[1] - lo[1])
+    s = min(sx, sy)
+
+    def xy(v):
+        d = np.array(v) - ctr
+        return (pad + (d @ e1 - lo[0]) * s, h - pad - (d @ e2 - lo[1]) * s)
+
+    paths = []
+    for p in sel:
+        d = []
+        for a, b in p["bonds"]:
+            x1, y1 = xy(p["atoms"][a]); x2, y2 = xy(p["atoms"][b])
+            d.append(f"M{x1:.1f} {y1:.1f}L{x2:.1f} {y2:.1f}")
+        if d:
+            paths.append(f"<path d='{''.join(d)}'/>")
+    return (f"<svg viewBox='0 0 {w} {h}' class='psvg' role='img' "
+            f"aria-label='{len(sel)} docked poses drawn flat'>"
+            + (_pocket_bg(w, h) if pocket else "")
+            + f"<g fill='none' stroke='{colour}' stroke-width='{stroke}' "
+            f"stroke-opacity='{op}' stroke-linecap='round'>"
+            + "".join(paths) + "</g></svg>")
 
 #: The three illustrative modes: share of the 500, centre, spread, and the story
 #: each one tells. Sizes are deliberately uneven — a dominant mode plus two
@@ -186,6 +291,80 @@ def _stage2(pts) -> str:
 </svg>"""
 
 
+#: Illustrative pooled ranking. Three molecules, six modes between them, and the
+#: point is that the three modes of molecule 2 land at ranks 1, 3 and 6 — a mode
+#: competes on its own geometry, not on the company it keeps.
+POOL = [
+    {"mol": "molecule 1", "col": "#0072ce", "modes": [("m0", 0.62), ("m1", 0.15)]},
+    {"mol": "molecule 2", "col": "#7b5ea7",
+     "modes": [("m0", 0.71), ("m1", 0.44), ("m2", 0.08)]},
+    {"mol": "molecule 3", "col": "#c2703d", "modes": [("m0", 0.33)]},
+]
+
+
+def _stage_pool() -> str:
+    """Every mode from every molecule, ranked in one list."""
+    rows = []
+    for g in POOL:
+        for k, v in g["modes"]:
+            rows.append((g["mol"], g["col"], k, v))
+    ranked = sorted(rows, key=lambda r: -r[3])
+
+    left, y = [], 26
+    for g in POOL:
+        h = 18 + 20 * len(g["modes"])
+        left.append(f"<rect x='10' y='{y}' width='150' height='{h}' rx='5' "
+                    f"fill='none' stroke='{g['col']}' stroke-opacity='.5'/>"
+                    f"<text x='18' y='{y + 14}' class='mtag' fill='{g['col']}'>"
+                    f"{g['mol']}</text>")
+        yy = y + 22
+        for k, v in g["modes"]:
+            left.append(
+                f"<rect x='20' y='{yy}' width='130' height='15' rx='3' "
+                f"fill='{g['col']}' fill-opacity='.14'/>"
+                f"<text x='27' y='{yy + 11}' class='chip' fill='{g['col']}'>{k}</text>"
+                f"<text x='143' y='{yy + 11}' class='chip' fill='{g['col']}' "
+                f"text-anchor='end'>{v:.2f}</text>")
+            yy += 20
+        y += h + 10
+
+    right, yy = [], 26
+    for i, (mol, col, k, v) in enumerate(ranked, start=1):
+        right.append(
+            f"<rect x='250' y='{yy}' width='168' height='17' rx='3' "
+            f"fill='{col}' fill-opacity='.14'/>"
+            f"<text x='243' y='{yy + 12}' class='chip' fill='var(--muted)' "
+            f"text-anchor='end'>{i}</text>"
+            f"<text x='257' y='{yy + 12}' class='chip' fill='{col}'>{mol} &middot; {k}</text>"
+            f"<text x='411' y='{yy + 12}' class='chip' fill='{col}' "
+            f"text-anchor='end'>{v:.2f}</text>")
+        yy += 21
+
+    return f"""<svg viewBox="0 0 430 300" class="dia" role="img"
+ aria-label="Modes from three molecules pooled into a single ranking">
+<text x="10" y="18" class="cap">each molecule's modes</text>
+<text x="250" y="18" class="cap">one ranked list</text>
+{''.join(left)}
+<path d="M175 150 L238 150" stroke="var(--blue)" stroke-width="1.4" fill="none"/>
+<path d="M232 145 L240 150 L232 155 Z" fill="var(--blue)"/>
+{''.join(right)}
+</svg>"""
+
+
+def _paired(dots_svg: str, real_svg: str, cap_l: str, cap_r: str) -> str:
+    """Schematic beside the real thing, so the abstraction is legible.
+
+    A dot cloud alone asks the reader to take on faith that a dot stands for a
+    molecule. Putting the actual poses next to it, in the same colour and at the
+    same scale, makes the abstraction checkable instead.
+    """
+    if not real_svg:
+        return dots_svg
+    return (f"<div class='pair'>"
+            f"<figure>{dots_svg}<figcaption>{cap_l}</figcaption></figure>"
+            f"<figure>{real_svg}<figcaption>{cap_r}</figcaption></figure></div>")
+
+
 def _mode_panel(pts, m) -> str:
     """One mode: its own share of the cloud, plus the representative it elects."""
     ox, oy, sc = -108.0, -76.0, 0.86
@@ -211,6 +390,89 @@ def _mode_panel(pts, m) -> str:
 <text x='8' y='16' class='mtag' fill='{m['col']}'>mode {m['key']}</text>
 <text x='8' y='142' class='cap'>{m['n']} poses</text>
 </svg>"""
+
+
+#: Sulfopin, the covalent parent every T_3/T_4 molecule is grown from.
+SULFOPIN = "CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)CCl"
+D4_GLOB = "/data/lab_vm/append_only/inhibition/04_t4_combinatorial/D4_*.parquet"
+
+
+def _svg(smiles: str, w: int, h: int) -> str:
+    """A 2D depiction as a data URI, or "" if it will not parse."""
+    import base64
+    import re as _re
+    try:
+        from rdkit import Chem, RDLogger
+        from rdkit.Chem import AllChem, Draw
+    except ImportError:
+        return ""
+    RDLogger.DisableLog("rdApp.*")
+    m = Chem.MolFromSmiles(smiles)
+    if m is None:
+        return ""
+    AllChem.Compute2DCoords(m)
+    d = Draw.rdMolDraw2D.MolDraw2DSVG(w, h)
+    d.drawOptions().bondLineWidth = 1
+    Draw.rdMolDraw2D.PrepareAndDrawMolecule(d, m)
+    d.FinishDrawing()
+    s = _re.sub(r"<\?xml.*?\?>", "", d.GetDrawingText(), flags=_re.S)
+    s = _re.sub(r"<!--.*?-->", "", s, flags=_re.S)
+    return "data:image/svg+xml;base64," + base64.b64encode(s.encode()).decode()
+
+
+def _chemspace(n: int = 8) -> str:
+    """Sulfopin in the middle, real generated derivatives around it.
+
+    The satellites are actual rows from the newest T_4 frame, not drawn examples,
+    so what this shows is the chemistry the pipeline really produced rather than
+    an artist's impression of it.
+    """
+    import glob as _g
+    core = _svg(SULFOPIN, 190, 130)
+    if not core:
+        return ""
+    sats = []
+    fs = sorted(_g.glob(D4_GLOB),
+                key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+    if fs:
+        try:
+            import pandas as _pd
+            d = _pd.read_parquet(fs[-1]).drop_duplicates("candidate_id")
+            d = d[d.canonical_smiles.notna()]
+            for _, r in d.head(n).iterrows():
+                u = _svg(str(r.canonical_smiles), 132, 92)
+                if u:
+                    sats.append((str(r.candidate_id), u))
+        except Exception:                                  # noqa: BLE001
+            pass
+    if not sats:
+        return ""
+    cells = "".join(f"<div class='sat'><img alt='' src=\"{u}\">"
+                    f"<span>{cid}</span></div>" for cid, u in sats)
+    return f"""
+<div class="cs">
+  <div class="csmid"><img alt="Sulfopin" src="{core}"><span>Sulfopin &mdash; the parent</span></div>
+  <div class="csgrid">{cells}</div>
+</div>"""
+
+
+def _n_candidates() -> str:
+    """How many molecules the T_3/T_4 arms actually generated."""
+    import glob as _g
+    n = 0
+    for pat in (D4_GLOB,
+                "/data/lab_vm/append_only/inhibition/03_t3_reinvent/D3_*.parquet"):
+        fs = sorted(_g.glob(pat),
+                    key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+        if not fs:
+            continue
+        try:
+            import pandas as _pd
+            n += _pd.read_parquet(fs[-1], columns=["candidate_id"]) \
+                    .candidate_id.nunique()
+        except Exception:                                  # noqa: BLE001
+            pass
+    return f"{n:,}" if n else "thousands of"
 
 
 def _real_poses() -> tuple[str, dict]:
@@ -327,15 +589,51 @@ def _real_poses() -> tuple[str, dict]:
 def build() -> str:
     rng = random.Random(SEED)
     pts = _points(rng)
-    real_block, real = _real_poses()
+    chem = _chemspace()
+    n_cand = _n_candidates()
+
+    # Real poses, drawn flat. Static by design (@tt8804): the interactive viewer
+    # cost 2.5 MB and a hairball; what the page needs is a picture you can put
+    # beside the schematic and compare.
+    real, real_all, real_by, real_one = {}, "", {}, ""
+    try:
+        _p = _read_sdf(Path(ALLPOSES) / f"{EXAMPLE}.sdf")
+    except Exception:                                      # noqa: BLE001
+        _p = []
+    if _p:
+        _order = [m for m, _ in sorted(
+            collections.Counter(q["mode"] for q in _p).items(),
+            key=lambda kv: -kv[1])]
+        _cols = {m: c for m, c in zip(_order, ["#0072ce", "#7b5ea7", "#c2703d",
+                                               "#0f7a54", "#b3261e"])}
+        _b = _basis(_p)
+        real_all = "".join(
+            _pose_svg(_p, _b, only=m, colour=_cols[m], w=250, h=190,
+                      stroke=0.5, op=0.42).replace("<svg", "<svg style='position:absolute;inset:0'", 1)
+            for m in _order)
+        _bg = (f"<svg viewBox='0 0 250 190' class='psvg' "
+               f"style='position:absolute;inset:0'>{_pocket_bg(250, 190)}</svg>")
+        real_all = (f"<div class='ovl' style='padding-bottom:{190 / 250 * 100:.1f}%'>"
+                    f"{_bg}{real_all}</div>")
+        _md = _medoid(_p, _order[0])
+        real_one = _pose_svg(_p, _b, colour=_cols[_order[0]], w=250, h=190,
+                             stroke=1.5, op=1.0, pocket=True, one=_md)
+        for m in _order:
+            real_by[m] = _pose_svg(_p, _b, only=m, colour=_cols[m],
+                                   w=200, h=150, stroke=0.6, op=0.55)
+        real = {"n": len(_p), "modes": len(_order),
+                "counts": dict(collections.Counter(q["mode"] for q in _p)),
+                "order": _order}
     # Built outside the f-string: a dict literal inside an f-string expression is
     # read as a set of a set, which is unhashable and fails at build time.
     _c = real.get("counts") or {}
     counts_txt = ("" if not _c else
                   " &mdash; " + " / ".join(f"mode {k}: {v}" for k, v in _c.items()))
 
+    _rk = real.get("order") or []
     panels = "".join(
-        f"<div class='mcard'>{_mode_panel(pts, m)}"
+        f"<div class='mcard'>"
+        f"{_paired(_mode_panel(pts, m), real_by.get(_rk[i], '') if i < len(_rk) else '', 'schematic', 'real poses')}"
         f"<table class='crit'>"
         f"<tr><th>d(C&rarr;S&gamma;)</th><td class='n'>{m['d']:.1f} &Aring;</td>"
         f"<td class='v {'ok' if 2.8 <= m['d'] <= 4.2 else 'no'}'>"
@@ -347,7 +645,7 @@ def build() -> str:
         f"<td class='v {'ok' if m['ar'] > 0.2 else 'no'}'>"
         f"{'carries' if m['ar'] > 0.2 else 'marginal'}</td></tr>"
         f"</table><p class='mnote'>{m['note']}</p></div>"
-        for m in MODES)
+        for i, m in enumerate(MODES))
 
     ranked = sorted(MODES, key=lambda m: -m["ar"])
     rank_rows = "".join(
@@ -412,6 +710,7 @@ p{{margin:.45em 0}}
 .lbl{{font:600 10px var(--mono);fill:var(--muted)}}
 .cap{{font:10.5px var(--sans);fill:var(--muted)}}
 .mtag{{font:700 11px var(--mono);letter-spacing:.06em}}
+.chip{{font:10.5px var(--mono)}}
 .modes{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}
 @media(max-width:760px){{.modes{{grid-template-columns:1fr}}}}
 .mcard{{border:1px solid var(--rule);border-radius:6px;padding:9px;
@@ -453,6 +752,41 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
 .p3wait{{position:absolute;inset:0;display:flex;align-items:center;
  justify-content:center;font:12px var(--mono);color:var(--muted);
  background:#eef1f6;z-index:2}}
+/* Chemical space: the parent in the middle, real generated derivatives around it. */
+.cs{{display:grid;grid-template-columns:206px 1fr;gap:14px;align-items:center;
+ border:1px solid var(--rule);border-radius:6px;padding:12px;background:var(--card)}}
+@media(max-width:640px){{.cs{{grid-template-columns:1fr}}}}
+.csmid{{text-align:center;border-right:1px solid var(--rule);padding-right:12px}}
+@media(max-width:640px){{.csmid{{border-right:0;border-bottom:1px solid var(--rule);
+ padding:0 0 10px}}}}
+.csmid img{{width:100%;height:auto;background:#fff;border-radius:3px}}
+.csmid span{{display:block;font:600 10.5px var(--mono);color:var(--navy);margin-top:4px}}
+.csgrid{{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}}
+@media(max-width:900px){{.csgrid{{grid-template-columns:repeat(2,1fr)}}}}
+.sat{{text-align:center}}
+.sat img{{width:100%;height:auto;background:#fff;border:1px solid var(--rule);
+ border-radius:3px}}
+.sat span{{display:block;font:9.5px var(--mono);color:var(--muted);margin-top:2px;
+ overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.arrow{{text-align:center;padding:2px 0 0}}
+.arrow span{{font:600 11px var(--mono);color:var(--blue);letter-spacing:.04em}}
+/* Schematic beside the real poses, same width and same colours, so a dot in one
+   can be matched to a shape in the other without being told to. */
+.pair{{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}}
+/* dots -> cloud -> one pose, left to right. */
+.trio{{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;align-items:start}}
+.trio figure{{margin:0;min-width:0}}
+.trio figcaption{{font-size:9.5px;color:var(--muted);text-align:center;
+ margin-top:3px;line-height:1.3}}
+@media(max-width:760px){{.trio{{grid-template-columns:1fr}}}}
+.pair figure{{margin:0;min-width:0}}
+.pair figcaption{{font-size:10px;color:var(--muted);text-align:center;
+ margin-top:3px;line-height:1.3}}
+.psvg{{width:100%;height:auto;background:var(--card);border:1px solid var(--rule);
+ border-radius:6px;display:block}}
+.ovl{{position:relative;width:100%;height:0;background:var(--card);
+ border:1px solid var(--rule);border-radius:6px;overflow:hidden}}
+.ovl .psvg{{border:0;border-radius:0;background:none;height:100%}}
 .foot{{margin-top:30px;padding-top:14px;border-top:1px solid var(--rule);
  font-size:12.5px;color:var(--muted)}}
 </style></head><body>
@@ -467,6 +801,18 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
 1.2&nbsp;nm residence cut.</div>
 
 <div class="step">
+ <div>{chem}</div>
+ <div><p class="n0">Step 0 &middot; chemical space</p>
+  <h2>Grow molecules around a known binder</h2>
+  <p>We start from <strong>Sulfopin</strong>, which is known to react with Cys113,
+  and generate variations around it &mdash; swapping the group it carries while
+  keeping the warhead that does the chemistry.</p>
+  <p>That gives thousands of candidates. Everything below is how we narrow them.</p></div>
+</div>
+
+<div class="arrow"><span>{n_cand} candidates &darr;</span></div>
+
+<div class="step">
  <div>{_stage1(pts)}</div>
  <div><p class="n0">Step 1 &middot; dock</p>
   <h2>500 poses, one molecule</h2>
@@ -478,7 +824,11 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
 </div>
 
 <div class="step">
- <div>{_stage2(pts)}</div>
+ <div><div class="trio">
+   <figure>{_stage2(pts)}<figcaption>schematic &mdash; one dot per pose</figcaption></figure>
+   <figure>{real_all}<figcaption>real &mdash; all {real.get('n', 0)} poses, by mode</figcaption></figure>
+   <figure>{real_one}<figcaption>one pose &mdash; the medoid of the biggest mode</figcaption></figure>
+  </div></div>
  <div><p class="n0">Step 2 &middot; split</p>
   <h2>The cloud is several binding modes</h2>
   <p>We group the poses into <strong>modes</strong> by where the reactive atom sits
@@ -486,13 +836,6 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
   <p>Not by whole-molecule shape — two poses can differ in a far-off ring and still
   be the same mode. Not by docking energy, which we know carries no signal here.</p>
   <p>Each mode then becomes its own row in the GUI.</p></div>
-</div>
-
-<div class="step wide">
- <div class="full"><p class="n0">The same two steps, on real output</p>
-  <h2>{real.get('n', 0)} real poses of one screened molecule</h2>
-  <p>Drag to rotate. Switch modes to see the cloud split{counts_txt}.</p>
-  {real_block}</div>
 </div>
 
 <div class="step">
@@ -526,6 +869,19 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
 </div>
 
 <div class="step">
+ <div>{_stage_pool()}</div>
+ <div><p class="n0">Step 4b &middot; pool</p>
+  <h2>Modes compete, not molecules</h2>
+  <p>Every mode from every molecule goes into <strong>one ranked list</strong>. A
+  mode is judged on its own geometry, so the modes of one molecule are not kept
+  together.</p>
+  <p>Molecule 2 here lands at ranks <strong>1, 3 and 6</strong>. Its best mode
+  tells you nothing about its worst.</p>
+  <p>That is why each row carries <em>which</em> mode was picked: promoted on its
+  dominant mode is a different claim from promoted on a minority one.</p></div>
+</div>
+
+<div class="step">
  <div><svg viewBox="0 0 700 150" class="tl" role="img"
   aria-label="A 10 ns sweep with attack-ready episodes marked">
   <text x="40" y="18" class="cap">10 ns sweep &middot; attack-ready episodes</text>
@@ -550,6 +906,19 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
   the molecule stay on target at all? That is what the GUI ranks on.</p>
   <p>A molecule can be attack-ready and still leave. It can also sit there for
   100 ns facing the wrong way.</p></div>
+</div>
+
+<div class="arrow"><span>survivors &darr;</span></div>
+
+<div class="step wide">
+ <div class="full"><p class="n0">Elevation</p>
+  <h2>What comes out</h2>
+  <p>What survives 100 ns is ranked by target engagement and handed to a chemist.
+  The controls &mdash; Sulfopin and Liu-2022-ZL-Pin13, both known to react &mdash;
+  go through the identical pipeline, so the ranking can be read against chemistry
+  whose answer we already know.</p>
+  <p class="mnote">Synthesis is roughly one compound a week, so the deliverable is
+  a short list, not a score.</p></div>
 </div>
 
 <p class="foot">Parameters and measured results shown here come from the 2.2.0

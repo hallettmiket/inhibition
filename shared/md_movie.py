@@ -210,13 +210,24 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
     markStale();
     viewer.render();
   }}
-  // Say so while the shell does not describe the frame on screen.
+  // A SHELL FROM ANOTHER FRAME IS WORSE THAN NO SHELL. Labelling it was not
+  // enough: the ligand moves and the surface does not, so it drives straight
+  // through a wall built for a different frame, and the picture is simply wrong.
+  // While the mesh does not match the frame on screen it is HIDDEN, and the
+  // cartoon and sticks -- which do track every frame -- carry the view. It comes
+  // back the moment the two agree again.
   function markStale() {{
     const el = document.getElementById('sstat');
+    const stale = surfFrame !== frame;
+    if (surf && viewer) {{
+      try {{
+        viewer.setSurfaceMaterialStyle(surf.surfid,
+          {{opacity: (surfaceOn() && !stale) ? 0.98 : 0}});
+      }} catch (e) {{}}
+    }}
     if (!el) return;
-    const stale = surfaceOn() && surfFrame !== frame;
-    el.textContent = stale ? 'surface: frame ' + surfFrame : '';
-    el.className = stale ? 'mono stale' : 'mono';
+    el.textContent = (surfaceOn() && stale) ? 'surface hidden — rebuilds on release' : '';
+    el.className = (surfaceOn() && stale) ? 'mono stale' : 'mono';
   }}
 
   function draw() {{

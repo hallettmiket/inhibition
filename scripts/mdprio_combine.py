@@ -244,6 +244,10 @@ def main() -> None:
     ctl = _controls()
     thumbs = _thumbs(list(args.candidates) + [c["ident"] for c in ctl])
     _ver, _code = _version()
+    # The version belongs IN the title (@tt8804): a page saved, screenshotted or
+    # pasted into a thread carries its release with it rather than losing it to a
+    # chip someone cropped out.
+    _full_title = f"{args.title} {_ver}".strip()
     swi = sw.set_index("parent_ident") if not sw.empty else pd.DataFrame()
     mdi = md.set_index("ident") if not md.empty else pd.DataFrame()
 
@@ -522,7 +526,7 @@ chemistries is the cheapest way to turn two points into a distribution.</p>
 
     page = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(args.title)}</title><style>
+<title>{html.escape(_full_title)}</title><style>
 /* The per-molecule reports are light-only and use this exact palette
    (shared/report_theme.py). The shell inherits it so the frame and its
    contents read as one document rather than two. */
@@ -632,8 +636,8 @@ iframe{{flex:1;width:100%;border:0;background:var(--paper)}}
 :root[data-theme="dark"] .thumb{{background:#fff}}
 </style></head><body>
 <div id="topbar">
- <h1 title="Pick a molecule on the left; its pose, movie and plots load on the right.">{html.escape(args.title)}</h1>
- <span class="ver" title="release this page was built from">{html.escape(_ver)}{(' &middot; ' + html.escape(_code)) if _code else ''}</span>
+ <h1 title="Pick a molecule on the left; its pose, movie and plots load on the right.">{html.escape(_full_title)}</h1>
+ {f'<span class="ver" title="release codename">{html.escape(_code)}</span>' if _code else ''}
  <span class="msep"></span>
  <button id="m-all" class="mbtn on" onclick="setMode('all')">all classes</button>
  <button id="m-cls" class="mbtn" onclick="setMode('cls')">by warhead class</button>
