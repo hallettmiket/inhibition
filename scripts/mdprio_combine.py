@@ -43,6 +43,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import outputs as sout                     # noqa: E402
+from shared import pipeline_schematic as schematic     # noqa: E402
 
 log = logging.getLogger("mdprio-combine")
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
@@ -83,6 +84,20 @@ def _thumbs(idents) -> dict:
             continue
         fr = pd.read_parquet(fs[-1]).drop_duplicates("candidate_id")
         smi.update(dict(zip(fr.candidate_id, fr.canonical_smiles)))
+    # Controls are not rows in D3/D4 -- they come from crystal structures. Their
+    # SMILES is in the pose sidecar written beside the pose. Without this they
+    # rendered as a text badge while every candidate showed a structure, which
+    # made the control look like a different sort of object rather than the same
+    # sort of object with a different provenance.
+    import json as _json
+    for p in sorted(glob.glob(str(B / "pose_sidecars/*.json"))):
+        try:
+            v = _json.loads(Path(p).read_text()).get("canonical_smiles")
+        except Exception:                                  # noqa: BLE001
+            continue
+        if isinstance(v, str):
+            smi.setdefault(Path(p).stem, v)
+
     out = {}
     for i in idents:
         v = smi.get(i)
@@ -202,12 +217,15 @@ def _controls() -> list[dict]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--candidates", nargs="+", required=True)
-    ap.add_argument("--title", default="100 ns candidates")
+    ap.add_argument("--title", default="T4 screen")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     sw, md, cls_of = _sweep(), _md(), _classes()
-    thumbs = _thumbs(args.candidates)
+    # Controls are resolved BEFORE the depictions so their structures are drawn
+    # in the same pass as the candidates', from the same function.
+    ctl = _controls()
+    thumbs = _thumbs(list(args.candidates) + [c["ident"] for c in ctl])
     swi = sw.set_index("parent_ident") if not sw.empty else pd.DataFrame()
     mdi = md.set_index("ident") if not md.empty else pd.DataFrame()
 
@@ -269,16 +287,39 @@ def main() -> None:
                 return fmt.format(src[key])
             except Exception:                          # noqa: BLE001
                 return str(src[key])
-        ar = 0.0
+        # THE 10 ns SWEEP IS TRIAGE, NOT THE RESULT. It exists to choose which
+        # molecules earn a 100 ns run. Ranking on it ranks the SELECTION FILTER
+        # and not the endpoint -- the same shape as ranking on docking energy,
+        # one stage further down. The endpoint is 100 ns target engagement, so
+        # that is the sort key, and the sweep is carried beside it as the triage
+        # reading it is.
+        ar = None
         if s_ is not None and "frac_attack_ready" in s_ and not pd.isna(s_["frac_attack_ready"]):
             ar = float(s_["frac_attack_ready"])
+        eng = None
+        if (m_ is not None and "explicit_frac_frames_engaged" in m_
+                and not pd.isna(m_["explicit_frac_frames_engaged"])):
+            eng = float(m_["explicit_frac_frames_engaged"])
         rmax = None
         if m_ is not None and "explicit_ligand_rmsd_nm_max" in m_ and not pd.isna(m_["explicit_ligand_rmsd_nm_max"]):
             rmax = float(m_["explicit_ligand_rmsd_nm_max"])
         held = rmax is not None and rmax < 1.2
+        has_md = eng is not None
         wcls = str(cls_of.get(t, "unclassified"))
+        # A molecule with no 100 ns run cannot be placed on the ranked axis at
+        # all. It goes in its own band rather than being given a 0, which would
+        # read as "measured and engaged nothing".
+        headline = (f"{eng*100:.0f}% engaged" if has_md
+                    else (f"sweep {ar*10:.2f} ns" if ar is not None else "—"))
+        meta = (f"{g(m_,'explicit_ligand_rmsd_nm_max')} nm max &middot; "
+                f"sweep {ar*10:.2f} ns" if has_md and ar is not None
+                else (f"{g(s_,'n_visits','{:.0f}')} visits &middot; awaiting 100 ns"
+                      if not has_md else g(m_, 'explicit_ligand_rmsd_nm_max') + " nm max"))
         rows_html.append(
-            f"<button class='row' data-cls=\"{html.escape(wcls)}\" data-eng='{ar:.6f}' "
+            f"<button class='row' data-cls=\"{html.escape(wcls)}\" "
+            f"data-eng='{(eng if has_md else -1):.6f}' "
+            f"data-sweep='{(ar if ar is not None else -1):.6f}' "
+            f"data-md='{1 if has_md else 0}' "
             f"data-held='{1 if held else 0}' "
             f"id='b_{html.escape(t)}' onclick=\"show('{html.escape(t)}')\">"
             f"<span class='rk'>{k+1}</span>"
@@ -286,13 +327,16 @@ def main() -> None:
                if t in thumbs else "<span class='thumb'></span>")
             + f"<span class='body'>"
             f"<span class='l1'><span class='mid-id'>{html.escape(t)}</span>"
-            f"<span class='eng'>{ar*10:.2f} ns</span></span>"
+            f"<span class='eng{'' if has_md else ' pend'}' "
+            f"title='{'fraction of the 100 ns run engaging the target' if has_md else 'no 100 ns run yet — 10 ns triage sweep only'}'>"
+            f"{headline}</span></span>"
             f"<span class='l2'><span class='wc'>{html.escape(wcls)}</span>"
-            f"<span class='meta'>{g(s_,'n_visits','{:.0f}')} visits &middot; "
-            f"{g(m_,'explicit_ligand_rmsd_nm_max')} nm</span>"
-            f"<span class='tag {'t-held' if held else 't-left'}'>"
-            f"{'held' if held else 'left'}</span></span>"
-            f"<span class='bar'><i style='width:{max(1.5,ar*100):.1f}%'></i></span>"
+            f"<span class='meta'>{meta}</span>"
+            + (f"<span class='tag {'t-held' if held else 't-left'}'>"
+               f"{'held' if held else 'left'}</span>"
+               if has_md else "<span class='tag t-pend'>swept</span>")
+            + "</span>"
+            f"<span class='bar'><i style='width:{max(1.5,(eng if has_md else 0)*100):.1f}%'></i></span>"
             f"</span></button>")
 
     # CONTROLS (#47/#48). The catalogue previously showed candidates only, so a
@@ -301,7 +345,6 @@ def main() -> None:
     # axis; controls that could not be swept appear in the controls tab carrying
     # the reason. Neither is given a held/left tag: no control has 100 ns, so
     # "left" would be a fact we do not have.
-    ctl = _controls()
     ranked_ctl = [c for c in ctl if c["frac_attack_ready"] is not None]
     ctl_rows_html = []
     for c in ctl:
@@ -312,17 +355,25 @@ def main() -> None:
         why = ("bonded product ~{:.2f} A from SG — outside the 2.8-4.2 A "
                "near-attack window by construction".format(c["dist_a"])
                if c["kind"] == "bonded" and c["dist_a"] else c["sweep_status"])
+        # A control with its own report opens in the SAME viewer as a candidate --
+        # pose, movie, RMSD plots, identical layout. Only the ones with no report
+        # fall back to the controls page.
+        has_rep = (REPORTS / f"{cid}.html").is_file()
         ctl_rows_html.append(
             f"<button class='row ctl' data-ctl='1' data-kind='{c['kind']}' "
-            f"data-cls='control' data-eng='{(ar if has else -1):.6f}' "
+            f"data-cls='control' data-eng='-1' "
+            f"data-sweep='{(ar if has else -1):.6f}' data-md='0' "
             f"data-noval='{0 if has else 1}' data-held='0' "
-            f"data-src='controls.html' "
-            f"id='b_{html.escape(cid)}' onclick=\"show('{html.escape(cid)}')\">"
+            + ("" if has_rep else "data-src='controls.html' ")
+            + f"id='b_{html.escape(cid)}' onclick=\"show('{html.escape(cid)}')\">"
             f"<span class='rk'>&middot;</span>"
-            f"<span class='thumb tctl'>{'RX' if c['kind']=='reactant' else 'XT'}</span>"
-            f"<span class='body'>"
+            + (f"<img class='thumb' alt='' src=\"{thumbs[cid]}\">"
+               if cid in thumbs
+               else f"<span class='thumb tctl'>{'RX' if c['kind']=='reactant' else 'XT'}</span>")
+            + f"<span class='body'>"
             f"<span class='l1'><span class='mid-id'>{html.escape(nm)}</span>"
-            f"<span class='eng'>{(f'{ar*10:.2f} ns' if has else '—')}</span></span>"
+            f"<span class='eng pend' title='control — 10 ns only, no 100 ns run'>"
+            f"{(f'sweep {ar*10:.2f} ns' if has else '—')}</span></span>"
             f"<span class='l2'><span class='wc'>control &middot; {html.escape(c['pdb'])}</span>"
             f"<span class='meta'>"
             + (f"{c['n_visits']:.0f} visits" if c["n_visits"] is not None else html.escape(why))
@@ -449,6 +500,7 @@ with their bonded distance and no sweep. Extending the builder to the remaining
 chemistries is the cheapest way to turn two points into a distribution.</p>
 </body></html>"""
     (REPORTS / "controls.html").write_text(ctl_page)
+    (REPORTS / "pipeline.html").write_text(schematic.build())
 
     page = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -486,8 +538,19 @@ h1{{margin:0;font-size:.86rem;font-weight:600;letter-spacing:-.01em;color:var(--
 .o-held{{background:#e6f4ee;color:var(--good)}}
 .o-left{{background:#fbeae8;color:var(--bad)}}
 .o-ctl{{background:#fdf0dc;color:#8a5a00}}
+.o-pend{{background:var(--raise);color:var(--muted)}}
 :root[data-theme="dark"] .o-ctl{{background:#3a2c14;color:#e0b070}}
 .mbtn:disabled{{opacity:.4;cursor:default}}
+a.mbtn.lnk{{text-decoration:none;color:var(--blue);border-color:var(--blue);
+ flex:none;line-height:1.5}}
+a.mbtn.lnk:hover{{background:var(--blue-pale)}}
+.legend{{font-size:11px;color:var(--muted);padding:8px 14px;background:var(--raise);
+ border-bottom:1px solid var(--rule);line-height:1.45}}
+.legend b{{color:var(--navy)}}
+/* A molecule that has only been triaged shows its sweep reading in muted type, so
+   the ranked number and the not-yet-ranked number cannot be read as one column. */
+.eng.pend{{color:var(--muted);font-weight:500}}
+.t-pend{{background:var(--raise);color:var(--muted)}}
 main{{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}}
 @media(max-width:880px){{main{{grid-template-columns:1fr;grid-template-rows:250px 1fr}}}}
 #rail{{overflow-y:auto;border-right:1px solid var(--rule);background:var(--rail)}}
@@ -558,10 +621,15 @@ iframe{{flex:1;width:100%;border:0;background:var(--paper)}}
  <span class="msep"></span>
  <button id="c-tab" class="mbtn" onclick="setTab()" title="the crystallographic controls, scored by the same criterion">controls</button>
  <span class="mhint" id="mhint"></span>
+ <a class="mbtn lnk" href="pipeline.html" target="_blank" rel="noopener"
+    title="how a molecule becomes a row: docking, modes, criteria, ranking, sweep, MD">how this works &#8599;</a>
  <button id="theme" class="mbtn tbtn" onclick="toggleTheme()" title="light / dark">dark</button>
 </div>
 <main>
- <div id="rail">{''.join(rows_html)}{''.join(ctl_rows_html)}</div>
+ <div id="rail"><div class="legend">ranked by <b>100&nbsp;ns target engagement</b>
+  &mdash; the fraction of the run engaging Cys113. The 10&nbsp;ns sweep is triage
+  for choosing what earns a 100&nbsp;ns run, not the result.</div>
+ {''.join(rows_html)}{''.join(ctl_rows_html)}</div>
  <div id="viewer">
   <div id="vhead"><span id="vname">&mdash;</span>
    <a id="vopen" href="#" target="_blank" rel="noopener">open full report &#8599;</a></div>
@@ -576,6 +644,7 @@ function renumber(l){{l.forEach(function(b,i){{b.querySelector('.rk').textConten
 function hdr(cls,txt){{var h=document.createElement('div');h.className=cls;h.textContent=txt;
   RAIL.appendChild(h);}}
 function byEng(a,b){{return parseFloat(b.dataset.eng)-parseFloat(a.dataset.eng)}}
+function bySweep(a,b){{return parseFloat(b.dataset.sweep)-parseFloat(a.dataset.sweep)}}
 function layoutGroup(rows){{
   if(MODE==='all'){{rows.forEach(function(b){{RAIL.appendChild(b)}});renumber(rows);return;}}
   var g={{}};
@@ -597,28 +666,37 @@ function relayout(){{
   ROWS.forEach(function(b){{b.style.display='none'}});
   pool.forEach(function(b){{b.style.display=''}});
   var all=pool.slice().sort(byEng);
-  if(TAB){{ all.forEach(function(b){{RAIL.appendChild(b)}}); renumber(all); }}
-  else if(!SPLIT){{ layoutGroup(all); }}
+  // ONLY A 100 ns RUN CAN BE RANKED. The sweep is the triage that decides what
+  // earns one, so a swept-but-not-yet-run molecule has no position on this axis
+  // -- it gets its own band, ordered by its sweep reading, rather than a zero
+  // that would read as "measured, engaged nothing".
+  var done=all.filter(function(b){{return b.dataset.md==='1'}});
+  var pend=all.filter(function(b){{return b.dataset.md!=='1'}})
+              .sort(bySweep);
+  if(TAB){{ all.sort(bySweep).forEach(function(b){{RAIL.appendChild(b)}}); renumber(all); }}
   else{{
-    // Controls carry no held/left verdict -- none has a 100 ns trajectory -- so
-    // they get their own band rather than being swept into "dissociated", which
-    // would assert a measurement we never made.
-    var ctls=all.filter(function(b){{return b.dataset.ctl==='1'}});
-    var cand=all.filter(function(b){{return b.dataset.ctl!=='1'}});
-    var held=cand.filter(function(b){{return b.dataset.held==='1'}});
-    var gone=cand.filter(function(b){{return b.dataset.held!=='1'}});
-    if(held.length){{hdr('ohd o-held','held the pocket  ('+held.length+')'); layoutGroup(held);}}
-    if(gone.length){{hdr('ohd o-left','dissociated  ('+gone.length+')'); layoutGroup(gone);}}
-    if(ctls.length){{hdr('ohd o-ctl','controls \u2014 no 100 ns run  ('+ctls.length+')');
-      ctls.forEach(function(b){{RAIL.appendChild(b)}}); renumber(ctls);}}
+    if(!SPLIT){{ layoutGroup(done); }}
+    else{{
+      var held=done.filter(function(b){{return b.dataset.held==='1'}});
+      var gone=done.filter(function(b){{return b.dataset.held!=='1'}});
+      if(held.length){{hdr('ohd o-held','held the pocket  ('+held.length+')'); layoutGroup(held);}}
+      if(gone.length){{hdr('ohd o-left','dissociated  ('+gone.length+')'); layoutGroup(gone);}}
+    }}
+    // Controls sit here too: none has a 100 ns trajectory, so none can be ranked
+    // and none carries a held/left verdict.
+    if(pend.length){{
+      var nctl=pend.filter(function(b){{return b.dataset.ctl==='1'}}).length;
+      hdr('ohd o-pend','10 ns sweep only \u2014 not yet ranked  ('+pend.length
+          +(nctl?', incl. '+nctl+' controls':'')+')');
+      pend.forEach(function(b){{RAIL.appendChild(b)}}); renumber(pend);
+    }}
   }}
   var bits;
   if(TAB){{
     bits=[pool.length+' controls','crystallographic poses through the same criterion'];
   }} else {{
-    var nc=pool.filter(function(b){{return b.dataset.ctl==='1'}}).length;
-    bits=[(pool.length-nc)+' molecules'];
-    if(nc) bits.push(nc+' controls ranked alongside');
+    bits=[done.length+' ranked on 100 ns engagement'];
+    if(pend.length) bits.push(pend.length+' swept only');
     bits.push(MODE==='all'?'one ranking across all classes'
       :'ranked within warhead class \u2014 cross-class comparison is biased (#47)');
     if(SPLIT) bits.push('held and dissociated shown separately');

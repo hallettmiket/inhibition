@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import logging
 import sys
 from pathlib import Path
@@ -83,7 +84,43 @@ def _er():
     return m
 
 
-def series(rep: Path, er) -> dict:
+def prod_ns(rep: Path, default: float = 100.0) -> float:
+    """The production length of THIS run, from the mdp that produced it.
+
+    `elevation_report.to_ns` rescales an xvg time column onto a known total,
+    because different gmx tools write the column in different units and nothing
+    in the file says which. That is sound -- but its total defaults to 100.0, and
+    a default is a pin. Pointed at the 10 ns sweep trajectories the controls were
+    run under, it stretched a 10 ns axis onto a 100 ns one and every time
+    coordinate in the report came out 10x too large, while the residence fraction
+    and the RMSD statistics -- which are per-frame and carry no time -- stayed
+    correct. Populated, plausible, and wrong: the shape in
+    `how_this_project_breaks.md`.
+
+    `nsteps * dt` is the run's own statement of its length, so ask the run.
+    """
+    for name in ("prod.mdp", "mdout.mdp"):
+        p = rep / name
+        if not p.is_file():
+            continue
+        vals = {}
+        for line in p.read_text().splitlines():
+            if "=" not in line or line.lstrip().startswith(";"):
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip().lower().replace("-", "_")
+            if k in ("nsteps", "dt"):
+                try:
+                    vals[k] = float(v.split(";")[0].strip())
+                except ValueError:
+                    pass
+        if "nsteps" in vals and "dt" in vals and vals["nsteps"] > 0:
+            return vals["nsteps"] * vals["dt"] / 1000.0
+    log.warning("no prod.mdp under %s — assuming %.0f ns", rep, default)
+    return default
+
+
+def series(rep: Path, er, total_ns: float = 100.0) -> dict:
     """Every gmx series this run produced, each on its own true time axis."""
     out = {}
     for key, fname in (("rmsd", "rmsd.xvg"), ("mindist", "mindist.xvg"),
@@ -94,7 +131,7 @@ def series(rep: Path, er) -> dict:
         a = er.read_xvg(p)
         if a.size == 0:
             continue
-        out[key] = (er.to_ns(a[:, 0]), a[:, 1])
+        out[key] = (er.to_ns(a[:, 0], total_ns), a[:, 1])
     return out
 
 
@@ -124,7 +161,8 @@ def residence(s: dict) -> dict:
             "left_at_ns": left, "dissociated": left is not None}
 
 
-def nac_series(cand: str, rep: Path, movie: Path) -> dict | None:
+def nac_series(cand: str, rep: Path, movie: Path,
+               total_ns: float = 100.0) -> dict | None:
     """Warhead->Cys113 SG distance AND the near-attack angle, per frame.
 
     NEITHER IS PRODUCED BY THE RUN. `md_residence` writes rmsd/mindist/numcont
@@ -194,7 +232,10 @@ def nac_series(cand: str, rep: Path, movie: Path) -> dict | None:
             return None
         r = nac.measure(mech, lig[idx], s_)
         dist.append(r.distance); ang.append(r.angle)
-    t = np.linspace(0.0, 100.0, len(dist))
+    # The movie frames span the production run, whatever its length -- see
+    # prod_ns(). Hardcoding 100.0 put the controls' attack-geometry trace on a
+    # 100 ns axis for a 10 ns trajectory.
+    t = np.linspace(0.0, total_ns, len(dist))
     return {"t": t, "dist": np.array(dist), "angle": np.array(ang),
             "kind": nac.MECHANISMS.get(mech, ""), "mechanism": mech}
 
@@ -271,15 +312,24 @@ def main() -> None:
     ap.add_argument("--out", default=None)
     ap.add_argument("--no-movie", action="store_true",
                     help="skip the 3D trajectory movie (it costs a trjconv pass)")
+    # The 100 ns runs and the 10 ns sweep live under DIFFERENT roots (the split
+    # md_residence_3ikd.py --work-root introduced). The controls were swept, not
+    # elevated, so their trajectories sit under the sweep root -- without this
+    # they could have no report at all, and the viewer had nothing to show.
+    ap.add_argument("--work-root", default=None,
+                    help=f"trajectory root holding <ident>/md/<rep> (default {MD})")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     er = _er()
-    rep = MD / args.candidate / "md" / args.rep
+    root = Path(args.work_root) if args.work_root else MD
+    rep = root / args.candidate / "md" / args.rep
     if not rep.is_dir():
         raise SystemExit(f"no trajectory directory {rep}")
 
-    s = series(rep, er)
+    total_ns = prod_ns(rep)
+    log.info("%s: production length %.1f ns (from the mdp)", args.candidate, total_ns)
+    s = series(rep, er, total_ns)
     res = residence(s)
     if res["status"] != "ok":
         raise SystemExit(f"{args.candidate}: {res['status']}")
@@ -303,6 +353,18 @@ def main() -> None:
             if not cls:
                 cls = _fr.loc[args.candidate].get("warhead_class")
             break
+    if not isinstance(smiles, str):
+        # Controls are not rows in D3/D4 -- they come from crystal structures -- so
+        # the generated-candidate frames cannot describe them. The pose sidecar is
+        # written next to the pose itself by whatever produced it, which makes it
+        # the right place to ask: it is keyed on the pose, not on a generator.
+        _sc = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
+                   f"pose_sidecars/{args.candidate}.json")
+        if _sc.is_file():
+            try:
+                smiles = json.loads(_sc.read_text()).get("canonical_smiles")
+            except Exception as exc:                       # noqa: BLE001
+                log.warning("sidecar unreadable for %s: %s", args.candidate, exc)
     if not cls:
         for _t, _sc in (("T4", "conditional_eb"), ("T3", "enrichment_conditional")):
             _fs = sorted(_g.glob("/data/lab_vm/append_only/inhibition/00_outputs/"
@@ -371,7 +433,8 @@ def main() -> None:
                f"Left at {res['left_at_ns']:.0f} ns")
 
     # The NAC series needs the fitted movie frames, so it comes after the movie.
-    nacs = nac_series(args.candidate, rep, mpdb) if not args.no_movie else None
+    nacs = (nac_series(args.candidate, rep, mpdb, total_ns)
+            if not args.no_movie else None)
     if nacs is None:
         log.warning("no warhead->SG distance/angle series for %s", args.candidate)
     img = figure(args.candidate, s, res, er, nacs)
