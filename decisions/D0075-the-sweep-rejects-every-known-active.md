@@ -5,7 +5,7 @@ date: 2026-08-10
 status: proposed
 approach: shared
 decided_by: '@tt8804'
-origin: positive control requested before the Monday review
+origin: user
 supersedes: []
 superseded_by: null
 affects:
