@@ -446,6 +446,35 @@ def _stage_pool() -> str:
 </svg>"""
 
 
+def _split_counts() -> tuple[str, str]:
+    """How many candidates pose splitting turned into how many modes.
+
+    From the screen's own output, and only the two columns that answer it — the
+    full frame is ~2.9M rows across 131 files and the page needs none of the rest.
+    """
+    import glob as _g
+    fs = sorted(_g.glob("/data/lab_vm/append_only/inhibition/00_outputs/"
+                        "blacksmith/nac_v3/*.csv"))
+    if not fs:
+        return "", ""
+    # PER FILE, not one try around the lot. Half this directory is aggregate
+    # output carrying no `mode` column at all, and wrapping the whole concat meant
+    # one unusable file returned "no data" for all 131 -- a blank label with the
+    # answer sitting in the other 64.
+    import pandas as _pd
+    parts = []
+    for f in fs:
+        try:
+            parts.append(_pd.read_csv(f, usecols=["parent_ident", "mode"]))
+        except Exception:                                  # noqa: BLE001
+            continue                                       # aggregate file
+    if not parts:
+        return "", ""
+    d = _pd.concat(parts, ignore_index=True).dropna(subset=["parent_ident", "mode"])
+    return (f"{d.parent_ident.nunique():,}",
+            f"{len(d.drop_duplicates(['parent_ident', 'mode'])):,}")
+
+
 def _run_counts() -> dict:
     """How far the real run actually got — swept, elevated, held.
 
@@ -681,7 +710,7 @@ def _chemspace(n: int = 8) -> str:
     # RADIAL, WITH ARROWS OUT OF THE MIDDLE (@tt8804). A grid put the parent in a
     # cell like any other and the growth relationship disappeared -- the reader
     # could not tell which molecule everything else came from.
-    W, H, CX, CY = 440, 330, 220, 165
+    W, H, CX, CY = 440, 352, 220, 165
     RX, RY = 152, 118
     sw, sh = 76, 54
     parts = []
@@ -855,6 +884,7 @@ def build(title: str = "DWI Derivative Screen", built: str = "") -> str:
     chem = _chemspace()
     n_cand = _n_candidates()
     rc = _run_counts()
+    n_split, n_modes = _split_counts()
 
     # Real poses, drawn flat. Static by design (@tt8804): the interactive viewer
     # cost 2.5 MB and a hairball; what the page needs is a picture you can put
@@ -873,37 +903,37 @@ def build(title: str = "DWI Derivative Screen", built: str = "") -> str:
                                                "#0f7a54", "#b3261e"])}
         _b = _basis(_p)
         real_all = "".join(
-            _pose_svg(_p, _b, only=m, colour=_cols[m], w=250, h=190,
+            _pose_svg(_p, _b, only=m, colour=_cols[m], w=430, h=300,
                       stroke=0.5, op=0.42).replace("<svg", "<svg style='position:absolute;inset:0'", 1)
             for m in _order)
         # One background layer carrying the pocket AND the Cys113 anchor, under
         # the per-mode clouds -- so the combined panel has the same context as
         # every single-mode panel instead of floating free.
-        _bg = _pose_svg(_p, _b, w=250, h=190, pocket=True, only_bg=True) \
+        _bg = _pose_svg(_p, _b, w=430, h=300, pocket=True, only_bg=True) \
             .replace("<svg", "<svg style='position:absolute;inset:0'", 1)
-        real_all = (f"<div class='ovl' style='padding-bottom:{190 / 250 * 100:.1f}%'>"
+        real_all = (f"<div class='ovl' style='padding-bottom:{300 / 430 * 100:.1f}%'>"
                     f"{_bg}{real_all}</div>")
         # Step 1's picture: every pose, one colour, in the pocket -- the mess as
         # it actually is, before anything has been grouped.
-        real_mess = _pose_svg(_p, _b, colour="#4a6885", w=250, h=190,
+        real_mess = _pose_svg(_p, _b, colour="#4a6885", w=430, h=300,
                               stroke=0.45, op=0.30, pocket=True)
         # ALL THREE MEDOIDS, EACH IN ITS OWN MODE COLOUR. One medoid in one colour
         # said "the cloud reduces to this pose"; the actual claim is that it
         # reduces to one pose PER MODE, and the three sit in different places.
         _meds = "".join(
-            _pose_svg(_p, _b, colour=_cols[m], w=250, h=190, stroke=1.7, op=1.0,
+            _pose_svg(_p, _b, colour=_cols[m], w=430, h=300, stroke=1.7, op=1.0,
                       one=_medoid(_p, m))
             .replace("<svg", "<svg style='position:absolute;inset:0'", 1)
             for m in _order)
-        real_one = (f"<div class='ovl' style='padding-bottom:{190 / 250 * 100:.1f}%'>"
+        real_one = (f"<div class='ovl' style='padding-bottom:{300 / 430 * 100:.1f}%'>"
                     f"{_bg}{_meds}</div>")
         # Every mode: its cloud in the pocket, with its own medoid picked out on
         # top, and a second panel showing that medoid alone.
         for m in _order:
             _mm = _medoid(_p, m)
-            real_by[m] = _pose_svg(_p, _b, only=m, colour=_cols[m], w=210, h=160,
+            real_by[m] = _pose_svg(_p, _b, only=m, colour=_cols[m], w=200, h=150,
                                    stroke=0.55, op=0.35, pocket=True, highlight=_mm)
-            real_med[m] = _pose_svg(_p, _b, colour=_cols[m], w=210, h=160,
+            real_med[m] = _pose_svg(_p, _b, colour=_cols[m], w=200, h=150,
                                     stroke=1.6, op=1.0, pocket=True, one=_mm)
         real = {"n": len(_p), "modes": len(_order),
                 "counts": dict(collections.Counter(q["mode"] for q in _p)),
@@ -961,7 +991,7 @@ def build(title: str = "DWI Derivative Screen", built: str = "") -> str:
     v, path = 0.30, []
     for i in range(121):
         v = max(0.16, min(1.05, v + rng3.gauss(0, 0.055)))
-        path.append(f"{40 + i * 5.33:.1f},{126 - v * 62:.1f}")
+        path.append(f"{40 + i * 5.33:.1f},{176 - v * 62:.1f}")
     trace = " ".join(path)
 
     return f"""<!doctype html><html><head><meta charset="utf-8">
@@ -1139,6 +1169,8 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
   <p>Each mode then becomes its own row in the GUI.</p></div>
 </div>
 
+<div class="arrow"><span>{n_split} candidates &rarr; {n_modes} binding modes &darr;</span></div>
+
 <div class="step wide">
  <div class="full"><p class="n0">Step 3 &middot; criteria</p>
   <h2>Can this mode actually react?</h2>
@@ -1176,20 +1208,24 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
 
 <div class="step">
  <div>{_stage_survival()}
- <svg viewBox="0 0 700 150" class="tl" role="img"
-  aria-label="A 10 ns sweep with attack-ready episodes marked">
+ <svg viewBox="0 0 700 196" class="tl" role="img"
+  aria-label="A 10 ns sweep with attack-ready episodes, then the 100 ns RMSD trace">
   <text x="40" y="18" class="cap">10 ns sweep &middot; attack-ready episodes</text>
   <rect x="40" y="26" width="630" height="26" rx="2" fill="var(--cav-out)"/>
   {sweep}
   <line x1="40" y1="60" x2="670" y2="60" stroke="var(--rule)"/>
   <text x="40" y="74" class="cap">0</text><text x="640" y="74" class="cap">10 ns</text>
-  <text x="40" y="104" class="cap">100 ns MD &middot; ligand RMSD</text>
+  <!-- The RMSD caption used to sit at y=104, straight through the trace it
+       labels. The band now starts below it -- baseline 176 -- so nothing drawn
+       reaches the caption line. -->
+  <text x="40" y="100" class="cap">100 ns MD &middot; ligand RMSD</text>
   <polyline points="{trace}" fill="none" stroke="var(--blue)" stroke-width="1.5"/>
-  <line x1="40" y1="{126 - 1.2 * 62:.1f}" x2="670" y2="{126 - 1.2 * 62:.1f}"
+  <line x1="40" y1="{176 - 1.2 * 62:.1f}" x2="670" y2="{176 - 1.2 * 62:.1f}"
         stroke="var(--bad)" stroke-width="1" stroke-dasharray="4 3"/>
-  <text x="676" y="{130 - 1.2 * 62:.1f}" class="cap" text-anchor="end"
-        style="fill:var(--bad)">1.2 nm</text>
-  <line x1="40" y1="132" x2="670" y2="132" stroke="var(--rule)"/>
+  <text x="670" y="{176 - 1.2 * 62 - 4:.1f}" class="cap" text-anchor="end"
+        style="fill:var(--bad)">1.2 nm &mdash; above this it has left</text>
+  <line x1="40" y1="178" x2="670" y2="178" stroke="var(--rule)"/>
+  <text x="40" y="192" class="cap">0</text><text x="634" y="192" class="cap">100 ns</text>
  </svg></div>
  <div><p class="n0">Step 5 &middot; sweep, then MD</p>
   <h2>Does it hold up once things move?</h2>
