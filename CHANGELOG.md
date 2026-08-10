@@ -19,7 +19,19 @@ Every entry below states whether prior numbers survive it.
 ## 2.2.0 “Chalcopyrite” — in progress
 
 Pose splitting and tooling upgrades. Outline: `docs/outline_2.2.0.md`.
+Framework as built: `docs/framework_2.2.0.md`.
 Retrospective on the release it follows: `docs/retrospective_2.1.0.md`.
+Retrospective on this one: `docs/retrospective_2.2.0.md`, written 2026-08-09 and
+judged against the outline's four pre-registered failure criteria — one failed
+outright (another silent stage), one is untested (mode-count reproducibility).
+
+**Deliberately not stamped released.** Two things are open and neither is the
+retrospective's to decide: the receptor split (D0059 is still `proposed`, while
+`config/receptor.yaml` and `noncovalent_dock_run.py` still default to 6VAJ), and
+the next version number, which is the open question in
+[#46](https://github.com/hallettmiket/inhibition/issues/46) — `2.3.0` or `3.0.0`
+turns on whether "the ranking predicts nothing" invalidates measurements or only
+their interpretation, the distinction this file opens with.
 
 ### The catalogue viewer — the new GUI foundation (2026-08-09)
 

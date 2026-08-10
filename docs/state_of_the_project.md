@@ -34,8 +34,22 @@ Read alongside:
 independent approaches, with an integration layer that presents their
 shortlists for a human to adjudicate.
 
-The problem is finding an inhibitor of human **Pin1**, catalytic **Cys113**,
-against **PDB 6VAJ**.
+The problem is finding an inhibitor of human **Pin1**, catalytic **Cys113**.
+
+**The receptor is contested, and the code currently disagrees with itself.**
+D0059 (2026-08-05, @tt8804, relaying the chemist) replaces **6VAJ** with the
+prepared **3IKD**: 6VAJ is co-crystallised with sulfopin, so its pocket is
+induced-fit around that ligand, and cross-docking into it ranked the crystal
+pose #1 in **0 of 82** cases against 5/82 self-docked. But D0059's status is
+still `proposed`, `config/receptor.yaml` still pins `pdb_id: 6VAJ`, and
+`shared/noncovalent_dock_run.py:61` still hardcodes `6VAJ_prepared.pdbqt` —
+while the benchmark and reference-screen paths call `resolve_3ikd_ian()`, which
+refuses to run against the wrong 3IKD. **Which receptor you get depends on which
+entry point you came through.** Settle this before running anything; see
+[`retrospective_2.2.0.md`](retrospective_2.2.0.md) §3.3.
+
+Measurements below that predate D0059 were made on 6VAJ and are labelled where
+it matters — they are not silently reinterpreted as 3IKD results.
 
 **The deliverable is the method, not the molecule.** Pin1 is the testbed. This
 matters when prioritising: a result about whether the choreography works beats
@@ -322,6 +336,16 @@ chunk rather than everything.
   `nfs4_getfacl` returns "not supported" and `chmod` may not change what is
   actually enforced. If a directory is unreadable despite a mode that plainly
   permits it, that is the ACL and it needs a storage admin.
+* **Two receptors are live at once.** `config/receptor.yaml` and
+  `noncovalent_dock_run.py` default to 6VAJ; the benchmark and reference-screen
+  paths guard hard for 3IKD_ian. Both are populated and plausible, so nothing
+  errors — you simply get whichever your entry point chose. See §1 and
+  [`retrospective_2.2.0.md`](retrospective_2.2.0.md) §3.3.
+* **A guard only protects the path that calls it.** `elevation_report.py` knows
+  the MD system renumbers from 1 (Cys113 is residue 63, `PIN1_OFFSET = 50`) and
+  refuses to mislabel a structure. New styling code in `md_movie.py` bypassed it
+  and drew a **glutamate** labelled as the target cysteine. Route renderers
+  through the guard rather than trusting each new path.
 * **Streamlit does not re-import helper modules.** Editing `curate.py` and
   clicking Rerun gives you the old module. There is a guard that stops the page
   and says so; restart the process.
