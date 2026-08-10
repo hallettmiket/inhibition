@@ -174,7 +174,8 @@ def _pocket_bg(w, h) -> str:
 
 
 def _pose_svg(poses, basis, only=None, colour="#0072ce",
-              w=250, h=190, stroke=0.55, op=0.5, pocket=False, one=None) -> str:
+              w=250, h=190, stroke=0.55, op=0.5, pocket=False, one=None,
+              highlight=None, only_bg=False) -> str:
     """Every pose drawn flat: one <path> per pose, not one line per bond.
 
     491 poses at ~32 bonds each is ~15,000 elements as lines and 491 as paths,
@@ -182,9 +183,9 @@ def _pose_svg(poses, basis, only=None, colour="#0072ce",
     """
     import numpy as np
     ctr, e1, e2 = basis
-    sel = [one] if one is not None else \
-        [p for p in poses if only is None or p["mode"] == only]
-    if not sel:
+    sel = [] if only_bg else ([one] if one is not None else
+                              [p for p in poses if only is None or p["mode"] == only])
+    if not sel and not only_bg:
         return ""
     allxy = np.array([[(np.array(v) - ctr) @ e1, (np.array(v) - ctr) @ e2]
                       for q in poses for v in q["atoms"].values()])
@@ -216,12 +217,25 @@ def _pose_svg(poses, basis, only=None, colour="#0072ce",
                   f"stroke='#8a6d00' stroke-width='.7'/>"
                   f"<text x='{gx + 7:.1f}' y='{gy + 3.5:.1f}' class='sglbl'>"
                   f"Cys113 S&gamma;</text>")
+    # THE MEDOID DRAWN ON TOP OF ITS OWN CLOUD. A cloud alone does not say which
+    # pose represents it, and a medoid alone does not say what it was chosen from.
+    # Overlaying the two answers both at once.
+    hi_path = ""
+    if highlight is not None:
+        d = []
+        for a, b in highlight["bonds"]:
+            x1, y1 = xy(highlight["atoms"][a]); x2, y2 = xy(highlight["atoms"][b])
+            d.append(f"M{x1:.1f} {y1:.1f}L{x2:.1f} {y2:.1f}")
+        if d:
+            hi_path = (f"<path d='{''.join(d)}' fill='none' stroke='{colour}' "
+                       f"stroke-width='1.7' stroke-opacity='1' "
+                       f"stroke-linecap='round'/>")
     return (f"<svg viewBox='0 0 {w} {h}' class='psvg' role='img' "
             f"aria-label='{len(sel)} docked poses drawn flat around Cys113'>"
             + (_pocket_bg(w, h) if pocket else "")
             + f"<g fill='none' stroke='{colour}' stroke-width='{stroke}' "
             f"stroke-opacity='{op}' stroke-linecap='round'>"
-            + "".join(paths) + "</g>" + anchor + "</svg>")
+            + "".join(paths) + "</g>" + hi_path + anchor + "</svg>")
 
 #: The three illustrative modes: share of the 500, centre, spread, and the story
 #: each one tells. Sizes are deliberately uneven — a dominant mode plus two
@@ -324,10 +338,10 @@ def _stage2(pts) -> str:
 #: point is that the three modes of molecule 2 land at ranks 1, 3 and 6 — a mode
 #: competes on its own geometry, not on the company it keeps.
 POOL = [
-    {"mol": "mol A", "col": "#0072ce", "modes": [("m0", 0.62), ("m1", 0.15)]},
-    {"mol": "mol B", "col": "#7b5ea7",
+    {"mol": "mol A", "col": "#1b7f79", "modes": [("m0", 0.62), ("m1", 0.15)]},
+    {"mol": "mol B", "col": "#a63d7a",
      "modes": [("m0", 0.71), ("m1", 0.44), ("m2", 0.08)]},
-    {"mol": "mol C", "col": "#c2703d", "modes": [("m0", 0.33)]},
+    {"mol": "mol C", "col": "#6b7f1b", "modes": [("m0", 0.33)]},
 ]
 
 
@@ -411,14 +425,14 @@ def _run_counts() -> dict:
 #: Illustrative survival: eight ranked modes, which clear the 10 ns sweep, and
 #: which of those are still in the pocket at 100 ns. Deliberately NOT monotonic --
 #: the top of the ranking is not guaranteed to survive, and that is the point.
-SURVIVE = [("mol B · m0", "#7b5ea7", True, True),
-           ("mol A · m0", "#0072ce", True, True),
-           ("mol B · m1", "#7b5ea7", True, False),
-           ("mol C · m0", "#c2703d", True, True),
-           ("mol D · m0", "#0f7a54", False, None),
-           ("mol A · m1", "#0072ce", True, False),
-           ("mol E · m0", "#b3261e", False, None),
-           ("mol B · m2", "#7b5ea7", False, None)]
+SURVIVE = [("mol B · m0", "#a63d7a", True, True),
+           ("mol A · m0", "#1b7f79", True, True),
+           ("mol B · m1", "#a63d7a", True, False),
+           ("mol C · m0", "#6b7f1b", True, True),
+           ("mol D · m0", "#8a5a00", False, None),
+           ("mol A · m1", "#1b7f79", True, False),
+           ("mol E · m0", "#4a5f8a", False, None),
+           ("mol B · m2", "#a63d7a", False, None)]
 
 
 def _stage_survival() -> str:
@@ -746,6 +760,7 @@ def build() -> str:
     # cost 2.5 MB and a hairball; what the page needs is a picture you can put
     # beside the schematic and compare.
     real, real_all, real_by, real_one, real_mess = {}, "", {}, "", ""
+    real_med = {}
     try:
         _p = _read_sdf(Path(ALLPOSES) / f"{EXAMPLE}.sdf")
     except Exception:                                      # noqa: BLE001
@@ -761,8 +776,11 @@ def build() -> str:
             _pose_svg(_p, _b, only=m, colour=_cols[m], w=250, h=190,
                       stroke=0.5, op=0.42).replace("<svg", "<svg style='position:absolute;inset:0'", 1)
             for m in _order)
-        _bg = (f"<svg viewBox='0 0 250 190' class='psvg' "
-               f"style='position:absolute;inset:0'>{_pocket_bg(250, 190)}</svg>")
+        # One background layer carrying the pocket AND the Cys113 anchor, under
+        # the per-mode clouds -- so the combined panel has the same context as
+        # every single-mode panel instead of floating free.
+        _bg = _pose_svg(_p, _b, w=250, h=190, pocket=True, only_bg=True) \
+            .replace("<svg", "<svg style='position:absolute;inset:0'", 1)
         real_all = (f"<div class='ovl' style='padding-bottom:{190 / 250 * 100:.1f}%'>"
                     f"{_bg}{real_all}</div>")
         # Step 1's picture: every pose, one colour, in the pocket -- the mess as
@@ -772,9 +790,14 @@ def build() -> str:
         _md = _medoid(_p, _order[0])
         real_one = _pose_svg(_p, _b, colour=_cols[_order[0]], w=250, h=190,
                              stroke=1.5, op=1.0, pocket=True, one=_md)
+        # Every mode: its cloud in the pocket, with its own medoid picked out on
+        # top, and a second panel showing that medoid alone.
         for m in _order:
-            real_by[m] = _pose_svg(_p, _b, only=m, colour=_cols[m],
-                                   w=200, h=150, stroke=0.6, op=0.55)
+            _mm = _medoid(_p, m)
+            real_by[m] = _pose_svg(_p, _b, only=m, colour=_cols[m], w=210, h=160,
+                                   stroke=0.55, op=0.35, pocket=True, highlight=_mm)
+            real_med[m] = _pose_svg(_p, _b, colour=_cols[m], w=210, h=160,
+                                    stroke=1.6, op=1.0, pocket=True, one=_mm)
         real = {"n": len(_p), "modes": len(_order),
                 "counts": dict(collections.Counter(q["mode"] for q in _p)),
                 "order": _order}
@@ -787,7 +810,12 @@ def build() -> str:
     _rk = real.get("order") or []
     panels = "".join(
         f"<div class='mcard'>"
-        f"{_paired(_mode_panel(pts, m), real_by.get(_rk[i], '') if i < len(_rk) else '', 'schematic', 'real poses')}"
+        f"<div class='trio'>"
+        f"<figure>{_mode_panel(pts, m)}<figcaption>schematic</figcaption></figure>"
+        f"<figure>{real_by.get(_rk[i], '') if i < len(_rk) else ''}"
+        f"<figcaption>real poses &mdash; medoid picked out</figcaption></figure>"
+        f"<figure>{real_med.get(_rk[i], '') if i < len(_rk) else ''}"
+        f"<figcaption>the medoid alone</figcaption></figure></div>"
         f"<table class='crit'>"
         f"<tr><th>d(C&rarr;S&gamma;)</th><td class='n'>{m['d']:.1f} &Aring;</td>"
         f"<td class='v {'ok' if 2.8 <= m['d'] <= 4.2 else 'no'}'>"
@@ -873,7 +901,7 @@ p{{margin:.45em 0}}
 .modes{{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}}
 .mcard{{border:1px solid var(--rule);border-radius:6px;padding:12px;
  background:var(--raise);display:grid;
- grid-template-columns:minmax(0,1.5fr) minmax(0,260px);gap:16px;align-items:center}}
+ grid-template-columns:minmax(0,2.1fr) minmax(0,240px);gap:16px;align-items:center}}
 @media(max-width:820px){{.mcard{{grid-template-columns:1fr}}}}
 .mcard .crit{{margin-top:0}}
 table{{border-collapse:collapse;width:100%;font-size:12.5px}}
