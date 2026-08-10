@@ -985,10 +985,11 @@ p{{margin:.45em 0}}
 /* One mode per ROW (@tt8804): three columns squeezed the diagrams to thumbnails.
    Stacked, each mode gets the schematic, the real poses and its numbers side by
    side at a size you can actually read. */
-.modes{{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}}
-.mcard{{border:1px solid var(--rule);border-radius:6px;padding:12px;
+.modes{{display:grid;grid-template-columns:1fr;gap:9px;margin-top:12px}}
+.mcard{{border:1px solid var(--rule);border-radius:6px;padding:9px 11px;
  background:var(--raise);display:grid;
- grid-template-columns:minmax(0,1.15fr) minmax(0,340px);gap:18px;align-items:center}}
+ grid-template-columns:minmax(0,470px) minmax(0,300px);gap:20px;align-items:center;
+ justify-content:start}}
 @media(max-width:820px){{.mcard{{grid-template-columns:1fr}}}}
 .mcard .crit{{margin-top:0}}
 table{{border-collapse:collapse;width:100%;font-size:12.5px}}
@@ -1058,7 +1059,7 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
 /* dots -> cloud -> one pose, left to right. */
 .trio{{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;align-items:start}}
 .trio figure{{margin:0;min-width:0}}
-.trio figcaption{{font-size:9.5px;color:var(--muted);text-align:center;
+.trio figcaption{{font-size:9px;color:var(--muted);text-align:center;
  margin-top:3px;line-height:1.3}}
 @media(max-width:760px){{.trio{{grid-template-columns:1fr}}}}
 .pair figure{{margin:0;min-width:0}}
@@ -1132,18 +1133,16 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
   <p><strong>Angle</strong>: it has to come in roughly head-on.</p>
   <p>Mode 3 shows why you need both — right distance, wrong angle. Distance alone
   would have passed it.</p>
-  <div class="modes">{panels}</div></div>
-</div>
-
-<div class="step">
- <div><p class="tcap">one molecule &mdash; its three modes, scored</p>
+  <div class="modes">{panels}</div>
+  <p class="tcap" style="margin-top:14px">the three modes, scored</p>
   <table class="rank">
   <tr><th class="n">#</th><th>mode</th><th class="n">poses</th>
       <th class="n">d &Aring;</th><th class="n">angle</th><th class="n">ready</th></tr>
-  {rank_rows}</table>
-  <div class="arrow down"><span>&darr;&nbsp; every molecule is scored the same way,
-   then all their modes are pooled</span></div>
-  {_stage_pool()}
+  {rank_rows}</table></div>
+</div>
+
+<div class="step">
+ <div>{_stage_pool()}
   <p class="mnote" style="margin-top:10px">Ranked on attack-readiness, not on
   docking energy — energy correlates with reaction competence at
   &rho;&nbsp;=&nbsp;+0.009 across 115,300 poses, which is noise.</p></div>
