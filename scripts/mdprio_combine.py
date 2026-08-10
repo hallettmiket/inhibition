@@ -128,11 +128,28 @@ def _classes() -> dict:
 
 
 def _md() -> pd.DataFrame:
+    """The 100 ns rows, preferring a run that SUCCEEDED over one that did not.
+
+    `drop_duplicates(keep="last")` over an unsorted glob decided this by file
+    order. A molecule can hold several 100 ns rows -- a launch that died in setup
+    writes one too -- so for rx_6VAJ the GUI showed either a real result or a
+    blank depending on which filename `glob` happened to return last. The failed
+    row is not a later measurement; it is not a measurement at all.
+
+    Rows are ordered by whether they carry a result, and only then deduped.
+    """
     fs = glob.glob(str(B / "md_residence/*.csv"))
     if not fs:
         return pd.DataFrame()
     d = pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)
-    return d[d.get("production_ps", 0) >= 50000].drop_duplicates("ident", keep="last")
+    d = d[d.get("production_ps", 0) >= 50000].copy()
+    if "status" in d.columns:
+        d = d[d.status.astype(str).str.startswith("ok")]
+    eng = "explicit_frac_frames_engaged"
+    if eng in d.columns:
+        d["_has"] = d[eng].notna().astype(int)
+        d = d.sort_values("_has")
+    return d.drop_duplicates("ident", keep="last")
 
 
 def _version() -> tuple[str, str]:
@@ -243,6 +260,11 @@ def main() -> None:
     # in the same pass as the candidates', from the same function.
     ctl = _controls()
     thumbs = _thumbs(list(args.candidates) + [c["ident"] for c in ctl])
+    # The crystal set from _controls(), PLUS the reference molecules. ref_* are
+    # known binders put through the identical criterion -- they are controls by
+    # construction, and tagging only the crystal ones left Juglone ranked but
+    # absent from the controls tab.
+    ctl_idents = {c['ident'] for c in ctl} | {t for t in args.candidates if t.startswith('ref_')}
     _ver, _code = _version()
     # The version AND its codename belong in the title (@tt8804): a page saved,
     # screenshotted or pasted into a thread carries its release with it rather
@@ -340,9 +362,17 @@ def main() -> None:
                 f"sweep {ar*10:.2f} ns" if has_md and ar is not None
                 else (f"{g(s_,'n_visits','{:.0f}')} visits &middot; awaiting 100 ns"
                       if not has_md else g(m_, 'explicit_ligand_rmsd_nm_max') + " nm max"))
+        # A CONTROL THAT NOW HAS A 100 ns RUN IS ONE ROW, NOT TWO. It was being
+        # emitted here as a ranked candidate AND again in the controls block as an
+        # unranked control -- two rows, the same DOM id twice, so clicking either
+        # resolved to whichever the browser found first. It stays a single row
+        # that is ranked on its own number and still answers the controls tab.
+        is_ctl = t in ctl_idents
         rows_html.append(
-            f"<button class='row' data-cls=\"{html.escape(wcls)}\" "
-            f"data-eng='{(eng if has_md else -1):.6f}' "
+            f"<button class='row{' ctl' if is_ctl else ''}' "
+            f"data-cls=\"{'control' if is_ctl else html.escape(wcls)}\" "
+            + ("data-ctl='1' " if is_ctl else "")
+            + f"data-eng='{(eng if has_md else -1):.6f}' "
             f"data-sweep='{(ar if ar is not None else -1):.6f}' "
             f"data-md='{1 if has_md else 0}' "
             f"data-held='{1 if held else 0}' "
@@ -373,6 +403,8 @@ def main() -> None:
     ranked_ctl = [c for c in ctl if c["frac_attack_ready"] is not None]
     ctl_rows_html = []
     for c in ctl:
+        if c["ident"] in tabs:
+            continue      # already a ranked row above
         ar = c["frac_attack_ready"]
         has = ar is not None
         cid = c["ident"]
