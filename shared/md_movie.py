@@ -221,25 +221,30 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
     if (surf) {{ try {{ viewer.removeSurface(surf.surfid); }} catch (e) {{}} surf = null; }}
     if (!surfaceOn()) {{ surfFrame = frame; return; }}
     surf = viewer.addSurface(M.SurfaceType.VDW,
-      {{opacity: 0.97, colorfunc: chargeColour}},
-      {{within: {{distance: {SURF_SHELL_A}, sel: {{resi: {CYS113_RESI}}}}},
-        not: {{or: [{{resn: 'MOL'}}, {{resi: {CYS113_RESI}}}]}}}});
+      {{opacity: 0.98, colorfunc: chargeColour}},
+      {{not: {{or: [{{resn: 'MOL'}}, {{resi: {CYS113_RESI}}}]}}}});
     surfFrame = frame;
   }}
   // Nothing to warn about any more: the mesh is rebuilt with the frame, so it
   // can never describe a different one. The readout just says what it covers.
+  // THE SURFACE IS NEVER HIDDEN (@tt8804). Rebuilding it per frame could not keep
+  // up with playback and it flickered out; hiding it while it lagged left the
+  // frame with no surface at all. It now stays on screen the whole time and is
+  // REFRESHED WHEN PLAYBACK STOPS -- on pause, and on releasing the slider. While
+  // the video runs the mesh is one frame's shell over a moving cartoon, which is
+  // the compromise being chosen deliberately; the readout says so.
   function markStale() {{
     const el = document.getElementById('sstat');
     if (!el) return;
-    el.textContent = surfaceOn() ? 'surface: {SURF_SHELL_A} A around Cys113' : '';
-    el.className = 'mono';
+    const stale = surfFrame !== frame;
+    el.textContent = (surfaceOn() && stale) ? 'surface: frame ' + surfFrame
+                                            + ' — refreshes on pause' : '';
+    el.className = (surfaceOn() && stale) ? 'mono stale' : 'mono';
   }}
 
   function draw() {{
     viewer.setFrame(frame).then(function() {{
-      // WITH the frame, not after it: the coordinates have just changed, so the
-      // mesh is rebuilt here before the render below.
-      buildSurface(); markStale();
+      markStale();
       viewer.setStyle({{}}, {{cartoon: {{color: '#2f3742', opacity: 1.0}}}});
       viewer.setStyle({{resn: 'MOL'}},
                       {{stick: {{radius: 0.26, colorscheme: 'yellowCarbon'}}}});
@@ -327,14 +332,19 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
   document.getElementById('frame').addEventListener('change', function(e) {{
     frame = +e.target.value; draw();
   }});
+  document.getElementById('frame').addEventListener('change', function(e) {{
+    frame = +e.target.value; draw();
+    if (!timer) {{ buildSurface(); markStale(); viewer.render(); }}
+  }});
   document.getElementById('play').addEventListener('click', function(e) {{
-    if (timer) {{ clearInterval(timer); timer = null; e.target.innerHTML = '&#9654; play'; return; }}
+    if (timer) {{ clearInterval(timer); timer = null; e.target.innerHTML = '&#9654; play';
+                  buildSurface(); markStale(); viewer.render(); return; }}
     e.target.innerHTML = '&#10073;&#10073; pause';
     timer = setInterval(function() {{
       frame = (frame + 1) % DSG.length;
       document.getElementById('frame').value = frame;
       draw();
-    }}, 110);
+    }}, 70);
   }});
   document.getElementById('surf').addEventListener('change', function(e) {{
     if (!viewer) return;
