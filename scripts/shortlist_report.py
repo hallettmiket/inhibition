@@ -289,7 +289,11 @@ the distance. Residues are where they are.</p></div>
 (function(){{
   const M = window.$3Dmol || window['3Dmol'];
   const L = {json.dumps(links)}, RES = {json.dumps(sorted(set(resis)))};
-  window.addEventListener('load', function(){{
+  // Same lazy boot as the movie: a closed <details> has no height, and a viewer
+  // built into a zero-height box draws nothing.
+  let built = false;
+  function boot(){{
+    if (built) return; built = true;
     requestAnimationFrame(function(){{ requestAnimationFrame(function(){{
       const v = M.createViewer(document.getElementById('{elem_id}'),
                                {{backgroundColor:'#eef1f6'}});
@@ -309,13 +313,54 @@ the distance. Residues are where they are.</p></div>
       }});
       v.zoomTo({{resn:'MOL'}}); v.zoom(0.55); v.resize();
     }}); }});
-  }});
+  }}
+  (function(){{
+    const host = document.getElementById('{elem_id}');
+    const det = host && host.closest ? host.closest('details') : null;
+    if (det) {{
+      if (det.open) window.addEventListener('load', boot);
+      det.addEventListener('toggle', function(){{ if (det.open) boot(); }});
+    }} else {{ window.addEventListener('load', boot); }}
+  }})();
 }})();
 </script>"""
 
 
+def contact_distances(movie_pdb: Path, rows: list) -> dict:
+    """Closest measured atom-pair distance per residue, in the medoid frame.
+
+    The same frame and the same pairs the 3D view draws, so the number beside a
+    residue in the flat map is the number on the line in the 3D one. Two figures
+    of the same contact disagreeing by a tenth of an Angstrom is the kind of
+    thing that costs a reader an hour.
+    """
+    import numpy as np
+    frame, _ = representative_frame(movie_pdb)
+    if frame is None:
+        return {}
+    lig, prot = [], []
+    for l in frame.splitlines():
+        if not l.startswith(("ATOM", "HETATM")):
+            continue
+        if (l[76:78].strip() or l[12:16].strip()[:1]) == "H":
+            continue
+        rec = ((float(l[30:38]), float(l[38:46]), float(l[46:54])),
+               l[17:20].strip(), l[22:26].strip())
+        (lig if rec[1] == "MOL" else prot).append(rec)
+    out = {}
+    for rn, ri, _f, _p, ai in rows:
+        if ai is None or ai >= len(lig):
+            continue
+        la = np.array(lig[ai][0])
+        cand = [np.linalg.norm(np.array(p[0]) - la) for p in prot
+                if p[1] == rn and p[2] == ri]
+        if cand:
+            out[(rn, ri)] = float(min(cand))
+    return out
+
+
 def interaction_map(mol, rows: list, n_frames: int, cys_resi: int = 63,
-                    offset: int = 50) -> str:
+                    offset: int = 50, dist_of: dict | None = None) -> str:
     """A real interaction diagram: each residue drawn against the atom it contacts.
 
     The ligand is rendered by RDKit, and RDKit is then asked where it PUT each
@@ -335,15 +380,22 @@ def interaction_map(mol, rows: list, n_frames: int, cys_resi: int = 63,
     RDLogger.DisableLog("rdApp.*")
     if mol is None:
         return ""
+    dist_of = dist_of or {}
     keep = [r for r in rows if r[2] >= 0.20 and r[4] is not None][:12]
     if not keep:
         return ""
 
-    W, H = 860, 620
+    # THE MOLECULE GETS THE MIDDLE, NOT THE WHOLE CANVAS. Drawn at full size it
+    # filled the frame and the residues had nowhere to go but on top of it, which
+    # is what made the last version unreadable and gave no sense of separation.
+    # It is rendered into an inner box and placed centred, leaving an annulus.
+    W, H = 980, 720
+    IW, IH = 470, 340
+    OX, OY = (W - IW) / 2, (H - IH) / 2
     m = Chem.Mol(mol)
     m.RemoveAllConformers()
     rdCoordGen.AddCoords(m)
-    d = Draw.rdMolDraw2D.MolDraw2DSVG(W, H)
+    d = Draw.rdMolDraw2D.MolDraw2DSVG(IW, IH)
     o = d.drawOptions()
     o.bondLineWidth = 2
     o.additionalAtomLabelPadding = 0.15
@@ -353,11 +405,12 @@ def interaction_map(mol, rows: list, n_frames: int, cys_resi: int = 63,
     svg = d.GetDrawingText()
     inner = svg[svg.index(">", svg.index("<svg")) + 1: svg.rindex("</svg>")]
     inner = re.sub(r"<rect[^>]*>", "", inner, count=1)     # drop its white backdrop
+    inner = f"<g transform='translate({OX:.0f},{OY:.0f})'>{inner}</g>"
 
     pos = {}
     for i in range(m.GetNumAtoms()):
         pt = d.GetDrawCoords(i)
-        pos[i] = (pt.x, pt.y)
+        pos[i] = (pt.x + OX, pt.y + OY)     # same shift as the drawing above
     cx = sum(p[0] for p in pos.values()) / len(pos)
     cy = sum(p[1] for p in pos.values()) / len(pos)
 
@@ -368,18 +421,18 @@ def interaction_map(mol, rows: list, n_frames: int, cys_resi: int = 63,
         vx, vy = ax - cx, ay - cy
         L = math.hypot(vx, vy) or 1.0
         vx, vy = vx / L, vy / L
-        r = 96.0
+        r = 150.0
         for _ in range(28):
             x, y = ax + vx * r, ay + vy * r
             x = min(max(x, 58), W - 58)
             y = min(max(y, 34), H - 46)
-            if all((x - px) ** 2 + (y - py) ** 2 > 68 ** 2 for px, py, *_ in placed):
+            if all((x - px) ** 2 + (y - py) ** 2 > 84 ** 2 for px, py, *_ in placed):
                 break
             r += 26.0
-        placed.append((x, y, ax, ay, rn, ri, frac, pol))
+        placed.append((x, y, ax, ay, rn, ri, frac, pol, dist_of.get((rn, ri))))
 
     parts = []
-    for x, y, ax, ay, rn, ri, frac, pol in placed:
+    for x, y, ax, ay, rn, ri, frac, pol, dist in placed:
         is_cys = (rn == "CYS" and str(ri) == str(cys_resi))
         col = "#b3261e" if is_cys else ("#0f7a54" if pol > 0.2 else "#4a6885")
         dash = " stroke-dasharray='5 4'" if pol > 0.2 else ""
@@ -392,11 +445,12 @@ def interaction_map(mol, rows: list, n_frames: int, cys_resi: int = 63,
             f"stroke='{col}' stroke-width='{0.9 + 2.4 * frac:.1f}' "
             f"opacity='.55'{dash}/>"
             f"<circle cx='{ax:.0f}' cy='{ay:.0f}' r='3.4' fill='{col}'/>"
-            f"<rect x='{x-40:.0f}' y='{y-15:.0f}' width='80' height='30' rx='6' "
+            f"<rect x='{x-52:.0f}' y='{y-15:.0f}' width='104' height='30' rx='6' "
             f"fill='{col}' fill-opacity='.13' stroke='{col}' stroke-width='1.2'/>"
             f"<text x='{x:.0f}' y='{y-2:.0f}' class='rl' fill='{col}'>{shown}</text>"
             f"<text x='{x:.0f}' y='{y+10:.0f}' class='rf' fill='{col}'>"
-            f"{frac*100:.0f}% of frames</text>")
+            + (f"{dist:.1f} &#8491; &#183; {frac*100:.0f}% of frames" if dist
+               else f"{frac*100:.0f}% of frames") + "</text>")
 
     return f"""<svg viewBox="0 0 {W} {H + 34}" class="imap" role="img"
  aria-label="each contacting residue joined to the ligand atom it contacts">
@@ -505,7 +559,8 @@ def block(ident: str, er, three: str, cls: dict) -> str:
         try:
             rows_c, nfr = contacts(mpdb)
             lm = ligand_mol(mpdb, smiles_of(ident) or "")
-            imap = interaction_map(lm, rows_c, nfr)
+            dmap = contact_distances(mpdb, rows_c)
+            imap = interaction_map(lm, rows_c, nfr, dist_of=dmap)
             i3d = interaction_3d(mpdb, rows_c, f"i3_{ident}")
         except Exception as exc:                          # noqa: BLE001
             log.warning("%s: interaction map unavailable: %s", ident, exc)

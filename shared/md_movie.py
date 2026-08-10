@@ -361,9 +361,27 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
   // 3Dmol absolutely-positions its canvas, so the container must already have a
   // real height when the viewer is created -- building on DOMContentLoaded gave
   // a 0x0 box and a blank viewer.
-  window.addEventListener('load', function() {{
+  // BUILD WHEN THE PANEL OPENS, not on window load. 3Dmol absolutely-positions
+  // its canvas, so the container must already have a real height -- and a closed
+  // <details> has none. Booting on load inside a collapsed panel gives a 0x0 box
+  // and a viewer that renders nothing, which is exactly what happened when the
+  // panels were changed to start closed: the movies were there, sized to nothing.
+  var built = false;
+  function boot1() {{
+    if (built) return;
+    built = true;
     requestAnimationFrame(function() {{ requestAnimationFrame(boot); }});
-  }});
+  }}
+  (function() {{
+    var host = document.getElementById('{elem_id}');
+    var det = host && host.closest ? host.closest('details') : null;
+    if (det) {{
+      if (det.open) window.addEventListener('load', boot1);
+      det.addEventListener('toggle', function() {{ if (det.open) boot1(); }});
+    }} else {{
+      window.addEventListener('load', boot1);
+    }}
+  }})();
 }})();
 </script>
 """
