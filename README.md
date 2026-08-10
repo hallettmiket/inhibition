@@ -9,16 +9,29 @@ each with their own **approach**. The pipeline code lives here; the generic
 machinery for *describing* choreographies belongs in the murmurent repo.
 
 <!-- release-block:start -->
-## Release 2.2.0 “Chalcopyrite” — in progress
+## Release 2.2.0 “Chalcopyrite” — closed 2026-08-10
 
-> **Branch** `release/2.2.0-chalcopyrite` · **status** active development
+> **Branch** `release/2.2.0-chalcopyrite` · **status** closed; successor not yet named ([#46](https://github.com/hallettmiket/inhibition/issues/46))
 >
 > | | |
 > |---|---|
-> | **Outline** | **[`docs/outline_2.2.0.md`](docs/outline_2.2.0.md)** — pose splitting, the score, tooling, and what would make this release a failure |
-> | **Retrospective of 2.1.0** | **[`docs/retrospective_2.1.0.md`](docs/retrospective_2.1.0.md)** — read this before adding code. Nine defects, all one mistake |
-> | **Inherited architecture** | [`docs/framework_2.1.0.md`](docs/framework_2.1.0.md) — the stages that carry forward |
+> | **Retrospective** | **[`docs/retrospective_2.2.0.md`](docs/retrospective_2.2.0.md)** — every defect this version found was in the reading, not the chemistry |
+> | **Outline** | [`docs/outline_2.2.0.md`](docs/outline_2.2.0.md) — what was promised, and what would have made it a failure |
+> | **Framework as built** | [`docs/framework_2.2.0.md`](docs/framework_2.2.0.md) |
+> | **Retrospective of 2.1.0** | [`docs/retrospective_2.1.0.md`](docs/retrospective_2.1.0.md) — read before adding code. Nine defects, all one mistake |
+> | **Shortlist report** | [`docs/report_template.md`](docs/report_template.md) — the outward-facing format, and how to build one |
+> | **GUI** | [`docs/gui_spec.md`](docs/gui_spec.md) |
 > | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) |
+
+**How 2.2.0 ended.** The positive control ran on the last night and produced a
+three-record chain, each qualifying the one before: the 10 ns sweep rejects every
+known active (**D0075**); it does so because a 100 ps dwell filter discards exactly
+the brief approaches the observable was chosen to count, and on raw visits within
+mechanism Liu-2022-ZL-Pin13 beats 20 of 20 SN2 candidates (**D0076**); and the
+crystal-reactant controls model a covalent adduct as a Michaelis complex, so they
+could not have answered the question anyway (**D0077**). The screen had put a known
+covalent inhibitor into a valid near-attack geometry — 3.36 Å, 156.8° — the whole
+time.
 
 **The thesis.** 2.1.0 asked *"how good is this molecule's pose?"* of a molecule
 that does not have **a** pose. It has a distribution of them, often several

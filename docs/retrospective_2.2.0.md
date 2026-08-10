@@ -301,6 +301,19 @@ And two more, from the last night, which say the same thing again:
 **13** — independent approaches Liu-2022-ZL-Pin13 made into attack geometry.
 **0** — the number our own readout scored it.
 
+## 7b. What shipped outward
+
+A **shortlist report** for the chemist — four T_4 molecules with structure,
+copy-paste SMILES, the 100 ns movie, the RMSD plots and the measured values, in
+one self-contained file. Format recorded as
+[`report_template.md`](report_template.md) and adopted as the template for
+anything leaving the project.
+
+It carries no ranking and no gate verdict on purpose. A reader outside this
+project cannot check those claims, and given D0075-D0077 the ranking is the part
+this version has least confidence in. The molecule and its measurements travel;
+the interpretation travels in the covering message.
+
 ## 8. Where 2.2.0 leaves the project
 
 Every defect this version found was in the reading, not the chemistry. Pose
