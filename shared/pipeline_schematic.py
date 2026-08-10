@@ -24,11 +24,70 @@ pages that differ only in dot positions.
 
 from __future__ import annotations
 
+import collections
+import json
 import math
 import random
+from pathlib import Path
 
 SEED = 7
 N_POSES = 500
+
+#: A real screened molecule to illustrate with: 491 poses, exactly three modes.
+#: Named here rather than discovered, because the page is a worked example and it
+#: should show the SAME molecule every time it is rebuilt.
+EXAMPLE = "t4_0e251ffccad1"
+ALLPOSES = ("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
+            "nac_v3_allposes")
+RECEPTOR = ("/data/lab_vm/modifiable/inhibition/receptor_3ikd_prep/"
+            "3IKD_noligand.pdb")
+THREEDMOL = "scripts/.cache_3dmol-min.js"
+
+
+def _read_sdf(path):
+    """Per-pose mode, centroid and raw block — without paying for RDKit.
+
+    The mode tag is written by the screen itself, so the grouping shown on this
+    page is the real one; only the single dot standing in for each pose is a
+    summary of it.
+    """
+    out = []
+    for blk in path.read_text(errors="ignore").split("$$$$"):
+        lines = blk.splitlines()
+        if len(lines) < 5:
+            continue
+        # FIND THE COUNTS LINE BY WHAT IT IS, not by where it sits. The title line
+        # is blank in these files, so any leading-newline handling shifts a fixed
+        # index onto an atom line, int() fails, and every pose is silently skipped
+        # -- an empty panel from a file that parses perfectly well.
+        ci = next((i for i, ln in enumerate(lines) if ln.rstrip().endswith("V2000")), -1)
+        if ci < 0:
+            continue
+        try:
+            n = int(lines[ci][:3])
+        except ValueError:
+            continue
+        xs = ys = zs = 0.0
+        k = 0
+        for ln in lines[ci + 1:ci + 1 + n]:
+            try:
+                x, y, z = float(ln[0:10]), float(ln[10:20]), float(ln[20:30])
+            except ValueError:
+                continue
+            sym = ln[31:34].strip()
+            if sym == "H":
+                continue
+            xs += x; ys += y; zs += z; k += 1
+        if not k:
+            continue
+        mode = "0"
+        for i, ln in enumerate(lines):
+            if ln.startswith(">") and "<mode>" in ln and i + 1 < len(lines):
+                mode = lines[i + 1].strip()
+                break
+        out.append({"mode": mode, "c": [xs / k, ys / k, zs / k],
+                    "blk": "\n".join(lines) + "\n$$$$\n"})
+    return out
 
 #: The three illustrative modes: share of the 500, centre, spread, and the story
 #: each one tells. Sizes are deliberately uneven — a dominant mode plus two
@@ -154,9 +213,106 @@ def _mode_panel(pts, m) -> str:
 </svg>"""
 
 
+def _real_poses() -> tuple[str, dict]:
+    """The same story, on real output: 491 poses of one screened molecule.
+
+    One dot per pose at its heavy-atom centroid, coloured by the mode the screen
+    assigned it, inside the real 3IKD receptor. Dots rather than 491 sets of
+    sticks because the page has to load: the cloud is the point, and one
+    representative per mode is drawn in full beside it.
+    """
+    sdf = Path(ALLPOSES) / f"{EXAMPLE}.sdf"
+    rec = Path(RECEPTOR)
+    js = Path(__file__).resolve().parent.parent / THREEDMOL
+    if not (sdf.is_file() and rec.is_file() and js.is_file()):
+        return "", {}
+    poses = _read_sdf(sdf)
+    if not poses:
+        return "", {}
+    order = [m for m, _ in
+             sorted(collections.Counter(p["mode"] for p in poses).items(),
+                    key=lambda kv: -kv[1])]
+    cols = {m: c for m, c in zip(order, ["#0072ce", "#7b5ea7", "#c2703d",
+                                         "#0f7a54", "#b3261e"])}
+    dots = [{"c": [round(v, 2) for v in p["c"]], "m": p["mode"]} for p in poses]
+    reps = {}
+    for p in poses:
+        reps.setdefault(p["mode"], p["blk"])
+    counts = collections.Counter(p["mode"] for p in poses)
+    btns = "".join(
+        f"<button class='p3b' data-m='{m}' onclick=\"pmode('{m}')\">"
+        f"<span class='dotc' style='background:{cols[m]}'></span>mode {m}"
+        f" <b>{counts[m]}</b></button>" for m in order)
+    block = f"""
+<div class="p3wrap">
+ <div class="p3ctl">
+  <button class="p3b on" data-m="all" onclick="pmode('all')">all {len(poses)} poses</button>
+  {btns}
+  <label class="p3l"><input id="p3rep" type="checkbox" checked> show one full pose</label>
+ </div>
+ <div class="p3box"><div id="p3"></div></div>
+ <p class="p3cap">Real output for <code>{EXAMPLE}</code> — {len(poses)} poses,
+ {len(order)} modes, in 3IKD. Each dot is one pose at its heavy-atom centroid,
+ coloured by the mode the screen assigned. The sticks are one real pose from the
+ selected mode.</p>
+</div>
+<script>{js.read_text(errors='ignore')}</script>
+<script type="text/plain" id="p3rec">{rec.read_text(errors='ignore')}</script>
+<script type="text/plain" id="p3reps">{json.dumps(reps)}</script>
+<script>
+(function(){{
+  const M = window.$3Dmol || window['3Dmol'];
+  const DOTS = {json.dumps(dots)}, COLS = {json.dumps(cols)};
+  const REPS = JSON.parse(document.getElementById('p3reps').textContent);
+  let v = null, cur = 'all', repModel = null;
+  function drawDots(){{
+    v.removeAllShapes();
+    DOTS.forEach(function(d){{
+      if (cur !== 'all' && d.m !== cur) return;
+      v.addSphere({{center:{{x:d.c[0],y:d.c[1],z:d.c[2]}}, radius:0.34,
+                    color: COLS[d.m] || '#888',
+                    opacity: cur === 'all' ? 0.55 : 0.85}});
+    }});
+  }}
+  function drawRep(){{
+    if (repModel !== null) {{ v.removeModel(repModel); repModel = null; }}
+    if (!document.getElementById('p3rep').checked) return;
+    const m = cur === 'all' ? Object.keys(REPS)[0] : cur;
+    if (!REPS[m]) return;
+    repModel = v.addModel(REPS[m], 'sdf');
+    repModel.setStyle({{}}, {{stick:{{radius:0.16, colorscheme:'yellowCarbon'}}}});
+  }}
+  function render(){{ drawDots(); drawRep(); v.render(); }}
+  window.pmode = function(m){{
+    cur = m;
+    document.querySelectorAll('.p3b').forEach(function(b){{
+      b.classList.toggle('on', b.dataset.m === m); }});
+    render();
+  }};
+  window.addEventListener('load', function(){{
+    requestAnimationFrame(function(){{ requestAnimationFrame(function(){{
+      v = M.createViewer(document.getElementById('p3'), {{backgroundColor:'#eef1f6'}});
+      v.addModel(document.getElementById('p3rec').textContent, 'pdb');
+      v.setStyle({{}}, {{cartoon:{{color:'#9fb0c4', opacity:0.72}}}});
+      render();
+      v.zoomTo(); v.zoom(1.5); v.resize();
+      document.getElementById('p3rep').addEventListener('change', render);
+    }}); }});
+  }});
+}})();
+</script>"""
+    return block, {"n": len(poses), "modes": len(order), "counts": dict(counts)}
+
+
 def build() -> str:
     rng = random.Random(SEED)
     pts = _points(rng)
+    real_block, real = _real_poses()
+    # Built outside the f-string: a dict literal inside an f-string expression is
+    # read as a set of a set, which is unhashable and fails at build time.
+    _c = real.get("counts") or {}
+    counts_txt = ("" if not _c else
+                  " &mdash; " + " / ".join(f"mode {k}: {v}" for k, v in _c.items()))
 
     panels = "".join(
         f"<div class='mcard'>{_mode_panel(pts, m)}"
@@ -259,6 +415,21 @@ td.n,th.n{{text-align:right;font-family:var(--mono)}}
  border-radius:6px}}
 code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
  padding:1px 5px;border-radius:3px}}
+.step.wide{{grid-template-columns:1fr}}
+.full{{min-width:0}}
+.p3wrap{{margin-top:10px}}
+.p3box{{position:relative;width:100%;height:460px;border:1px solid var(--rule);
+ border-radius:6px;overflow:hidden;background:#eef1f6}}
+.p3box > div{{position:absolute;inset:0}}
+.p3ctl{{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:8px}}
+.p3b{{font:11.5px var(--sans);padding:3px 10px;border:1px solid var(--rule);
+ background:var(--card);color:var(--muted);border-radius:99px;cursor:pointer;
+ display:inline-flex;align-items:center;gap:6px}}
+.p3b.on{{border-color:var(--navy);color:var(--navy);font-weight:600}}
+.p3b b{{font-family:var(--mono);font-size:10.5px}}
+.dotc{{width:9px;height:9px;border-radius:50%;display:inline-block}}
+.p3l{{font-size:11.5px;color:var(--muted);margin-left:4px}}
+.p3cap{{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.45}}
 .foot{{margin-top:30px;padding-top:14px;border-top:1px solid var(--rule);
  font-size:12.5px;color:var(--muted)}}
 </style></head><body>
@@ -275,50 +446,42 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
 <div class="step">
  <div>{_stage1(pts)}</div>
  <div><p class="n0">Step 1 &middot; dock</p>
-  <h2>500 poses, one molecule, one pocket</h2>
-  <p>Reactive docking against <strong>3IKD</strong> with a flexible Cys113,
-  <code>--nrun 500</code>. Each run is an independent search, so the output is a
-  cloud of candidate placements rather than one answer.</p>
-  <p><strong>Why 500 and not 200.</strong> Pose coverage was measured, not guessed:
-  reaching 95% of the reachable poses needs about 300 runs, so 500 is the default
-  with margin. Coverage is not the same as reproducibility, and only coverage has
-  been demonstrated.</p>
-  <p>The search is not the bottleneck. Against 15 deposited Pin1 complexes the
-  crystallographic pose is somewhere in this cloud <strong>93.3%</strong> of the
-  time. What happens next is where it gets lost.</p></div>
+  <h2>500 poses, one molecule</h2>
+  <p>We dock each molecule into Pin1 <strong>500 separate times</strong>. Every run
+  searches independently, so we get a cloud of possible placements, not one answer.</p>
+  <p>500 because we measured it: ~300 runs covers 95% of the poses. 500 leaves margin.</p>
+  <p>The search works. The right pose is somewhere in this cloud <strong>93.3%</strong>
+  of the time. It gets lost later.</p></div>
 </div>
 
 <div class="step">
  <div>{_stage2(pts)}</div>
  <div><p class="n0">Step 2 &middot; split</p>
-  <h2>The cloud is not one binding mode</h2>
-  <p>Poses cluster into <strong>modes</strong> on two things: where the reactive
-  atom sits, and which way the warhead points.</p>
-  <p><strong>Deliberately not</strong> whole-molecule RMSD — two poses that place
-  the warhead identically and differ in a distal ring are one mode, not two
-  (D0062). <strong>Deliberately not</strong> docking energy, which would re-import
-  the exact defect this stage exists to remove (#23/#30). And not distance-to-S&gamma;
-  or the attack angle either, because those <em>are</em> the criteria: a mode defined
-  partly by its own score is guaranteed to look internally consistent.</p>
-  <p>Each mode becomes its own <strong>candidate row</strong>, so ranking, selection
-  and this catalogue consume it unchanged.</p></div>
+  <h2>The cloud is several binding modes</h2>
+  <p>We group the poses into <strong>modes</strong> by where the reactive atom sits
+  and which way the warhead points.</p>
+  <p>Not by whole-molecule shape — two poses can differ in a far-off ring and still
+  be the same mode. Not by docking energy, which we know carries no signal here.</p>
+  <p>Each mode then becomes its own row in the GUI.</p></div>
+</div>
+
+<div class="step wide">
+ <div class="full"><p class="n0">The same two steps, on real output</p>
+  <h2>{real.get('n', 0)} real poses of one screened molecule</h2>
+  <p>Drag to rotate. Switch modes to see the cloud split{counts_txt}.</p>
+  {real_block}</div>
 </div>
 
 <div class="step">
  <div class="modes">{panels}</div>
  <div><p class="n0">Step 3 &middot; criteria</p>
-  <h2>Each mode is judged on its own geometry</h2>
-  <p>Two independent gates, and a mode has to clear both. <strong>Distance</strong>:
-  the reactive carbon must sit in the <code>2.8&ndash;4.2 &Aring;</code> near-attack
-  window — closer is a formed bond, further is no reaction.
-  <strong>Angle</strong>: the approach must be near-linear for an S<sub>N</sub>2
-  displacement.</p>
-  <p>Mode C is why both are needed. It is comfortably inside the distance window
-  and still cannot react, because it approaches side-on at 96&deg;. Distance alone
-  would have passed it.</p>
-  <p>The angular bar is stricter for S<sub>N</sub>2 than for a perpendicular
-  addition, which is why cross-class ranking is biased and the catalogue offers a
-  within-class view (#47).</p></div>
+  <h2>Can this mode actually react?</h2>
+  <p>Two checks, both must pass. <strong>Distance</strong>: the reactive carbon has
+  to sit <code>2.8&ndash;4.2 &Aring;</code> from the sulfur. Closer means the bond
+  already formed; further means no reaction.</p>
+  <p><strong>Angle</strong>: it has to come in roughly head-on.</p>
+  <p>Mode C shows why you need both — right distance, wrong angle. Distance alone
+  would have passed it.</p></div>
 </div>
 
 <div class="step">
@@ -330,17 +493,13 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
   docking energy — energy correlates with reaction competence at
   &rho;&nbsp;=&nbsp;+0.009 across 115,300 poses, which is noise.</p></div>
  <div><p class="n0">Step 4 &middot; rank</p>
-  <h2>The dominant mode is not automatically the winner</h2>
-  <p>Mode A leads here on both population and geometry, but those can disagree, and
-  when they do the population is not what decides. A molecule promoted on a minority
-  mode is a different claim from one promoted on its dominant mode, so the mode that
-  was elevated is carried on the row rather than left implicit.</p>
-  <p>Selecting the mode this way recovers the crystal pose <strong>93.3%</strong> of
-  the time against docking energy's <strong>60.0%</strong>, measured on 15 crystal
-  complexes at 500 runs, each docked twice.</p>
-  <p><strong>Every ranking here is stamped <code>rank_validated = False</code>.</strong>
-  It is an ordering the pipeline produced, not evidence the molecules at the top
-  bind.</p></div>
+  <h2>The biggest mode does not automatically win</h2>
+  <p>We rank on geometry, not on how many poses landed in a mode. The two can
+  disagree, and when they do we carry which mode was picked on the row.</p>
+  <p>Picking this way finds the right pose <strong>93.3%</strong> of the time.
+  Picking by docking energy: <strong>60.0%</strong>.</p>
+  <p>Every ranking is still stamped <code>rank_validated = False</code>. It is an
+  ordering we produced, not proof the top molecules bind.</p></div>
 </div>
 
 <div class="step">
@@ -360,18 +519,14 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
   <line x1="40" y1="132" x2="670" y2="132" stroke="var(--rule)"/>
  </svg></div>
  <div><p class="n0">Step 5 &middot; sweep, then MD</p>
-  <h2>Does the geometry survive being moved?</h2>
-  <p>A docked pose is a static guess. The <strong>10 ns sweep</strong> asks how much
-  of the time the mode actually holds attack geometry once the system is free to
-  move — that fraction, and the number of separate <em>visits</em>, are what the
-  catalogue's headline <code>ns</code> figure and visit count report.</p>
-  <p>Survivors go to <strong>100 ns MD</strong>, which asks a different question:
-  does the molecule stay in the pocket at all? Maximum ligand RMSD under
-  <code>1.2 nm</code> is <em>held</em>; above it the molecule left.</p>
-  <p><strong>These two readings are near-independent</strong> (&rho;&nbsp;=&nbsp;&minus;0.007),
-  which is why the catalogue can show them combined or split. A molecule can be
-  attack-ready and still leave; it can also sit in the pocket for 100 ns facing the
-  wrong way.</p></div>
+  <h2>Does it hold up once things move?</h2>
+  <p>A docked pose is frozen. The <strong>10 ns sweep</strong> lets it move and asks
+  how much of the time it still looks ready to react. This is <em>triage</em> — it
+  picks what is worth a long run.</p>
+  <p>Those go to <strong>100 ns MD</strong>, which asks a different question: does
+  the molecule stay on target at all? That is what the GUI ranks on.</p>
+  <p>A molecule can be attack-ready and still leave. It can also sit there for
+  100 ns facing the wrong way.</p></div>
 </div>
 
 <p class="foot">Parameters and measured results shown here come from the 2.2.0

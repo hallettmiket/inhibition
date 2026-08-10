@@ -165,6 +165,7 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
     <button id="play">&#9654; play</button>
     <input id="frame" type="range" min="0" max="{max(0, len(dist) - 1)}" value="0">
     <span id="ftxt" class="mono"></span>
+    <span id="sstat" class="mono"></span>
     <label><input id="surf" type="checkbox" checked> surface</label>
     <label><input id="labs" type="checkbox" checked> labels</label>
   </div>
@@ -181,7 +182,7 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
   const LO = {nac_lo}, HI = {nac_hi};
   const box = document.getElementById('{elem_id}');
   const raw = document.getElementById('pdbdata-{elem_id}').textContent;
-  let viewer = null, frame = 0, timer = null, surf = null;
+  let viewer = null, frame = 0, timer = null, surf = null, surfFrame = -1;
 
   // charge -> colour. 0 is a mid grey that stands off a white page; negative
   // ramps to red and positive to blue, so the charged patches still read.
@@ -193,7 +194,33 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
     return (c[0] << 16) | (c[1] << 8) | c[2];
   }}
 
+  function surfaceOn() {{
+    const c = document.getElementById('surf');
+    return !c || c.checked;
+  }}
+  // Rebuild the mesh at whatever frame is showing now. removeSurface first --
+  // addSurface stacks meshes, and stacking 126 of them is how the viewer dies.
+  function buildSurface() {{
+    if (!viewer) return;
+    if (surf) {{ try {{ viewer.removeSurface(surf.surfid); }} catch (e) {{}} surf = null; }}
+    surf = viewer.addSurface(M.SurfaceType.VDW,
+      {{opacity: surfaceOn() ? 0.98 : 0, colorfunc: chargeColour}},
+      {{not: {{or: [{{resn: 'MOL'}}, {{resi: {CYS113_RESI}}}]}}}});
+    surfFrame = frame;
+    markStale();
+    viewer.render();
+  }}
+  // Say so while the shell does not describe the frame on screen.
+  function markStale() {{
+    const el = document.getElementById('sstat');
+    if (!el) return;
+    const stale = surfaceOn() && surfFrame !== frame;
+    el.textContent = stale ? 'surface: frame ' + surfFrame : '';
+    el.className = stale ? 'mono stale' : 'mono';
+  }}
+
   function draw() {{
+    markStale();
     viewer.setFrame(frame).then(function() {{
       viewer.setStyle({{}}, {{cartoon: {{color: '#2f3742', opacity: 1.0}}}});
       viewer.setStyle({{resn: 'MOL'}},
@@ -252,9 +279,19 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
     // did nothing on its own -- the surface simply covered it. Excluding both the
     // ligand and residue 113 leaves an opening at the reaction site, which is
     // also the one place the reader needs to see into.
-    surf = viewer.addSurface(M.SurfaceType.VDW,
-      {{opacity: 0.98, colorfunc: chargeColour}},
-      {{not: {{or: [{{resn: 'MOL'}}, {{resi: {CYS113_RESI}}}]}}}});
+    // THE SURFACE IS A MESH, NOT A STYLE. `setFrame` regenerates the cartoon,
+    // sticks and spheres from the new coordinates on every frame; a surface is
+    // triangulated once, at the coordinates it was asked for, and a frame change
+    // never recomputes it. Built once at load it stayed frozen at frame 0 while
+    // the cartoon animated underneath -- and the Cys113 cut-out stayed carved
+    // where the ligand USED to be, which is the one spot the reader is looking.
+    //
+    // Rebuilding every frame is correct and too slow to play through: the mesh is
+    // the expensive call in this viewer. So it is rebuilt ON RELEASE -- slider
+    // let go, playback paused -- and marked STALE in between, because a shell
+    // describing a different frame with nothing saying so is precisely the
+    // plausible-and-wrong rendering this project keeps producing.
+    buildSurface();
     // NO SURFACE ON THE LIGAND (@tt8804: too distracting). It is drawn as
     // yellow sticks only, so the warhead and its approach vector stay readable
     // against the protein surface instead of competing with it.
@@ -264,11 +301,17 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
     viewer.resize();
   }}
 
+  // `input` fires continuously through the drag, `change` fires once on release.
+  // The cheap redraw rides the drag; the expensive mesh waits for the release.
   document.getElementById('frame').addEventListener('input', function(e) {{
     frame = +e.target.value; draw();
   }});
+  document.getElementById('frame').addEventListener('change', function(e) {{
+    frame = +e.target.value; draw(); if (!timer) buildSurface();
+  }});
   document.getElementById('play').addEventListener('click', function(e) {{
-    if (timer) {{ clearInterval(timer); timer = null; e.target.innerHTML = '&#9654; play'; return; }}
+    if (timer) {{ clearInterval(timer); timer = null; e.target.innerHTML = '&#9654; play';
+                  buildSurface(); return; }}
     e.target.innerHTML = '&#10073;&#10073; pause';
     timer = setInterval(function() {{
       frame = (frame + 1) % DSG.length;
@@ -277,9 +320,11 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
     }}, 70);
   }});
   document.getElementById('surf').addEventListener('change', function(e) {{
-    if (!viewer) return;
+    if (!viewer || !surf) return;
+    // Turning it back on should show THIS frame, not the one it was built at.
+    if (e.target.checked && surfFrame !== frame) {{ buildSurface(); return; }}
     viewer.setSurfaceMaterialStyle(surf.surfid, {{opacity: e.target.checked ? 0.98 : 0}});
-
+    markStale();
     viewer.render();
   }});
   document.getElementById('labs').addEventListener('change', draw);
@@ -305,4 +350,8 @@ VIEWER_CSS = """
 .glctl input[type=range] { flex: 1 1 220px; }
 .glctl button { border: 1px solid #003087; background: #fff; color: #003087;
                 border-radius: 3px; padding: .25rem .7rem; cursor: pointer; }
+/* The surface is rebuilt on release, so while scrubbing or playing it describes
+   an older frame. Say which one, rather than letting it pass as current. */
+.glctl .stale { color: #8a5a00; background: #fdf0dc; border-radius: 99px;
+                padding: .05rem .5rem; font-size: .78rem; }
 """

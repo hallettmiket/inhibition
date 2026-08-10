@@ -135,6 +135,23 @@ def _md() -> pd.DataFrame:
     return d[d.get("production_ps", 0) >= 50000].drop_duplicates("ident", keep="last")
 
 
+def _version() -> tuple[str, str]:
+    """Current version and its codename, read from the CHANGELOG's first entry.
+
+    Not a constant in this file. A version literal here would be a pin, and pins
+    in this repo go stale silently -- the CHANGELOG is where the release is
+    actually declared, so ask it.
+    """
+    import re
+    p = REPO / "CHANGELOG.md"
+    if p.is_file():
+        m = re.search(r'^##\s+([0-9]+\.[0-9]+\.[0-9]+)\s+[""“”"]?([^""“”"\n—-]*)',
+                      p.read_text(), re.M)
+        if m:
+            return m.group(1), m.group(2).strip().strip('"“”')
+    return "", ""
+
+
 def _sweep_all() -> pd.DataFrame:
     """Every sweep row, INCLUDING the failures.
 
@@ -226,6 +243,7 @@ def main() -> None:
     # in the same pass as the candidates', from the same function.
     ctl = _controls()
     thumbs = _thumbs(list(args.candidates) + [c["ident"] for c in ctl])
+    _ver, _code = _version()
     swi = sw.set_index("parent_ident") if not sw.empty else pd.DataFrame()
     mdi = md.set_index("ident") if not md.empty else pd.DataFrame()
 
@@ -531,6 +549,9 @@ h1{{margin:0;font-size:.86rem;font-weight:600;letter-spacing:-.01em;color:var(--
 .mbtn.on{{background:var(--navy);border-color:var(--navy);color:#fff;font-weight:600}}
 .mbtn:focus-visible{{outline:2px solid var(--blue);outline-offset:2px}}
 .mhint{{font-size:11px;color:var(--muted);flex:none;margin-left:4px}}
+.ver{{font-family:var(--mono);font-size:10.5px;color:var(--muted);flex:none;
+ border:1px solid var(--rule);border-radius:99px;padding:1px 8px;
+ background:var(--paper)}}
 .msep{{width:1px;height:16px;background:var(--rule);margin:0 2px;flex:none}}
 .ohd{{font-family:var(--mono);font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;
  font-weight:700;padding:11px 14px 7px;border-bottom:1px solid var(--rule);
@@ -612,6 +633,7 @@ iframe{{flex:1;width:100%;border:0;background:var(--paper)}}
 </style></head><body>
 <div id="topbar">
  <h1 title="Pick a molecule on the left; its pose, movie and plots load on the right.">{html.escape(args.title)}</h1>
+ <span class="ver" title="release this page was built from">{html.escape(_ver)}{(' &middot; ' + html.escape(_code)) if _code else ''}</span>
  <span class="msep"></span>
  <button id="m-all" class="mbtn on" onclick="setMode('all')">all classes</button>
  <button id="m-cls" class="mbtn" onclick="setMode('cls')">by warhead class</button>
