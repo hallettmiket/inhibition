@@ -540,15 +540,27 @@ def _paired(dots_svg: str, real_svg: str, cap_l: str, cap_r: str) -> str:
 
 
 def _mode_panel(pts, m) -> str:
-    """One mode: its own share of the cloud, plus the representative it elects."""
-    ox, oy, sc = -108.0, -76.0, 0.86
-    cx = ox + m["cx"] * sc
-    cy = oy + m["cy"] * sc
+    """One mode: its own share of the cloud, plus the representative it elects.
+
+    The transform is FITTED to what this panel actually draws -- the mode's own
+    spread and the sulfur it points at -- rather than being one hard-coded offset
+    shared by all three. A fixed transform framed the biggest mode and pushed the
+    smaller two off their own canvases: dots, pocket and labels all clipped, on a
+    diagram whose whole job is to show where a mode sits.
+    """
+    W, H, PAD = 200.0, 150.0, 20.0
+    xs = [m["cx"] - 3.3 * m["sx"], m["cx"] + 3.3 * m["sx"], SG[0]]
+    ys = [m["cy"] - 3.3 * m["sy"], m["cy"] + 3.3 * m["sy"], SG[1]]
+    lo_x, hi_x, lo_y, hi_y = min(xs), max(xs), min(ys), max(ys)
+    sc = min((W - 2 * PAD) / max(1.0, hi_x - lo_x),
+             (H - 2 * PAD) / max(1.0, hi_y - lo_y))
+    ox = PAD - lo_x * sc + (W - 2 * PAD - (hi_x - lo_x) * sc) / 2
+    oy = PAD - lo_y * sc + (H - 2 * PAD - (hi_y - lo_y) * sc) / 2
+    cx, cy = ox + m["cx"] * sc, oy + m["cy"] * sc
     ang = math.radians(180 - m["ang"])
-    sgx = ox + SG[0] * sc
-    sgy = oy + SG[1] * sc
-    wx = cx + 34 * math.cos(ang)
-    wy = cy - 34 * math.sin(ang)
+    sgx, sgy = ox + SG[0] * sc, oy + SG[1] * sc
+    wx = cx + 30 * math.cos(ang)
+    wy = cy - 30 * math.sin(ang)
     return f"""<svg viewBox="0 0 200 150" class="mini" role="img"
  aria-label="Mode {m['key']}: {m['n']} poses, representative geometry">
 <ellipse cx='{ox + 232 * sc:.0f}' cy='{oy + 176 * sc:.0f}'
@@ -929,12 +941,12 @@ def build() -> str:
 *{{box-sizing:border-box}}
 body{{margin:0;padding:24px 28px 60px;background:var(--paper);color:var(--ink);
  font-family:var(--sans);font-size:14px;line-height:1.55;
- font-variant-numeric:tabular-nums;max-width:1320px}}
+ font-variant-numeric:tabular-nums;max-width:1400px}}
 h1{{font-size:1.2rem;color:var(--navy);margin:0 0 3px}}
 .sub{{color:var(--muted);margin:0 0 4px}}
 .warnbar{{border-left:3px solid var(--warn);background:var(--raise);
  padding:9px 13px;margin:14px 0 26px;border-radius:0 4px 4px 0;font-size:13px}}
-.step{{display:grid;grid-template-columns:minmax(0,560px) 1fr;gap:26px;align-items:start;
+.step{{display:grid;grid-template-columns:minmax(0,640px) 1fr;gap:26px;align-items:start;
  padding:22px 0;border-top:1px solid var(--rule)}}
 @media(max-width:1040px){{.step{{grid-template-columns:1fr}}}}
 .dia{{width:100%;height:auto;background:var(--card);border:1px solid var(--rule);
@@ -960,7 +972,7 @@ p{{margin:.45em 0}}
 .modes{{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}}
 .mcard{{border:1px solid var(--rule);border-radius:6px;padding:12px;
  background:var(--raise);display:grid;
- grid-template-columns:minmax(0,1.55fr) minmax(0,320px);gap:18px;align-items:center}}
+ grid-template-columns:minmax(0,1.15fr) minmax(0,340px);gap:18px;align-items:center}}
 @media(max-width:820px){{.mcard{{grid-template-columns:1fr}}}}
 .mcard .crit{{margin-top:0}}
 table{{border-collapse:collapse;width:100%;font-size:12.5px}}
@@ -1021,6 +1033,9 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .arrow{{text-align:center;padding:2px 0 0}}
 .arrow span{{font:600 11px var(--mono);color:var(--blue);letter-spacing:.04em}}
+.arrow.down{{padding:10px 0 8px;text-align:left}}
+.arrow.down span{{font-size:10.5px;line-height:1.4;display:inline-block}}
+.tcap{{font:600 10.5px var(--mono);color:var(--muted);margin:0 0 5px;letter-spacing:.04em;text-transform:uppercase}}
 /* Schematic beside the real poses, same width and same colours, so a dot in one
    can be matched to a shape in the other without being told to. */
 .pair{{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}}
@@ -1105,11 +1120,14 @@ window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
 </div>
 
 <div class="step">
- <div>{_stage_pool()}
-  <table class="rank" style="margin-top:12px">
+ <div><p class="tcap">one molecule &mdash; its three modes, scored</p>
+  <table class="rank">
   <tr><th class="n">#</th><th>mode</th><th class="n">poses</th>
       <th class="n">d &Aring;</th><th class="n">angle</th><th class="n">ready</th></tr>
   {rank_rows}</table>
+  <div class="arrow down"><span>&darr;&nbsp; every molecule is scored the same way,
+   then all their modes are pooled</span></div>
+  {_stage_pool()}
   <p class="mnote" style="margin-top:10px">Ranked on attack-readiness, not on
   docking energy — energy correlates with reaction competence at
   &rho;&nbsp;=&nbsp;+0.009 across 115,300 poses, which is noise.</p></div>

@@ -234,7 +234,7 @@ def _controls() -> list[dict]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--candidates", nargs="+", required=True)
-    ap.add_argument("--title", default="T4 screen")
+    ap.add_argument("--title", default="DWI Derivative Screen")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -244,10 +244,13 @@ def main() -> None:
     ctl = _controls()
     thumbs = _thumbs(list(args.candidates) + [c["ident"] for c in ctl])
     _ver, _code = _version()
-    # The version belongs IN the title (@tt8804): a page saved, screenshotted or
-    # pasted into a thread carries its release with it rather than losing it to a
-    # chip someone cropped out.
-    _full_title = f"{args.title} {_ver}".strip()
+    # The version AND its codename belong in the title (@tt8804): a page saved,
+    # screenshotted or pasted into a thread carries its release with it rather
+    # than losing it to a chip someone cropped out.
+    _full_title = " ".join(x for x in (
+        args.title,
+        f"version {_ver}" if _ver else "",
+        f"“{_code}”" if _code else "") if x)
     swi = sw.set_index("parent_ident") if not sw.empty else pd.DataFrame()
     mdi = md.set_index("ident") if not md.empty else pd.DataFrame()
 
@@ -637,7 +640,6 @@ iframe{{flex:1;width:100%;border:0;background:var(--paper)}}
 </style></head><body>
 <div id="topbar">
  <h1 title="Pick a molecule on the left; its pose, movie and plots load on the right.">{html.escape(_full_title)}</h1>
- {f'<span class="ver" title="release codename">{html.escape(_code)}</span>' if _code else ''}
  <span class="msep"></span>
  <button id="m-all" class="mbtn on" onclick="setMode('all')">all classes</button>
  <button id="m-cls" class="mbtn" onclick="setMode('cls')">by warhead class</button>
