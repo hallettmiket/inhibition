@@ -25,6 +25,35 @@ Retrospective on this one: `docs/retrospective_2.2.0.md`, written 2026-08-09 and
 judged against the outline's four pre-registered failure criteria — one failed
 outright (another silent stage), one is untested (mode-count reproducibility).
 
+### The positive control, and what it cost to read it (2026-08-10)
+
+Sulfopin and Liu-2022-ZL-Pin13 were put through the pipeline as positive controls.
+**No measured value changes for any candidate** — this is about what the readout
+was doing to them.
+
+Three records, in the order they were found, each qualifying the one before:
+
+* **D0075** — the 10 ns sweep rejects *every* known active. Sulfopin is not
+  rejected early (500 runs, 1 mode, 465 poses, 47 reaction-competent); it fails at
+  the sweep, with zero sustained visits, ranked 104 of 234.
+* **D0076** — *why*. `rx_7F0M` entered attack geometry **13 separate times** and
+  scored zero, because `MIN_DWELL_PS = 100` requires each excursion to *last*
+  100 ps at a 19.96 ps save interval. The pre-registration chose visits precisely
+  because "a covalent reaction needs ONE good approach, not sustained occupancy",
+  and the implementation filters on persistence. Re-derived on raw visits, within
+  mechanism: **Liu-2022 beats 20 of 20 SN2 candidates**, Sulfopin 18 of 20.
+* **D0077** — the `rx_*` controls were the wrong shape. 6VAJ's ligand is a
+  covalent **adduct**; cleaving the bond leaves the reactive carbon 1.98 Å from
+  SG, *below* the 2.8 Å window floor, and its 180° is constructed rather than
+  measured. Equilibration relaxes it to 3.57 Å / 100.9° before production starts.
+  Our own docked pose, by contrast, enters at 3.36 Å / 156.8° — inside the window
+  and over the SN2 bar.
+
+Net: the screen's chemistry was sound, and three separate readout defects made it
+look otherwise. The 100 ns results stand — Liu-2022 **99.95%** engaged and held,
+Sulfopin 78.9%, Juglone 47.5% — and the docked Sulfopin is the control that should
+carry the claim.
+
 **Deliberately not stamped released.** Two things are open and neither is the
 retrospective's to decide: the receptor split (D0059 is still `proposed`, while
 `config/receptor.yaml` and `noncovalent_dock_run.py` still default to 6VAJ), and

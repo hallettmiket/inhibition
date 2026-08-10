@@ -212,6 +212,49 @@ chosen for coverage, not yet demonstrated for reproducibility.
 secondary pocket Reddi 2023 reports; N-activated acrylamides at 97% of T₃
 (D0066), still without a chemist's ruling; the within-class rigidity confound.
 
+## 5b. The positive control, run on the last night — and what it found
+
+Added 2026-08-10, after the retrospective's first draft. @tt8804 asked the
+question the version had not yet answered: **would our own screen have caught
+Sulfopin?**
+
+Answering it produced three records in a chain, each qualifying the one before,
+and the chain is the most useful thing 2.2.0 produced.
+
+**D0075 — it says no.** Sulfopin through the production protocol gives 1 mode,
+465 poses, 47 reaction-competent, then fails the 10 ns sweep with **zero sustained
+visits**, ranked 104 of 234. Liu-2022-ZL-Pin13 and Juglone fail it too. Meanwhile
+58 of 233 candidates pass. On the face of it, the criterion admits a quarter of
+our generated matter and none of the chemistry known to react with Cys113.
+
+**D0076 — why, and it is a defect.** `rx_7F0M` entered attack geometry **13
+separate times** and scored zero visits, because `MIN_DWELL_PS = 100` requires
+each excursion to *last* 100 ps and the sweep saves every 19.96 ps — five
+consecutive frames. The pre-registration chose visits over occupancy in as many
+words: *"a covalent reaction needs ONE good approach, not sustained occupancy"*.
+The implementation then filtered on persistence. Re-derived on raw visits and
+compared within mechanism, as #47 requires: **Liu-2022 beats 20 of 20 SN2
+candidates**, Sulfopin's crystal form 18 of 20, its docked form 17 of 20, against
+an SN2 candidate median of **0**.
+
+**D0077 — and the control itself was the wrong shape.** 6VAJ's ligand is a
+covalent adduct. Cleaving the bond leaves the reactive carbon **1.98 Å** from SG,
+*below* the 2.8 Å window floor, and the 180° angle is *constructed* by placing the
+halogen along the S→C vector rather than measured. Equilibration relaxes it to
+3.57 Å / 100.9° before the first production frame. Our own docked pose enters at
+**3.36 Å / 156.8°** — inside the window, over the SN2 bar. The 5.01 Å RMSD between
+them at 1.45 Å centroid separation is a pivot, not a mislocation.
+
+**What the chain amounts to.** The screen's chemistry was sound. Three separate
+readout defects — a persistence filter on an observable chosen for the opposite
+reason, cross-mechanism ranking, and a control built in the wrong state — made it
+look otherwise. Each was found by asking what a number meant rather than by a test
+failing, which is the same route §3 records for every other defect this project
+has caught.
+
+The 100 ns results stand and are worth quoting on their own: **Liu-2022 99.95%
+engaged and held**, Sulfopin 78.9%, Juglone 47.5%.
+
 ## 6. Judged against its own failure criteria
 
 `outline_2.2.0.md` §5 stated in advance what would make 2.2.0 a failure. Scoring
