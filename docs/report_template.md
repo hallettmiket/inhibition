@@ -32,8 +32,13 @@ Per molecule, in this order:
 4. **The measured values** — trajectory length, warhead class, 100 ns target
    engagement, mean/max/final ligand RMSD, residence fraction, where it left if it
    left, and the 10 ns sweep readings beside them.
-5. **MD movie**, in a panel.
-6. **RMSD plots**, in a panel.
+5. **A download of the MD structure** — first frame of the fitted trajectory,
+   protein and ligand as simulated, as a `data:` URI so it saves with one click.
+   The recipient has no access to this filesystem, so a path is useless to them.
+6. **2D interaction map**, in a panel — residues contacting the ligand, sized and
+   coloured by the fraction of frames they are in contact.
+7. **MD movie**, in a panel.
+8. **RMSD plots**, in a panel.
 
 ## 2. What stays out
 
@@ -44,6 +49,28 @@ project produces is stamped `rank_validated = False` for reasons that take a
 retrospective to explain.
 
 Send the molecule and its measurements. Let the chemist do the chemistry.
+
+## 2b. The interaction map, and what it claims
+
+Computed here rather than by ProLIF or PLIP, neither of which is installed. The
+criteria are therefore stated on the figure itself:
+
+- **contact** = any protein heavy atom within **4.5 Å** of any ligand heavy atom;
+- **polar** = N/O to N/O within **3.5 Å**. Called *polar*, not *hydrogen bond*:
+  the movie PDB carries no hydrogens, so donor geometry cannot be checked and
+  "H-bond" would claim more than was measured;
+- **frequency** over ~40 frames spread across the run, not one snapshot. A single
+  frame reports which residues happened to be nearby at one instant, which for a
+  molecule that moves is close to arbitrary.
+
+**Residues are numbered as the CRYSTAL**, not as the MD system. GROMACS renumbers
+from 1, so the catalytic cysteine is residue 63 in the trajectory and Cys113
+everywhere else. A chemist reading "Cys63" would look up the wrong residue — the
+same offset that once had this project draw a glutamate and label it Cys113.
+
+It is a contact **summary**, not a LigPlot. Residues are placed for legibility,
+not at their real positions, and no line claims to join a particular ligand atom
+to a particular residue atom. The figure says so.
 
 ## 3. Rules the format keeps
 

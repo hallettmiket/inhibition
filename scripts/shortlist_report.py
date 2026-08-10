@@ -88,6 +88,133 @@ def depiction(smi: str, w: int = 340, h: int = 210) -> str:
     return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
 
 
+#: Heavy-atom contact cutoff, Angstrom. A residue counts as contacting the ligand
+#: in a frame if any of its heavy atoms is within this of any ligand heavy atom.
+CONTACT_A = 4.5
+#: Polar contact: N/O to N/O within this. Called "polar", not "hydrogen bond" --
+#: the movie PDB carries no hydrogens, so donor geometry cannot be checked and
+#: calling it an H-bond would claim more than was measured.
+POLAR_A = 3.5
+
+
+def contacts(movie_pdb: Path, max_frames: int = 40) -> tuple[list, int]:
+    """Per-residue contact frequency across the trajectory.
+
+    Over FRAMES, not one snapshot: a single frame says which residues happened to
+    be near the ligand at one instant, which for a molecule that moves is close to
+    arbitrary. Frequency over the run is the thing a chemist can act on.
+
+    Returns (rows, n_frames) where each row is
+    (resname, resid, fraction_of_frames, polar_fraction).
+    """
+    import numpy as np
+    text = movie_pdb.read_text()
+    models = [m for m in text.split("MODEL")[1:]] or [text]
+    step = max(1, len(models) // max_frames)
+    models = models[::step]
+
+    seen: dict[tuple, list] = {}
+    for mdl in models:
+        lig, prot = [], []
+        for ln in mdl.splitlines():
+            if not ln.startswith(("ATOM", "HETATM")):
+                continue
+            el = ln[76:78].strip() or ln[12:16].strip()[:1]
+            if el == "H":
+                continue
+            try:
+                xyz = (float(ln[30:38]), float(ln[38:46]), float(ln[46:54]))
+            except ValueError:
+                continue
+            rn, ri = ln[17:20].strip(), ln[22:26].strip()
+            (lig if rn == "MOL" else prot).append((xyz, rn, ri, el))
+        if not lig or not prot:
+            continue
+        L = np.array([a[0] for a in lig])
+        P = np.array([a[0] for a in prot])
+        d = np.linalg.norm(P[:, None, :] - L[None, :, :], axis=2)
+        near = d.min(axis=1) <= CONTACT_A
+        lig_pol = np.array([a[3] in ("N", "O") for a in lig])
+        hit_res, pol_res = set(), set()
+        for i, ok in enumerate(near):
+            if not ok:
+                continue
+            _, rn, ri, el = prot[i]
+            hit_res.add((rn, ri))
+            if el in ("N", "O") and lig_pol.any():
+                if d[i][lig_pol].min() <= POLAR_A:
+                    pol_res.add((rn, ri))
+        for k in hit_res:
+            seen.setdefault(k, [0, 0])
+            seen[k][0] += 1
+            if k in pol_res:
+                seen[k][1] += 1
+    n = len(models)
+    rows = [(rn, ri, c / n, p / n) for (rn, ri), (c, p) in seen.items()]
+    rows.sort(key=lambda r: -r[2])
+    return rows, n
+
+
+def interaction_map(smi: str, rows: list, n_frames: int, cys_resi: int = 63,
+                    offset: int = 50) -> str:
+    """Ligand in the middle, contacting residues around it by frequency.
+
+    A contact SUMMARY, not a LigPlot: the residues are placed for legibility, not
+    at their real positions, and no line claims to join a particular ligand atom
+    to a particular residue atom. Saying so on the figure is the point — a diagram
+    that looks like a LigPlot will be read as one.
+
+    NUMBERED AS THE CRYSTAL, NOT AS THE MD SYSTEM. GROMACS renumbers from 1, so
+    the catalytic cysteine is residue 63 in the trajectory and Cys113 in every
+    paper and every PDB entry. This report leaves the project, and a chemist
+    reading "Cys63" would either not recognise it or would look up the wrong
+    residue — the same offset that once had us draw a glutamate and label it
+    Cys113.
+    """
+    import math
+    keep = [r for r in rows if r[2] >= 0.20][:12]
+    if not keep:
+        return ""
+    W, H, CX, CY = 720, 470, 360, 235
+    core = depiction(smi, 250, 175) if smi else ""
+    parts = []
+    for i, (rn, ri, frac, pol) in enumerate(keep):
+        a = -math.pi / 2 + 2 * math.pi * i / len(keep)
+        x, y = CX + 250 * math.cos(a), CY + 158 * math.sin(a)
+        is_cys = (rn == "CYS" and str(ri) == str(cys_resi))
+        try:
+            shown = f"{rn}{int(ri) + offset}"
+        except ValueError:
+            shown = f"{rn}{ri}"
+        col = "#b3261e" if is_cys else ("#0f7a54" if pol > 0.2 else "#4a6885")
+        x0, y0 = CX + 120 * math.cos(a), CY + 84 * math.sin(a)
+        dash = " stroke-dasharray='4 3'" if pol > 0.2 else ""
+        parts.append(
+            f"<line x1='{x0:.0f}' y1='{y0:.0f}' x2='{x:.0f}' y2='{y:.0f}' "
+            f"stroke='{col}' stroke-width='{0.8 + 2.6 * frac:.1f}' opacity='.5'"
+            f"{dash}/>"
+            f"<circle cx='{x:.0f}' cy='{y:.0f}' r='25' fill='{col}' fill-opacity='.12' "
+            f"stroke='{col}' stroke-width='1.2'/>"
+            f"<text x='{x:.0f}' y='{y - 2:.0f}' class='rl' fill='{col}'>"
+            f"{shown}</text>"
+            f"<text x='{x:.0f}' y='{y + 11:.0f}' class='rf' fill='{col}'>"
+            f"{frac*100:.0f}%</text>")
+    return f"""<svg viewBox="0 0 {W} {H}" class="imap" role="img"
+ aria-label="residues contacting the ligand, by fraction of frames">
+<style>.rl{{font:600 11px ui-monospace,monospace;text-anchor:middle}}
+.rf{{font:9.5px ui-monospace,monospace;text-anchor:middle;opacity:.85}}
+.ik{{font:10px Helvetica,Arial,sans-serif;fill:#5b6b80}}</style>
+{''.join(parts)}
+<image href="{core}" x="{CX-125}" y="{CY-88}" width="250" height="175"/>
+<text x="10" y="{H-24}" class="ik">line width = fraction of frames in contact
+&#183; dashed + green = polar contact (N/O within {POLAR_A} &#8491;)
+&#183; red = catalytic Cys113 &#183; crystal numbering</text>
+<text x="10" y="{H-10}" class="ik">Contact = any heavy atom within {CONTACT_A} &#8491;,
+over {n_frames} frames of the run. Residues are placed for legibility, not at
+their real positions.</text>
+</svg>"""
+
+
 def md_row(ident: str):
     parts = []
     for f in glob.glob(str(B / "md_residence/*.csv")):
@@ -161,6 +288,26 @@ def block(ident: str, er, three: str, cls: dict) -> str:
         nacs = mp.nac_series(ident, rep, mpdb, total_ns)
     img = mp.figure(ident, s, res, er, nacs)
 
+    # THE STRUCTURE THE CHEMIST CAN OPEN. First model of the fitted movie: the
+    # protein and ligand as simulated, PBC-repaired and CA-fitted, one frame.
+    # Offered as a download rather than a path, because the recipient has no
+    # access to this filesystem.
+    imap, pdb_href, pdb_bytes = "", "", 0
+    if mpdb.is_file():
+        raw = mpdb.read_text()
+        first = raw.split("ENDMDL")[0]
+        if not first.lstrip().startswith(("MODEL", "ATOM", "HETATM", "TITLE", "REMARK")):
+            first = raw
+        frame1 = first.replace("MODEL", "REMARK MODEL", 1).rstrip() + "\nEND\n"
+        pdb_bytes = len(frame1.encode())
+        pdb_href = ("data:chemical/x-pdb;base64,"
+                    + base64.b64encode(frame1.encode()).decode())
+        try:
+            rows_c, nfr = contacts(mpdb)
+            imap = interaction_map(smiles_of(ident) or "", rows_c, nfr)
+        except Exception as exc:                          # noqa: BLE001
+            log.warning("%s: interaction map unavailable: %s", ident, exc)
+
     smi = smiles_of(ident) or ""
     svg = depiction(smi) if smi else ""
     m, sw = md_row(ident), sweep_row(ident)
@@ -182,6 +329,9 @@ def block(ident: str, er, three: str, cls: dict) -> str:
                      f"{float(sw.median_dist_a):.2f} &Aring;"))
         rows.append(("median attack angle", f"{float(sw.median_angle_deg):.1f}&deg;"))
     facts = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in rows)
+    dl = (f'<a class="dl" download="{ident}_md.pdb" href="{pdb_href}">'
+          f'Download the MD structure (PDB, {pdb_bytes/1024:.0f} KB)</a>'
+          if pdb_href else "")
 
     return f"""
 <section class="mol">
@@ -192,8 +342,12 @@ def block(ident: str, er, three: str, cls: dict) -> str:
       <label for="s_{ident}">SMILES</label>
       <textarea id="s_{ident}" readonly rows="3" onclick="this.select()">{smi}</textarea>
       <table class="kv">{facts}</table>
+      {dl}
     </div>
   </div>
+  <details class="panel"><summary>2D interaction map
+    <span class="hint">residues contacting the ligand, by fraction of frames</span></summary>
+    <div class="pbody">{imap}</div></details>
   <details class="panel"><summary>MD movie
     <span class="hint">100 ns, surface by charge, ligand in yellow</span></summary>
     <div class="pbody">{movie}</div></details>
@@ -261,6 +415,12 @@ table.kv th{{text-align:left;font-weight:500;color:var(--muted);padding:3px 14px
 table.kv td{{font-family:var(--mono);padding:3px 0}}
 img.plots{{width:100%;height:auto;border:1px solid var(--rule);border-radius:5px;
   background:#fff}}
+svg.imap{{width:100%;height:auto;background:var(--card);border:1px solid var(--rule);
+  border-radius:5px}}
+a.dl{{display:inline-block;margin-top:.7rem;font:600 12px var(--sans);
+  color:var(--blue);text-decoration:none;border:1px solid var(--blue);
+  border-radius:4px;padding:.35rem .7rem}}
+a.dl:hover{{background:var(--blue-pale)}}
 </style></head><body>
 <header class="mast"><h1>{title}</h1>
 <p class="standfirst">Timothy Wu &middot; {byline_ver}</p></header>
