@@ -97,6 +97,41 @@ CONTACT_A = 4.5
 #: calling it an H-bond would claim more than was measured.
 POLAR_A = 3.5
 
+#: One key, used by both figures, so a colour cannot mean two things across the
+#: page. Wording is deliberately about what was MEASURED: "polar", not H-bond;
+#: "no polar partner", not hydrophobic contact in the thermodynamic sense.
+_LEGEND_KEYS = [
+    ("#b3261e", False, "catalytic Cys113",
+     f"Sγ to the electrophilic carbon — the bond the screen is for"),
+    ("#0f7a54", True, "polar",
+     f"N/O to N/O within {POLAR_A} Å"),
+    ("#4a6885", False, "close contact",
+     f"heavy atoms within {CONTACT_A} Å, no polar partner"),
+]
+
+_LEGEND_3D = ('<div class="key3">'
+              + "".join(
+                  f'<span class="k"><i style="background:{c};'
+                  f'{"opacity:.55;" if d else ""}"></i>{n}'
+                  f'<em>{w}</em></span>' for c, d, n, w in _LEGEND_KEYS)
+              + '</div>')
+
+
+def _legend_svg(x: float, y: float) -> str:
+    """The same key as the 3D view, drawn into the SVG so the figure travels."""
+    out = [f"<text x='{x:.0f}' y='{y:.0f}' class='kh'>interactions</text>"]
+    for i, (col, dash, name, what) in enumerate(_LEGEND_KEYS):
+        yy = y + 17 + i * 15
+        dd = " stroke-dasharray='5 4'" if dash else ""
+        out.append(
+            f"<line x1='{x:.0f}' y1='{yy - 4:.0f}' x2='{x + 26:.0f}' "
+            f"y2='{yy - 4:.0f}' stroke='{col}' stroke-width='2.4'{dd}/>"
+            f"<text x='{x + 33:.0f}' y='{yy:.0f}' class='kt' fill='{col}'>"
+            f"{name}</text>"
+            f"<text x='{x + 33 + 7.2 * len(name):.0f}' y='{yy:.0f}' "
+            f"class='kw'>{what}</text>")
+    return "".join(out)
+
 
 def ligand_mol(movie_pdb: Path, smi: str):
     """The ligand as an RDKit mol whose atom order matches the PDB's.
@@ -226,8 +261,42 @@ def representative_frame(movie_pdb: Path):
     return keep[int(np.argmin(((c - c.mean(axis=0)) ** 2).sum(axis=1)))], len(keep)
 
 
+def reactive_atom_index(mol, warhead_class: str) -> int | None:
+    """The electrophilic carbon, taken from the warhead class's own SMARTS.
+
+    NOT the ligand atom nearest Cys113, which is what a plain contact search
+    returns and which for `bdhi_c5` is the BROMIDE. That is not wrong as a
+    distance -- the bromide sits on the carbon under attack -- but drawing the
+    Cys113 line to it says the halogen is the interaction, when the reaction is
+    S(gamma) displacing that bromide from the carbon. The class table's
+    `reactive_atom_smarts` puts the electrophilic carbon first, the same
+    convention `shared/covalent_adduct.py` relies on.
+
+    The movie PDB carries no hydrogens and `ligand_mol` builds the molecule from
+    that same PDB block, so an RDKit atom index is an index into the heavy-atom
+    list the contact search used.
+    """
+    from rdkit import Chem
+    if mol is None or not warhead_class:
+        return None
+    fs = sorted(glob.glob(str(REPO / "data" / "reference" / "warhead_classes_*.csv")))
+    if not fs:
+        return None
+    d = pd.read_csv(fs[-1])
+    hit = d[d.class_id == warhead_class]
+    if hit.empty:
+        return None
+    sma = str(hit.iloc[0].reactive_atom_smarts or "")
+    patt = Chem.MolFromSmarts(sma) if sma else None
+    if patt is None:
+        return None
+    m = mol.GetSubstructMatches(patt)
+    return int(m[0][0]) if m else None
+
+
 def interaction_3d(movie_pdb: Path, rows: list, elem_id: str,
-                   cys_resi: int = 63, offset: int = 50) -> str:
+                   cys_resi: int = 63, offset: int = 50,
+                   rx_atom: int | None = None) -> str:
     """The same contacts, drawn on the real 3D pose.
 
     Everything here is measured: the residues sit where they sit, and each dashed
@@ -260,9 +329,18 @@ def interaction_3d(movie_pdb: Path, rows: list, elem_id: str,
     for rn, ri, frac, pol, ai in keep:
         if ai >= len(lig):
             continue
-        la = np.array(lig[ai][0])
+        is_cys = (rn == "CYS" and str(ri) == str(cys_resi))
+        # CYS113 IS DRAWN AS THE REACTION, NOT AS A CONTACT. For every other
+        # residue the pair is "closest atom to closest atom", which is the right
+        # question. For the catalytic cysteine the right question is the attack
+        # vector: S(gamma) to the electrophilic carbon. Left to the generic rule
+        # this molecule drew Cys113 to its bromide, which is the leaving group.
+        pick = rx_atom if (is_cys and rx_atom is not None
+                           and rx_atom < len(lig)) else ai
+        la = np.array(lig[pick][0])
         cand = [(np.linalg.norm(np.array(p[0]) - la), p) for p in prot
-                if p[1] == rn and p[2] == ri]
+                if p[1] == rn and p[2] == ri
+                and (not is_cys or p[3] == "S" or rx_atom is None)]
         if not cand:
             continue
         dist, pa = min(cand, key=lambda t: t[0])
@@ -270,20 +348,24 @@ def interaction_3d(movie_pdb: Path, rows: list, elem_id: str,
             shown = f"{rn}{int(ri) + offset}"
         except ValueError:
             shown = f"{rn}{ri}"
-        is_cys = (rn == "CYS" and str(ri) == str(cys_resi))
         col = "0xb3261e" if is_cys else ("0x0f7a54" if pol > 0.2 else "0x4a6885")
+        tag = (f"{shown} Sγ→C  {dist:.1f} A" if is_cys and rx_atom is not None
+               else f"{shown}  {dist:.1f} A")
         links.append({"a": list(la), "b": list(pa[0]), "c": col,
-                      "t": f"{shown}  {dist:.1f} A", "d": pol > 0.2})
+                      "t": tag, "d": pol > 0.2})
         resis.append(int(ri))
 
     pdb = "\n".join(l for l in frame.splitlines()
                      if l.startswith(("ATOM", "HETATM")))
     return f"""
-<div class="glwrap"><div class="glbox"><div id="{elem_id}"></div></div>
+<div class="glwrap"><div class="glbox">
+<div id="{elem_id}" style="position:absolute;inset:0"></div></div>
+{_LEGEND_3D}
 <p class="p3cap">Representative frame — the ligand's medoid position over
-{nfr} frames. Dashed green = polar, red = catalytic Cys113, grey-blue =
-hydrophobic; each line joins the actual closest pair of atoms in this frame, with
-the distance. Residues are where they are.</p></div>
+{nfr} frames. Every line joins the actual closest pair of atoms in this frame,
+with the distance; residues are where they really are. Cys113 is drawn as the
+attack vector — S&gamma; to the electrophilic carbon — not as its nearest
+contact, which for a halide-displacement warhead is the leaving group.</p></div>
 <script type="text/plain" id="{elem_id}-pdb">{pdb}</script>
 <script>
 (function(){{
@@ -312,6 +394,10 @@ the distance. Residues are where they are.</p></div>
                          backgroundOpacity:0.72, borderThickness:0}});
       }});
       v.zoomTo({{resn:'MOL'}}); v.zoom(0.55); v.resize();
+      // 3Dmol draws NOTHING until render() is called. The labels are DOM
+      // overlays and appear without it, which is what made an unrendered
+      // viewer look like a viewer with a missing molecule.
+      v.render();
     }}); }});
   }}
   (function(){{
@@ -360,7 +446,8 @@ def contact_distances(movie_pdb: Path, rows: list) -> dict:
 
 
 def interaction_map(mol, rows: list, n_frames: int, cys_resi: int = 63,
-                    offset: int = 50, dist_of: dict | None = None) -> str:
+                    offset: int = 50, dist_of: dict | None = None,
+                    rx_atom: int | None = None) -> str:
     """A real interaction diagram: each residue drawn against the atom it contacts.
 
     The ligand is rendered by RDKit, and RDKit is then asked where it PUT each
@@ -414,58 +501,82 @@ def interaction_map(mol, rows: list, n_frames: int, cys_resi: int = 63,
     cx = sum(p[0] for p in pos.values()) / len(pos)
     cy = sum(p[1] for p in pos.values()) / len(pos)
 
-    # Place each residue outward along its own ray, then spread any that collide.
-    placed = []
-    for rn, ri, frac, pol, ai in sorted(keep, key=lambda r: -r[2]):
-        ax, ay = pos.get(ai, (cx, cy))
-        vx, vy = ax - cx, ay - cy
-        L = math.hypot(vx, vy) or 1.0
-        vx, vy = vx / L, vy / L
-        r = 150.0
-        for _ in range(28):
-            x, y = ax + vx * r, ay + vy * r
-            x = min(max(x, 58), W - 58)
-            y = min(max(y, 34), H - 46)
-            if all((x - px) ** 2 + (y - py) ** 2 > 84 ** 2 for px, py, *_ in placed):
-                break
-            r += 26.0
-        placed.append((x, y, ax, ay, rn, ri, frac, pol, dist_of.get((rn, ri))))
-
-    parts = []
-    for x, y, ax, ay, rn, ri, frac, pol, dist in placed:
-        is_cys = (rn == "CYS" and str(ri) == str(cys_resi))
-        col = "#b3261e" if is_cys else ("#0f7a54" if pol > 0.2 else "#4a6885")
-        dash = " stroke-dasharray='5 4'" if pol > 0.2 else ""
+    # EVERY BOX IS SIZED TO ITS OWN TEXT. A fixed 104px rect fitted "ALA124" and
+    # not "3.2 A - 78% of frames", so the second line ran out through the border
+    # and over whatever was behind it -- which read as labels being covered.
+    # Collision is tested rectangle-against-rectangle for the same reason: a
+    # single radius cannot describe boxes of different widths.
+    def _label(rn, ri, frac, dist):
         try:
             shown = f"{rn}{int(ri) + offset}"
         except ValueError:
             shown = f"{rn}{ri}"
+        sub = (f"{dist:.1f} &#8491; &#183; {frac*100:.0f}%" if dist
+               else f"{frac*100:.0f}% of frames")
+        plain = sub.replace("&#8491;", "A").replace("&#183;", "-")
+        w = max(len(shown) * 7.4, len(plain) * 5.9) + 22
+        return shown, sub, max(w, 76.0)
+
+    placed = []
+    for rn, ri, frac, pol, ai in sorted(keep, key=lambda r: -r[2]):
+        is_cys = (rn == "CYS" and str(ri) == str(cys_resi))
+        # Cys113 points at the electrophilic carbon, not at whichever atom
+        # happens to be nearest -- see reactive_atom_index.
+        pick = rx_atom if (is_cys and rx_atom is not None) else ai
+        ax, ay = pos.get(pick, pos.get(ai, (cx, cy)))
+        shown, sub, bw = _label(rn, ri, frac, dist_of.get((rn, ri)))
+        bh = 32.0
+        vx, vy = ax - cx, ay - cy
+        L = math.hypot(vx, vy) or 1.0
+        vx, vy = vx / L, vy / L
+        r = 150.0
+        for _ in range(40):
+            x, y = ax + vx * r, ay + vy * r
+            x = min(max(x, bw / 2 + 8), W - bw / 2 - 8)
+            y = min(max(y, bh / 2 + 6), H - bh / 2 - 8)
+            if all(abs(x - px) > (bw + pw) / 2 + 8 or abs(y - py) > bh + 5
+                   for px, py, pw, *_ in placed):
+                break
+            r += 22.0
+        placed.append((x, y, bw, ax, ay, rn, ri, frac, pol, shown, sub, is_cys))
+
+    parts = []
+    for x, y, bw, ax, ay, rn, ri, frac, pol, shown, sub, is_cys in placed:
+        col = "#b3261e" if is_cys else ("#0f7a54" if pol > 0.2 else "#4a6885")
+        dash = " stroke-dasharray='5 4'" if pol > 0.2 else ""
         parts.append(
             f"<line x1='{ax:.0f}' y1='{ay:.0f}' x2='{x:.0f}' y2='{y:.0f}' "
             f"stroke='{col}' stroke-width='{0.9 + 2.4 * frac:.1f}' "
             f"opacity='.55'{dash}/>"
             f"<circle cx='{ax:.0f}' cy='{ay:.0f}' r='3.4' fill='{col}'/>"
-            f"<rect x='{x-52:.0f}' y='{y-15:.0f}' width='104' height='30' rx='6' "
-            f"fill='{col}' fill-opacity='.13' stroke='{col}' stroke-width='1.2'/>"
-            f"<text x='{x:.0f}' y='{y-2:.0f}' class='rl' fill='{col}'>{shown}</text>"
+            f"<rect x='{x - bw/2:.0f}' y='{y-16:.0f}' width='{bw:.0f}' "
+            f"height='32' rx='6' fill='#ffffff' fill-opacity='.94' "
+            f"stroke='{col}' stroke-width='1.2'/>"
+            f"<text x='{x:.0f}' y='{y-3:.0f}' class='rl' fill='{col}'>"
+            f"{shown}{' S&#947;&#8594;C' if is_cys and rx_atom is not None else ''}"
+            f"</text>"
             f"<text x='{x:.0f}' y='{y+10:.0f}' class='rf' fill='{col}'>"
-            + (f"{dist:.1f} &#8491; &#183; {frac*100:.0f}% of frames" if dist
-               else f"{frac*100:.0f}% of frames") + "</text>")
+            f"{sub}</text>")
 
-    return f"""<svg viewBox="0 0 {W} {H + 34}" class="imap" role="img"
+    LEGY = H + 16
+    return f"""<svg viewBox="0 0 {W} {H + 98}" class="imap" role="img"
  aria-label="each contacting residue joined to the ligand atom it contacts">
 <style>.rl{{font:600 11.5px ui-monospace,monospace;text-anchor:middle}}
 .rf{{font:8.5px ui-monospace,monospace;text-anchor:middle;opacity:.85}}
-.ik{{font:10.5px Helvetica,Arial,sans-serif;fill:#5b6b80}}</style>
+.ik{{font:10.5px Helvetica,Arial,sans-serif;fill:#5b6b80}}
+.kh{{font:600 10.5px Helvetica,Arial,sans-serif;fill:#3c4a5c;
+  letter-spacing:.06em;text-transform:uppercase}}
+.kt{{font:600 10.5px ui-monospace,monospace}}
+.kw{{font:10.5px Helvetica,Arial,sans-serif;fill:#5b6b80}}</style>
 {inner}
 {''.join(parts)}
-<text x="10" y="{H + 12}" class="ik">Each residue is joined to the ligand atom it
-is nearest to, over {n_frames} frames. Line width = fraction of frames in contact
-&#183; dashed green = polar (N/O within {POLAR_A} &#8491;) &#183; red = catalytic Cys113
-&#183; crystal numbering.</text>
-<text x="10" y="{H + 26}" class="ik">Contact = any heavy atom within {CONTACT_A}
-&#8491;. The ATOM each residue joins is measured; the residue's position on the page
-is projected along that direction, not its real 3D position.</text>
+{_legend_svg(12, LEGY)}
+<text x="470" y="{LEGY + 17}" class="ik">Line width = fraction of the
+{n_frames} frames in contact. Crystal numbering.</text>
+<text x="470" y="{LEGY + 32}" class="ik">Each residue is joined to the ligand ATOM
+it is nearest to in the most frames &#8212; that atom is measured.</text>
+<text x="470" y="{LEGY + 47}" class="ik">The residue's POSITION on the page is
+projected along that direction, not its real 3D position.</text>
 </svg>"""
 
 
@@ -560,8 +671,12 @@ def block(ident: str, er, three: str, cls: dict) -> str:
             rows_c, nfr = contacts(mpdb)
             lm = ligand_mol(mpdb, smiles_of(ident) or "")
             dmap = contact_distances(mpdb, rows_c)
-            imap = interaction_map(lm, rows_c, nfr, dist_of=dmap)
-            i3d = interaction_3d(mpdb, rows_c, f"i3_{ident}")
+            rx = reactive_atom_index(lm, cls.get(ident, ""))
+            if rx is None:
+                log.warning("%s: no reactive atom for class %r; Cys113 will be "
+                            "drawn to its nearest atom", ident, cls.get(ident))
+            imap = interaction_map(lm, rows_c, nfr, dist_of=dmap, rx_atom=rx)
+            i3d = interaction_3d(mpdb, rows_c, f"i3_{ident}", rx_atom=rx)
         except Exception as exc:                          # noqa: BLE001
             log.warning("%s: interaction map unavailable: %s", ident, exc)
 
@@ -677,6 +792,12 @@ img.plots{{width:100%;height:auto;border:1px solid var(--rule);border-radius:5px
   background:#fff}}
 svg.imap{{width:100%;height:auto;background:var(--card);border:1px solid var(--rule);
   border-radius:5px}}
+.key3{{display:flex;flex-wrap:wrap;gap:.35rem 1.6rem;margin:.55rem 0 .1rem;
+  font:12px var(--sans)}}
+.key3 .k{{display:flex;align-items:center;gap:.45rem;font-weight:600}}
+.key3 .k i{{width:24px;height:3px;border-radius:2px;display:inline-block}}
+.key3 .k em{{font-style:normal;font-weight:400;color:var(--muted);
+  margin-left:.4rem}}
 a.dl{{display:inline-block;margin-top:.7rem;font:600 12px var(--sans);
   color:var(--blue);text-decoration:none;border:1px solid var(--blue);
   border-radius:4px;padding:.35rem .7rem}}
