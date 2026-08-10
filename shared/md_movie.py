@@ -162,17 +162,24 @@ SURF_SHELL_A = 14
 def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
                 three_js: str, nac_lo: float = 2.8, nac_hi: float = 4.2,
                 elem_id: str = "gl") -> str:
-    """A self-contained 3Dmol block: surface, charge colouring, labels, slider."""
+    """A self-contained 3Dmol block: surface, charge colouring, labels, slider.
+
+    EVERY CONTROL ID IS NAMESPACED BY `elem_id`. They used to be bare -- `frame`,
+    `play`, `surf` -- which is fine for one viewer per page and breaks the moment
+    two share a document: `getElementById` returns the first match, so all the
+    sliders drive the first movie and the rest are inert. The shortlist report
+    puts four viewers on one page, so the ids have to be unique per viewer.
+    """
     return f"""
 <div class="glwrap">
   <div class="glbox"><div id="{elem_id}"></div></div>
   <div class="glctl">
-    <button id="play">&#9654; play</button>
-    <input id="frame" type="range" min="0" max="{max(0, len(dist) - 1)}" value="0">
-    <span id="ftxt" class="mono"></span>
-    <span id="sstat" class="mono"></span>
-    <label><input id="surf" type="checkbox" checked> surface</label>
-    <label><input id="labs" type="checkbox" checked> labels</label>
+    <button id="{elem_id}-play">&#9654; play</button>
+    <input id="{elem_id}-frame" type="range" min="0" max="{max(0, len(dist) - 1)}" value="0">
+    <span id="{elem_id}-ftxt" class="mono"></span>
+    <span id="{elem_id}-sstat" class="mono"></span>
+    <label><input id="{elem_id}-surf" type="checkbox" checked> surface</label>
+    <label><input id="{elem_id}-labs" type="checkbox" checked> labels</label>
   </div>
 </div>
 <script>{three_js}</script>
@@ -200,7 +207,7 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
   }}
 
   function surfaceOn() {{
-    const c = document.getElementById('surf');
+    const c = document.getElementById('{elem_id}-surf');
     return !c || c.checked;
   }}
   // THE SURFACE IS REBUILT ON EVERY FRAME (@tt8804), so it moves with the
@@ -234,7 +241,7 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
   // the video runs the mesh is one frame's shell over a moving cartoon, which is
   // the compromise being chosen deliberately; the readout says so.
   function markStale() {{
-    const el = document.getElementById('sstat');
+    const el = document.getElementById('{elem_id}-sstat');
     if (!el) return;
     const stale = surfFrame !== frame;
     el.textContent = (surfaceOn() && stale) ? 'surface: frame ' + surfFrame
@@ -259,7 +266,7 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
       viewer.addStyle({{resi: {CYS113_RESI}, atom: 'SG'}},
                       {{sphere: {{radius: 0.75, color: '#f0c000'}}}});
       viewer.removeAllLabels();
-      if (document.getElementById('labs').checked) {{
+      if (document.getElementById('{elem_id}-labs').checked) {{
         LABELS.forEach(function(L, i) {{
           const p = LPOS[frame] && LPOS[frame][i];
           if (!p) return;
@@ -270,7 +277,7 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
         }});
       }}
       const d = DSG[frame];
-      document.getElementById('ftxt').textContent =
+      document.getElementById('{elem_id}-ftxt').textContent =
         frame + ' / ' + (DSG.length - 1) + '   warhead\\u2192SG ' +
         (d == null ? '\\u2014' : d.toFixed(2) + ' \\u00c5' +
           (d >= LO && d <= HI ? '  (in attack window)' : ''));
@@ -326,31 +333,31 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
 
   // `input` fires continuously through the drag, `change` fires once on release.
   // The cheap redraw rides the drag; the expensive mesh waits for the release.
-  document.getElementById('frame').addEventListener('input', function(e) {{
+  document.getElementById('{elem_id}-frame').addEventListener('input', function(e) {{
     frame = +e.target.value; draw();
   }});
-  document.getElementById('frame').addEventListener('change', function(e) {{
+  document.getElementById('{elem_id}-frame').addEventListener('change', function(e) {{
     frame = +e.target.value; draw();
   }});
-  document.getElementById('frame').addEventListener('change', function(e) {{
+  document.getElementById('{elem_id}-frame').addEventListener('change', function(e) {{
     frame = +e.target.value; draw();
     if (!timer) {{ buildSurface(); markStale(); viewer.render(); }}
   }});
-  document.getElementById('play').addEventListener('click', function(e) {{
+  document.getElementById('{elem_id}-play').addEventListener('click', function(e) {{
     if (timer) {{ clearInterval(timer); timer = null; e.target.innerHTML = '&#9654; play';
                   buildSurface(); markStale(); viewer.render(); return; }}
     e.target.innerHTML = '&#10073;&#10073; pause';
     timer = setInterval(function() {{
       frame = (frame + 1) % DSG.length;
-      document.getElementById('frame').value = frame;
+      document.getElementById('{elem_id}-frame').value = frame;
       draw();
     }}, 70);
   }});
-  document.getElementById('surf').addEventListener('change', function(e) {{
+  document.getElementById('{elem_id}-surf').addEventListener('change', function(e) {{
     if (!viewer) return;
     buildSurface(); markStale(); viewer.render();
   }});
-  document.getElementById('labs').addEventListener('change', draw);
+  document.getElementById('{elem_id}-labs').addEventListener('change', draw);
   // 3Dmol absolutely-positions its canvas, so the container must already have a
   // real height when the viewer is created -- building on DOMContentLoaded gave
   // a 0x0 box and a blank viewer.
