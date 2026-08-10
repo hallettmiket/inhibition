@@ -372,11 +372,16 @@ def _blend(a: str, b: str, w: float = 0.55) -> str:
 #:
 #: Proportions follow the real funnel rather than flattering it: 226 swept, 58
 #: elevated, so most rows here stop before 100 ns.
+#: ENGAGEMENT AND RESIDENCE ARE NEAR-INDEPENDENT (rho = -0.007, #46), so all four
+#: combinations appear here on purpose. A picture where every high-engagement row
+#: also held would teach the reader a correlation the measurements say is not
+#: there -- and the whole reason the GUI can split held from left is that a
+#: molecule can do well on one and badly on the other.
 ENTRIES = [
-    ("mol B", "1", 0.71, 0.52, 0.94, True),    # held, engaged nearly throughout
-    ("mol A", "1", 0.62, 0.41, 0.88, True),    # held
-    ("mol B", "2", 0.44, 0.37, 0.31, False),   # ran, left, low engagement
-    ("mol C", "1", 0.33, 0.33, None, None),    # swept, not elevated
+    ("mol B", "1", 0.71, 0.52, 0.91, True),    # high engagement, held
+    ("mol A", "1", 0.62, 0.41, 0.86, False),   # high engagement, still LEFT
+    ("mol B", "2", 0.44, 0.37, 0.29, True),    # low engagement, yet HELD
+    ("mol C", "1", 0.33, 0.33, 0.34, False),   # low engagement, left
     ("mol A", "2", 0.15, 0.21, None, None),    # swept, not elevated
     ("mol B", "3", 0.12, 0.11, None, None),    # swept, not elevated
     ("mol C", "2", 0.09, 0.08, None, None),    # swept, not elevated
@@ -531,9 +536,8 @@ def _stage_survival() -> str:
  aria-label="Ranked modes with the sweep and 100 ns numbers behind the rank">
 <defs><marker id="ah2" markerWidth="7" markerHeight="7" refX="6" refY="3.5"
  orient="auto"><path d="M0 0 L7 3.5 L0 7 z" fill="var(--blue)" opacity=".7"/></marker></defs>
-<text x="42" y="20" class="cap">the ranked list from step 4</text>
+<text x="42" y="20" class="cap">ranked mols</text>
 <text x="232" y="20" class="cap" text-anchor="end">10 ns</text>
-<text x="244" y="20" class="cap">100 ns?</text>
 <text x="320" y="20" class="cap" text-anchor="end">100 ns</text>
 <text x="336" y="20" class="cap">outcome</text>
 <text x="232" y="33" class="cap2" text-anchor="end">attack-ready</text>
@@ -620,7 +624,17 @@ def _svg(smiles: str, w: int, h: int) -> str:
     m = Chem.MolFromSmiles(smiles)
     if m is None:
         return ""
-    AllChem.Compute2DCoords(m)
+    # CoordGen, not Compute2DCoords. The default layout puts visibly wrong angles
+    # on substituted centres -- @tt8804 spotted it on Sulfopin's R group, where the
+    # tert-butyl came out skewed rather than at clean tetrahedral-looking angles.
+    # The STRUCTURE was right (verified identical to the 6VAJ free SMILES and to
+    # the pose sidecar, C11H20ClNO3S); only the drawing was. CoordGen is the
+    # template-based layout and gives conventional geometry.
+    try:
+        from rdkit.Chem import rdCoordGen
+        rdCoordGen.AddCoords(m)
+    except Exception:                                      # noqa: BLE001
+        AllChem.Compute2DCoords(m)
     d = Draw.rdMolDraw2D.MolDraw2DSVG(w, h)
     d.drawOptions().bondLineWidth = 1
     Draw.rdMolDraw2D.PrepareAndDrawMolecule(d, m)
@@ -834,7 +848,7 @@ def _real_poses() -> tuple[str, dict]:
     return block, {"n": len(poses), "modes": len(order), "counts": dict(counts)}
 
 
-def build() -> str:
+def build(title: str = "DWI Derivative Screen") -> str:
     rng = random.Random(SEED)
     pts = _points(rng)
     chem = _chemspace()
@@ -951,7 +965,7 @@ def build() -> str:
 
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>pipeline — how a molecule becomes a row</title><style>
+<title>{title}</title><style>
 :root{{--ink:#10233f;--navy:#003087;--blue:#0072ce;--blue-pale:#e8f1fb;
  --rule:#ccd6e2;--muted:#5b6b80;--paper:#fff;--raise:#f5f8fc;--card:#fff;
  --good:#0f7a54;--warn:#8a5a00;--bad:#b3261e;
@@ -968,10 +982,8 @@ body{{margin:0;padding:24px 28px 60px;background:var(--paper);color:var(--ink);
  font-variant-numeric:tabular-nums;max-width:1400px}}
 h1{{font-size:1.2rem;color:var(--navy);margin:0 0 3px}}
 .sub{{color:var(--muted);margin:0 0 4px}}
-.warnbar{{border-left:3px solid var(--warn);background:var(--raise);
- padding:9px 13px;margin:14px 0 26px;border-radius:0 4px 4px 0;font-size:13px}}
 .step{{display:grid;grid-template-columns:minmax(0,640px) 1fr;gap:26px;align-items:start;
- padding:22px 0;border-top:1px solid var(--rule)}}
+ padding:26px 0;border-top:2.5px solid var(--rule)}}
 @media(max-width:1040px){{.step{{grid-template-columns:1fr}}}}
 .dia{{width:100%;height:auto;background:var(--card);border:1px solid var(--rule);
  border-radius:6px}}
@@ -1082,14 +1094,9 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
  font-size:12.5px;color:var(--muted)}}
 </style></head><body>
 
-<h1>How a molecule becomes a row</h1>
-<p class="sub">Docking &rarr; modes &rarr; criteria &rarr; ranking &rarr; sweep &rarr; MD.</p>
-<div class="warnbar"><strong>The geometry on this page is drawn, not measured.</strong>
-The poses, clusters and traces are illustrative — they are there to show the shape of
-the pipeline, and no number positioned on a diagram is a result. Every
-<em>parameter</em> named is real: 500 runs, the 2.8&ndash;4.2&nbsp;&Aring; near-attack
-window, the 150&deg; angular bar, 10&nbsp;ns and 100&nbsp;ns, and the
-1.2&nbsp;nm residence cut.</div>
+<h1>{title}</h1>
+<p class="sub">Schematic panels are illustrative; the pose panels and every named
+parameter are real.</p>
 
 <div class="step">
  <div>{chem}</div>

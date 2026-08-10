@@ -525,7 +525,9 @@ with their bonded distance and no sweep. Extending the builder to the remaining
 chemistries is the cheapest way to turn two points into a distribution.</p>
 </body></html>"""
     (REPORTS / "controls.html").write_text(ctl_page)
-    (REPORTS / "pipeline.html").write_text(schematic.build())
+    # The schematic carries the SAME title as the GUI it explains, rather than a
+    # heading of its own that drifts the moment the release name changes.
+    (REPORTS / "pipeline.html").write_text(schematic.build(_full_title))
 
     page = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
