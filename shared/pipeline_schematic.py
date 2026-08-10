@@ -979,10 +979,10 @@ def build(title: str = "DWI Derivative Screen") -> str:
 *{{box-sizing:border-box}}
 body{{margin:0;padding:24px 28px 60px;background:var(--paper);color:var(--ink);
  font-family:var(--sans);font-size:14px;line-height:1.55;
- font-variant-numeric:tabular-nums;max-width:1400px}}
+ font-variant-numeric:tabular-nums;max-width:1464px}}
 h1{{font-size:1.2rem;color:var(--navy);margin:0 0 3px}}
 .sub{{color:var(--muted);margin:0 0 4px}}
-.step{{display:grid;grid-template-columns:minmax(0,640px) 1fr;gap:26px;align-items:start;
+.step{{display:grid;grid-template-columns:minmax(0,704px) 1fr;gap:26px;align-items:start;
  padding:26px 0;border-top:2.5px solid var(--rule)}}
 @media(max-width:1040px){{.step{{grid-template-columns:1fr}}}}
 .dia{{width:100%;height:auto;background:var(--card);border:1px solid var(--rule);
@@ -1008,7 +1008,7 @@ p{{margin:.45em 0}}
 .modes{{display:grid;grid-template-columns:1fr;gap:9px;margin-top:12px}}
 .mcard{{border:1px solid var(--rule);border-radius:6px;padding:9px 11px;
  background:var(--raise);display:grid;
- grid-template-columns:minmax(0,470px) minmax(0,300px);gap:20px;align-items:center;
+ grid-template-columns:minmax(0,540px) minmax(0,300px);gap:20px;align-items:center;
  justify-content:start}}
 @media(max-width:820px){{.mcard{{grid-template-columns:1fr}}}}
 .mcard .crit{{margin-top:0}}
