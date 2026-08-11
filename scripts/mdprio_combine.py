@@ -44,6 +44,7 @@ sys.path.insert(0, str(REPO))
 
 from shared import outputs as sout                     # noqa: E402
 from shared import pipeline_schematic as schematic     # noqa: E402
+from shared import mode_ranking as moderank        # noqa: E402
 
 log = logging.getLogger("mdprio-combine")
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
@@ -667,6 +668,12 @@ chemistries is the cheapest way to turn two points into a distribution.</p>
     from datetime import date as _date
     (REPORTS / "pipeline.html").write_text(
         schematic.build(_full_title, _date.today().isoformat()))
+    # EVERY MODE, ranked individually (#53). The rail is one row per MOLECULE
+    # because it indexes the sweep by parent_ident, so the per-mode ranking the
+    # pipeline computes was never visible anywhere. Same stable-name treatment
+    # as the schematic.
+    (REPORTS / "modes.html").write_text(
+        moderank.build(_full_title, _date.today().isoformat()))
 
     page = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -792,6 +799,8 @@ iframe{{flex:1;width:100%;border:0;background:var(--paper)}}
  <span class="mhint" id="mhint"></span>
  <a class="mbtn lnk" href="pipeline.html" target="_blank" rel="noopener"
     title="how a molecule becomes a row: docking, modes, criteria, ranking, sweep, MD">how this works &#8599;</a>
+ <a class="mbtn lnk" href="modes.html" target="_blank" rel="noopener"
+    title="every binding mode ranked individually, and which were never simulated (#53)">every mode &#8599;</a>
  <button id="theme" class="mbtn tbtn" onclick="toggleTheme()" title="light / dark">dark</button>
 </div>
 <main>

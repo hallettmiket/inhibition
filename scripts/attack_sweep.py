@@ -167,6 +167,27 @@ def geometry_stats(dist: np.ndarray, angle: np.ndarray, kind: str,
     }
 
 
+def pose_mode(pose_sdf: Path, pose_rank: int) -> int | None:
+    """The `mode` property of the pose with this `pose_rank`, or None.
+
+    Read by identity: the pose whose own `pose_rank` matches, and then that
+    pose's own `mode`. Nothing here counts positions in the file.
+    """
+    if not pose_sdf.is_file():
+        return None
+    try:
+        from rdkit import Chem, RDLogger
+        RDLogger.DisableLog("rdApp.*")
+        for m in Chem.SDMolSupplier(str(pose_sdf), removeHs=False, sanitize=False):
+            if m is None or not m.HasProp("pose_rank"):
+                continue
+            if int(m.GetProp("pose_rank")) == pose_rank:
+                return int(m.GetProp("mode")) if m.HasProp("mode") else None
+    except Exception as exc:                                # noqa: BLE001
+        log.warning("%s: could not read mode (%s)", pose_sdf.name, exc)
+    return None
+
+
 def run_sweep(cand: str, pose: Path, pose_rank: int, gpu: int,
               ps: float, net_charge: int | None) -> Path | None:
     """10 ns of MD through the production script, so the physics is identical."""
@@ -218,12 +239,27 @@ def main() -> None:
 
     rows = []
     for cand in args.candidates:
+        pose = Path(args.pose_dir) / f"{cand}.sdf"
+        # THE MODE IS READ FROM THE POSE, NOT DERIVED FROM ITS RANK.
+        #
+        # This was `mode = pose_rank - 1`, which assumes the exported poses are
+        # in mode order. `export_nac_poses` sorts NAC-viable first by energy and
+        # then the rest by energy, so that ordering is not guaranteed by
+        # construction -- it happens to hold for all 1,751 poses on disk today,
+        # which is exactly the kind of invariant that holds until it does not.
+        # The SDF carries an explicit `mode` property; read it (#53).
+        mode = pose_mode(pose, args.pose_rank)
         # `ident` carries the MODE, so two modes of one molecule are two rows
         # rather than one overwriting the other downstream.
-        rec = {"ident": f"{cand}_m{args.pose_rank - 1}" if args.pose_rank > 1 else cand,
+        #
+        # ALWAYS `_m<mode>`, INCLUDING MODE 0. It used to write the bare ident
+        # for pose_rank 1, so mode 0 was `t4_x` in this table and `t4_x_m0` in
+        # the rank table. Every obvious join on `ident` therefore dropped exactly
+        # the modes that were simulated, which is how #53 stayed invisible and
+        # how a wrong correlation reached #36. Join on (parent_ident, mode).
+        rec = {"ident": f"{cand}_m{mode}" if mode is not None else cand,
                "parent_ident": cand, "pose_rank": args.pose_rank,
-               "mode": args.pose_rank - 1, "sweep_ps": args.sweep_ps}
-        pose = Path(args.pose_dir) / f"{cand}.sdf"
+               "mode": mode, "sweep_ps": args.sweep_ps}
         if not pose.is_file():
             rec["status"] = f"no pose at {pose}"
             rows.append(rec); log.warning("%s: %s", cand, rec["status"]); continue
