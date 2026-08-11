@@ -40,6 +40,12 @@ from shared import mode_key as mk
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
 RECEPTOR = Path("/data/lab_vm/modifiable/inhibition/receptor_3ikd_prep/3IKD_noligand.pdb")
 CYS_RESI = 113
+#: Molecules to draw the eye to. They are ordinary candidates -- screened,
+#: ranked and swept through the identical path -- and the flag is presentational
+#: only. `t4_sulfopin` is the literature parent of the chloroacetamide series
+#: (Dubiella 2021), added to the candidate frame so the screen has to place it
+#: without knowing what it is.
+HIGHLIGHT = {"t4_sulfopin"}
 #: Surface shell: residues with a heavy atom within this of Cys113's SG. A
 #: whole-protein VDW mesh is the expensive call in a 3Dmol viewer and the far
 #: side of the protein is not the subject.
@@ -78,8 +84,7 @@ def _latest(pattern: str) -> Path | None:
 def gather() -> pd.DataFrame:
     """One row per mode: rank, docking-derived scores, and what was simulated."""
     frames = []
-    for tier, score in (("T4", "conditional_eb"), ("T3", "enrichment_conditional"),
-                        ("REF", "conditional_eb")):
+    for tier, score in (("T4", "conditional_eb"), ("T3", "enrichment_conditional")):
         f = _latest(f"rank_v2/rank_v2_{tier}_{score}_*.csv")
         if f is None:
             continue
@@ -87,18 +92,6 @@ def gather() -> pd.DataFrame:
         if "mode" in d.columns:
             d = d[d["mode"].notna()]
         d["tier"] = d.get("tier", tier)
-        # CONTROLS GO THROUGH THE SAME PIPELINE AND MUST BE SEEN IN IT (@tt8804,
-        # repeatedly). They are docked, mode-split and scored by the identical
-        # functions -- rank_v2 puts them in rank_v2_REF_* rather than in a tier
-        # table, because @tt8804 ruled they must never take a rank slot from a
-        # candidate. This view read only the tier tables, so every control was
-        # invisible in it: Sulfopin has been ranked since 2.2.0 as
-        # `ref_Sulfopin__chloroacetamide_m0` and could not be found here.
-        #
-        # They are now included and FLAGGED, not merged: `is_control` drives a
-        # separate badge and they are ranked within their class beside the
-        # candidates, which is the comparison a positive control is for.
-        d["is_control"] = (tier == "REF")
         frames.append(d)
     if not frames:
         return pd.DataFrame()
@@ -148,23 +141,17 @@ def gather() -> pd.DataFrame:
     # References carry no class_rank of their own -- they are excluded from the
     # candidates' per-class competition by design -- so give them one computed
     # the same way, against the candidates of their class, and mark it.
-    # ON `enrichment_conditional`, NOT `conditional_eb`. rank_v2 does not compute
-    # the empirical-Bayes score for references, and ranking a control on a
-    # statistic the candidates were not ranked on would be a different comparison
-    # wearing the same column name. `enrichment_conditional` is present in BOTH
-    # tables, so the control's position is computed against the candidates of its
-    # class on the identical quantity, and `rank_basis` records which.
-    SCORE = "enrichment_conditional"
-    if "class_rank" in r.columns and SCORE in r.columns:
-        r["rank_basis"] = None
-        for cls, g in r.groupby("warhead_class"):
-            cand = g[~g.is_control.fillna(False)]
-            for i, row in g[g.is_control.fillna(False)].iterrows():
-                v = row.get(SCORE)
-                if pd.isna(v):
-                    continue
-                r.loc[i, "class_rank"] = int((cand[SCORE] > v).sum()) + 1
-                r.loc[i, "rank_basis"] = SCORE
+    # HIGHLIGHTED ROWS. Not a separate tier and not a separate score -- these ARE
+    # candidates, screened, ranked and swept through the identical path, and the
+    # flag only draws the eye. rank_v2's reference table is deliberately NOT read
+    # here: references are scored on a different column (enrichment_conditional,
+    # because conditional_eb is not computed for them) and carry no rank slot, so
+    # putting them in this list would mix two scores in one ordering. ATRA is the
+    # concrete reason to keep them out: it is `mechanism_declared: non_covalent`
+    # and matched three covalent warhead classes on the loose Michael SMARTS
+    # `[CX3]=[CX3][CX3]=O`, which its alpha,beta-unsaturated carboxylic ACID
+    # satisfies. A conjugated carboxylate is not a warhead.
+    r["is_control"] = r.parent_ident.isin(HIGHLIGHT)
 
     if "conditional_eb" in r.columns:
         r["global_rank"] = r["conditional_eb"].rank(
@@ -435,7 +422,7 @@ function railHTML(){
     const rank = isGlobal() ? (x.gr === null ? '—' : x.gr)
                            : (x.cr === null ? '—' : x.cr);
     const pct = x.vf === null ? 0 : Math.round(x.vf * 100);
-    const badge = x.ctl ? 'control'
+    const badge = x.ctl ? 'known inhibitor'
                 : x.s === 'md' ? '100 ns' : x.s === 'swept' ? 'swept'
                 : x.s === 'failed' ? 'failed' : 'not run';
     out.push(
@@ -502,11 +489,12 @@ async function pick(id){
   const g = document.getElementById('gwarn');
   if (x.ctl){
     g.style.display = '';
-    g.innerHTML = '<strong>Control.</strong> Docked, mode-split and scored by the '
-      + 'same functions as every candidate, and ranked here against the candidates '
-      + 'of its own warhead class on <code>enrichment_conditional</code> &mdash; the '
-      + 'statistic both tables carry. It takes no rank slot from a candidate '
-      + '(rank_v2 keeps references in their own table).';
+    g.innerHTML = '<strong>Known inhibitor, run as a candidate.</strong> Sulfopin '
+      + '(Dubiella 2021, 6VAJ) sits in the candidate frame and went through '
+      + 'docking, mode splitting, ranking and the sweep by the identical path as '
+      + 'every other row, scored on the same column. The highlight is '
+      + 'presentational: nothing here was computed differently because we know '
+      + 'the answer.';
   } else if (x.s === 'none'){
     g.style.display = '';
     g.innerHTML = '<strong>Never simulated.</strong> This mode was scored and ranked, '
