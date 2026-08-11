@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import json
 import logging
 import os
 import shutil
@@ -319,7 +320,26 @@ def saved_pose_to_sdf(pose_sdf: Path, wd: Path, smiles: str,
     w = Chem.SDWriter(str(out))
     w.write(fixed)
     w.close()
-    log.info("  pose: rank %d of %d from %s", pose_rank, len(mols), pose_sdf.name)
+    # WHICH MODE WAS SIMULATED, written beside the trajectory it produced.
+    #
+    # The result row records `pose_path` but not which pose inside that file was
+    # taken, and a v3 pose SDF holds one pose PER MODE. So a finished 100 ns run
+    # could not be joined to the 10 ns sweep, which is scored per mode -- the
+    # bare ident in the sweep table is mode 0, and at least one molecule reached
+    # 100 ns on a minority mode (#46). Matching on the bare ident silently
+    # compares one mode's trajectory against a different mode's sweep.
+    #
+    # This blocked #35's re-derivation and #36's false-negative rate, both for
+    # the same reason: the run did not say which pose it ran. It says so now.
+    (wd / "pose_provenance.json").write_text(json.dumps({
+        "pose_sdf": str(pose_sdf),
+        "pose_rank": int(pose_rank),
+        "mode": (int(pose.GetProp("mode")) if pose.HasProp("mode") else None),
+        "n_poses_in_file": len(mols),
+    }, indent=2), encoding="utf-8")
+    log.info("  pose: rank %d of %d from %s (mode %s)", pose_rank, len(mols),
+             pose_sdf.name,
+             pose.GetProp("mode") if pose.HasProp("mode") else "unrecorded")
     return out
 
 
@@ -468,6 +488,12 @@ def run_one(ident: str, smiles: str, label: str, *, production_ps: float,
         # identity -- and it arrived with the --replicate flag that fixed the
         # seed. Fixing one half of "replicate" and not the other is how.
         rep_dir = Path(res.get("equilibration_dir") or (md_wd / f"rep{replicate}"))
+        # Carry the pose provenance onto the ROW, not only into the workdir --
+        # the row is what survives into 00_outputs and what any later join reads.
+        prov = wd / "pose_provenance.json"
+        if prov.is_file():
+            row.update({f"pose_{k}" if k != "pose_sdf" else k: v
+                        for k, v in json.loads(prov.read_text()).items()})
         row.update(measure_residence(rep_dir))
         log.info("  residence: ligand RMSD %.3f nm mean, engaged in %.0f%% of frames",
                  row["explicit_ligand_rmsd_nm_mean"],
