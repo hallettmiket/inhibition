@@ -8,11 +8,15 @@ then choose what goes to the sweep. It was built retrospectively, after #53 foun
 that the sweep took mode 0 for 242 of 242 molecules while the ranking is per
 mode, and that gap was invisible precisely because no view like this existed.
 
-RANK WITHIN A WARHEAD CLASS IS THE DEFAULT; GLOBAL IS OFFERED AND FLAGGED. The
-SN2 angular criterion is far stricter than the perpendicular one (#47), so a
-global order compares scores computed under different bars. It is offered because
-"where does this sit overall" is a real question, and refusing to answer it does
-not remove the bias -- the toggle names it instead.
+SCOPE IS ONE CONTROL, NOT TWO. A dropdown picks a warhead class, every class
+ranked within itself, or one global order. Two separate toggles let a reader
+combine "global" with a class filter, a combination with no meaning.
+
+Within-class is the default. The SN2 angular criterion is far stricter than the
+perpendicular one (#47), so a global order compares scores computed under
+different bars. It is offered because "where does this sit overall" is a real
+question, and refusing to answer it does not remove the bias -- the option names
+it instead.
 
 THE JOIN IS ON (parent_ident, mode). Never on `ident`: mode 0 is the bare ident
 in the sweep table and `_m0` in the rank table, so a merge on the label silently
@@ -165,6 +169,13 @@ h1{margin:0;font-size:.86rem;font-weight:600;letter-spacing:-.01em;color:var(--n
  border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
 .mbtn.on{background:var(--navy);color:#fff;border-color:var(--navy)}
 .mbtn.lnk{text-decoration:none;color:var(--blue)}
+select#scope{font:600 11px var(--sans);padding:3px 26px 3px 10px;border-radius:99px;
+ border:1px solid var(--rule);background:var(--paper);color:var(--ink);cursor:pointer;
+ appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),
+ linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+ background-position:calc(100% - 14px) 52%,calc(100% - 9px) 52%;
+ background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+select#scope:focus{outline:2px solid var(--blue);outline-offset:1px}
 .msep{width:1px;height:16px;background:var(--rule);flex:none}
 .mhint{font-size:11px;color:var(--muted);margin-left:4px}
 main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
@@ -224,14 +235,8 @@ a{color:var(--blue)}
 <div id="topbar">
  <h1 title="Pick a mode on the left; its pose and scores load on the right.">__TITLE__ — ranking</h1>
  <span class="msep"></span>
- <button id="b-class" class="mbtn on" onclick="setMode('class')"
-   title="rank within a warhead class — the only comparison the criterion supports">by warhead class</button>
- <button id="b-global" class="mbtn" onclick="setMode('global')"
-   title="one order across all classes — biased, see the hint">global</button>
- <span class="msep"></span>
- <button id="b-all" class="mbtn on" onclick="setFilter('all')">all modes</button>
- <button id="b-un" class="mbtn" onclick="setFilter('unsimulated')"
-   title="modes the screen scored and never simulated">never simulated</button>
+ <select id="scope" onchange="setScope(this.value)"
+   title="rank within one warhead class, within every class, or across all of them"></select>
  <span class="mhint" id="mhint"></span>
  <span class="msep"></span>
  <a class="mbtn lnk" href="combined.html" title="the sweep and 100 ns MD results">results &#8599;</a>
@@ -268,25 +273,46 @@ a{color:var(--blue)}
 <script>
 const ROWS = __ROWS__;
 const MODE_COLS = ['#0072ce','#7b5ea7','#c2703d','#0f7a54','#b3261e','#8a6d1f'];
-let RANKMODE = 'class', FILTER = 'all', SEL = null, V = null, SURF = null;
+// SCOPE is one control: a warhead class name, '*' for every class ranked within
+// itself, or '__global__' for one order across all of them. Two orthogonal
+// toggles let a reader combine "global" with a class filter, which is a
+// combination with no meaning.
+let SCOPE = '*', SEL = null, V = null, SURF = null;
 
 function lib(){ return window.$3Dmol || window['3Dmol']; }
 function fmt(x, d){ return (x === null || x === undefined) ? '—' : (+x).toFixed(d); }
 
+function isGlobal(){ return SCOPE === '__global__'; }
+
 function visible(){
-  let r = (FILTER === 'unsimulated') ? ROWS.filter(x => x.s === 'none') : ROWS.slice();
-  if (RANKMODE === 'class') r.sort((a,b) => a.c.localeCompare(b.c) || a.cr - b.cr);
-  else r.sort((a,b) => (a.gr === null ? 1e9 : a.gr) - (b.gr === null ? 1e9 : b.gr));
+  let r = ROWS.slice();
+  if (SCOPE !== '*' && !isGlobal()) r = r.filter(x => x.c === SCOPE);
+  if (isGlobal()) r.sort((a,b) => (a.gr === null ? 1e9 : a.gr) - (b.gr === null ? 1e9 : b.gr));
+  else r.sort((a,b) => a.c.localeCompare(b.c) || a.cr - b.cr);
   return r;
+}
+
+function buildScope(){
+  const n = {};
+  ROWS.forEach(x => { n[x.c] = (n[x.c] || 0) + 1; });
+  const opts = ['<optgroup label="ranked within its own class">',
+    '<option value="*">all classes</option>'];
+  Object.keys(n).sort().forEach(c =>
+    opts.push('<option value="' + c + '">' + c + ' (' + n[c].toLocaleString() + ')</option>'));
+  opts.push('</optgroup><optgroup label="across classes">',
+    '<option value="__global__">global — biased (#47)</option></optgroup>');
+  const el = document.getElementById('scope');
+  el.innerHTML = opts.join('');
+  el.value = SCOPE;
 }
 
 function railHTML(){
   const r = visible(), out = [];
   let cls = null;
   for (const x of r){
-    if (RANKMODE === 'class' && x.c !== cls){ cls = x.c;
+    if (SCOPE === '*' && x.c !== cls){ cls = x.c;
       out.push('<div class="chd">' + cls + '</div>'); }
-    const rank = (RANKMODE === 'class') ? x.cr : (x.gr === null ? '—' : x.gr);
+    const rank = isGlobal() ? (x.gr === null ? '—' : x.gr) : x.cr;
     const pct = x.vf === null ? 0 : Math.round(x.vf * 100);
     const badge = x.s === 'md' ? '100 ns' : x.s === 'swept' ? 'swept'
                 : x.s === 'failed' ? 'failed' : 'not run';
@@ -304,18 +330,12 @@ function railHTML(){
   }
   document.getElementById('mhint').textContent =
     r.length.toLocaleString() + ' modes' +
-    (RANKMODE === 'global' ? ' · global order compares classes scored under different bars (#47)' : '');
+    (isGlobal() ? ' · one order across classes scored under different bars (#47)'
+                : ' · rank is within the warhead class');
   document.getElementById('rail').innerHTML = out.join('');
 }
 
-function setMode(m){ RANKMODE = m;
-  document.getElementById('b-class').classList.toggle('on', m === 'class');
-  document.getElementById('b-global').classList.toggle('on', m === 'global');
-  railHTML(); }
-function setFilter(f){ FILTER = f;
-  document.getElementById('b-all').classList.toggle('on', f === 'all');
-  document.getElementById('b-un').classList.toggle('on', f === 'unsimulated');
-  railHTML(); }
+function setScope(v){ SCOPE = v; railHTML(); }
 function toggleTheme(){
   const d = document.documentElement.getAttribute('data-theme') === 'dark';
   document.documentElement.setAttribute('data-theme', d ? 'light' : 'dark'); }
@@ -400,6 +420,7 @@ function draw(pdbTxt, x){
 
 document.getElementById('c-surf').addEventListener('change', function(){ if (SEL) pick(SEL); });
 document.getElementById('c-other').addEventListener('change', function(){ if (SEL) pick(SEL); });
+buildScope();
 railHTML();
 </script>
 </body></html>"""
