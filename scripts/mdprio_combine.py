@@ -460,12 +460,15 @@ def main() -> None:
         # A molecule with no 100 ns run cannot be placed on the ranked axis at
         # all. It goes in its own band rather than being given a 0, which would
         # read as "measured and engaged nothing".
-        headline = (f"{eng*100:.0f}% engaged" if has_md
-                    else (f"sweep {ar*10:.2f} ns" if ar is not None else "—"))
-        meta = (f"{g(m_,'explicit_ligand_rmsd_nm_max')} nm max &middot; "
-                f"sweep {ar*10:.2f} ns" if has_md and ar is not None
-                else (f"{g(s_,'n_visits','{:.0f}')} visits &middot; awaiting 100 ns"
-                      if not has_md else g(m_, 'explicit_ligand_rmsd_nm_max') + " nm max"))
+        headline = f"{eng*100:.0f}% engaged" if has_md else "—"
+        # THE SELECTOR CARRIES 100 ns FACTS ONLY (@tt8804, #55): max ligand RMSD,
+        # held/left, engaged %. The 10 ns sweep is triage for deciding what earns
+        # a 100 ns run -- it is not a result, and sitting in the rail beside the
+        # engagement number it read as a second, competing score. It moves to a
+        # table in the viewer, where it is clearly labelled as what selected the
+        # molecule rather than what was found.
+        meta = (f"{g(m_, 'explicit_ligand_rmsd_nm_max')} nm max RMSD" if has_md
+                else "awaiting 100 ns")
         # A CONTROL THAT NOW HAS A 100 ns RUN IS ONE ROW, NOT TWO. It was being
         # emitted here as a ranked candidate AND again in the controls block as an
         # unranked control -- two rows, the same DOM id twice, so clicking either
@@ -534,10 +537,10 @@ def main() -> None:
             + f"<span class='body'>"
             f"<span class='l1'><span class='mid-id'>{html.escape(nm)}</span>"
             f"<span class='eng pend' title='control — 10 ns only, no 100 ns run'>"
-            f"{(f'sweep {ar*10:.2f} ns' if has else '—')}</span></span>"
+            f"&mdash;</span></span>"
             f"<span class='l2'><span class='wc'>control &middot; {html.escape(c['pdb'])}</span>"
             f"<span class='meta'>"
-            + (f"{c['n_visits']:.0f} visits" if c["n_visits"] is not None else html.escape(why))
+            + ("awaiting 100 ns" if c["n_visits"] is not None else html.escape(why))
             + "</span>"
             f"<span class='tag t-ctl'>{'reactant' if c['kind']=='reactant' else 'bonded'}</span>"
             f"</span>"

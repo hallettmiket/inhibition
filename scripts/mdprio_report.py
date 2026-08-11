@@ -439,9 +439,12 @@ def main() -> None:
         log.warning("no warhead->SG distance/angle series for %s", args.candidate)
     img = figure(args.candidate, s, res, er, nacs)
 
+    # THE SWEEP IS NOT A RESULT AND NO LONGER SITS BESIDE ONE (#55). It is
+    # triage: it decided whether this molecule earned a 100 ns run. Presented in
+    # the headline facts next to the engagement number it read as a second,
+    # competing score, so it has left the selector rail entirely and appears here
+    # in its own table, under a heading that says what it is for.
     facts = [("molecule", args.candidate), ("warhead class", cls or "unclassified")]
-    if sweep_ar is not None:
-        facts.append(("attack-ready (10 ns)", f"{sweep_ar*100:.1f}%  ·  {sweep_v} visits"))
     if occ is not None:
         facts.append(("BPMD occupancy", rt.num(occ, "{:.3f}")))
     if pose:
@@ -470,8 +473,18 @@ def main() -> None:
          f'</summary><div class="pbody">{movie_block}</div></details>')
         if movie_block else "",
         '<details class="panel"><summary>How it was selected, and what that is worth'
-        '<span class="hint">pre-registration context</span></summary>'
+        '<span class="hint">the 10 ns triage sweep — not a result</span></summary>'
         '<div class="pbody">',
+        (('<table class="kv"><tbody>'
+          f'<tr><th>attack-ready, 10 ns sweep</th><td>{sweep_ar*100:.1f}%</td></tr>'
+          f'<tr><th>sustained visits</th><td>{sweep_v}</td></tr>'
+          '</tbody></table>'
+          '<p>These are the numbers that decided this molecule earned a 100 ns '
+          'run. They are <strong>triage, not a measurement of it</strong> — the '
+          'result is the 100&nbsp;ns engagement and RMSD above. D0075 and D0076 '
+          'record what this sweep does and does not order correctly.</p>')
+         if sweep_ar is not None else
+         '<p>No 10 ns sweep reading for this molecule.</p>'),
         f"<p>It was selected on a BPMD occupancy of "
         f"<strong>{rt.num(occ, '{:.3f}')}</strong>, against a crystallographic "
         f"median of {REF_MEDIAN:.3f}. That number is what the pre-registration "
