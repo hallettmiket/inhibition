@@ -24,13 +24,16 @@ all of it had parsed.
 
 ## 2. What ranks, and on what
 
-**The sort key is `explicit_frac_frames_engaged` from the 100 ns MD run** — the
-fraction of the run engaging the target.
+**The sort key is `explicit_ligand_rmsd_nm_max` from the 100 ns MD run, ascending**
+— the largest distance the ligand ever got from where it started (@tt8804, #55,
+2026-08-11). It replaced `explicit_frac_frames_engaged`, which is still shown on
+every row but no longer orders the list.
 
 The 10 ns sweep is **triage**, not a result. It decides which molecules earn a
 100 ns run. Ranking on it ranks the selection filter rather than the endpoint,
-which is the same defect as ranking on docking energy one stage earlier. It is
-carried beside the headline number, in muted type, labelled as a sweep.
+which is the same defect as ranking on docking energy one stage earlier. **It does
+not appear in the rail at all** — beside the ranked number it read as a second,
+competing score — and lives in each molecule's own page instead.
 
 On the evidence, the sweep is a weak selector anyway: spearman(sweep, 100 ns
 engagement) = **+0.240** over the molecules that have both.
@@ -46,12 +49,24 @@ and false claim.
 |---|---|---|
 | 2D structure | `canonical_smiles`, D3/D4 frame or pose sidecar | controls resolve via the sidecar |
 | identifier | `parent_ident` | |
-| headline number | `explicit_frac_frames_engaged` | shown as `NN% engaged` |
-| headline (unranked) | `frac_attack_ready × 10` | shown as `sweep N.NN ns`, muted |
+| headline number | `explicit_ligand_rmsd_nm_max` | shown as `N.NNN nm max` — **the sort key** |
+| headline (unranked) | — | an em-dash; an unranked row has no position on this axis |
 | warhead class | `rank_v2` | |
-| max RMSD | `explicit_ligand_rmsd_nm_max` | |
+| engagement | `explicit_frac_frames_engaged` | shown as `NN% engaged` on the meta line |
 | verdict tag | `rmsd_max < 1.2 nm` | `held` / `left`, or `swept` |
 | bar | engagement | |
+
+**The rail is ranked on max ligand RMSD over the 100 ns run, lowest first**
+(@tt8804, #55) — how far the molecule ever got from where it started. It replaced
+100 ns target engagement as the sort key on 2026-08-11; engagement is still shown,
+it is no longer what orders the list. The two are strongly related — ρ = −0.732
+over 62 runs (D0078) — so the orderings are similar, and where they differ, RMSD
+ranks a molecule that sat still without engaging above one that engaged and moved.
+
+**No sweep reading appears in the rail at all.** The 10 ns sweep is triage — it
+decides which molecules earn a 100 ns run — and beside the ranked number it read
+as a second, competing score. It lives in each molecule's own page, under *"How it
+was selected, and what that is worth"*.
 
 A **legend sits at the top of the rail** stating the ranking axis in words. A
 number in a column has to be readable without knowing which of two similar

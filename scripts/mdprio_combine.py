@@ -460,14 +460,18 @@ def main() -> None:
         # A molecule with no 100 ns run cannot be placed on the ranked axis at
         # all. It goes in its own band rather than being given a 0, which would
         # read as "measured and engaged nothing".
-        headline = f"{eng*100:.0f}% engaged" if has_md else "—"
+        # THE HEADLINE IS WHAT THE RAIL IS SORTED ON (@tt8804, #55): max ligand
+        # RMSD over the 100 ns run, lowest first. Engagement moves to the meta
+        # line -- still shown, no longer the thing being ordered.
+        headline = (f"{rmax:.3f} nm max" if has_md and rmax is not None
+                    else ("—" if not has_md else f"{eng*100:.0f}% engaged"))
         # THE SELECTOR CARRIES 100 ns FACTS ONLY (@tt8804, #55): max ligand RMSD,
         # held/left, engaged %. The 10 ns sweep is triage for deciding what earns
         # a 100 ns run -- it is not a result, and sitting in the rail beside the
         # engagement number it read as a second, competing score. It moves to a
         # table in the viewer, where it is clearly labelled as what selected the
         # molecule rather than what was found.
-        meta = (f"{g(m_, 'explicit_ligand_rmsd_nm_max')} nm max RMSD" if has_md
+        meta = (f"{eng*100:.0f}% engaged" if has_md and eng is not None
                 else "awaiting 100 ns")
         # A CONTROL THAT NOW HAS A 100 ns RUN IS ONE ROW, NOT TWO. It was being
         # emitted here as a ranked candidate AND again in the controls block as an
@@ -480,6 +484,10 @@ def main() -> None:
             f"data-cls=\"{'control' if is_ctl else html.escape(wcls)}\" "
             + ("data-ctl='1' " if is_ctl else "")
             + f"data-eng='{(eng if has_md else -1):.6f}' "
+            # THE SORT KEY, ASCENDING -- lower is better, so an unranked row
+            # cannot be given 0. It gets a sentinel that sorts last, and is in
+            # the unranked band anyway.
+            f"data-rmax='{(rmax if has_md and rmax is not None else 9999):.6f}' "
             f"data-sweep='{(ar if ar is not None else -1):.6f}' "
             f"data-md='{1 if has_md else 0}' "
             f"data-held='{1 if held else 0}' "
@@ -490,7 +498,7 @@ def main() -> None:
             + f"<span class='body'>"
             f"<span class='l1'><span class='mid-id'>{html.escape(t)}</span>"
             f"<span class='eng{'' if has_md else ' pend'}' "
-            f"title='{'fraction of the 100 ns run engaging the target' if has_md else 'no 100 ns run yet — 10 ns triage sweep only'}'>"
+            f"title='{'largest ligand RMSD over the 100 ns run — the sort key, lowest first' if has_md else 'no 100 ns run yet — 10 ns triage sweep only'}'>"
             f"{headline}</span></span>"
             f"<span class='l2'><span class='wc'>{html.escape(wcls)}</span>"
             f"<span class='meta'>{meta}</span>"
@@ -820,9 +828,11 @@ iframe{{flex:1;width:100%;border:0;background:var(--paper)}}
  <button id="theme" class="mbtn tbtn" onclick="toggleTheme()" title="light / dark">dark</button>
 </div>
 <main>
- <div id="rail"><div class="legend">ranked by <b>100&nbsp;ns target engagement</b>
-  &mdash; the fraction of the run engaging Cys113. The 10&nbsp;ns sweep is triage
-  for choosing what earns a 100&nbsp;ns run, not the result.</div>
+ <div id="rail"><div class="legend">ranked by <b>max ligand RMSD</b> over the
+  100&nbsp;ns run, lowest first &mdash; how far the molecule ever got from where it
+  started. Engagement and held/left are shown beside it. The 10&nbsp;ns sweep is
+  triage for choosing what earns a 100&nbsp;ns run, not the result, and is in each
+  molecule&rsquo;s own page.</div>
  {''.join(rows_html)}{''.join(ctl_rows_html)}</div>
  <div id="viewer">
   <div id="vhead"><span id="vname">&mdash;</span>
@@ -837,13 +847,16 @@ var MODE='all', SPLIT=0, TAB=false;
 function renumber(l){{l.forEach(function(b,i){{b.querySelector('.rk').textContent=i+1}});}}
 function hdr(cls,txt){{var h=document.createElement('div');h.className=cls;h.textContent=txt;
   RAIL.appendChild(h);}}
-function byEng(a,b){{return parseFloat(b.dataset.eng)-parseFloat(a.dataset.eng)}}
+// ASCENDING on max ligand RMSD: lowest excursion first. Every other ordering in
+// this file is descending-is-better, so the direction is stated rather than left
+// to be inferred from a minus sign.
+function byRank(a,b){{return parseFloat(a.dataset.rmax)-parseFloat(b.dataset.rmax)}}
 function bySweep(a,b){{return parseFloat(b.dataset.sweep)-parseFloat(a.dataset.sweep)}}
 function layoutGroup(rows){{
   if(MODE==='all'){{rows.forEach(function(b){{RAIL.appendChild(b)}});renumber(rows);return;}}
   var g={{}};
   rows.forEach(function(b){{(g[b.dataset.cls]=g[b.dataset.cls]||[]).push(b)}});
-  Object.keys(g).sort(function(x,y){{return byEng(g[x][0],g[y][0])}}).forEach(function(n){{
+  Object.keys(g).sort(function(x,y){{return byRank(g[x][0],g[y][0])}}).forEach(function(n){{
     hdr('chd',n+'  ('+g[n].length+')');
     g[n].forEach(function(b){{RAIL.appendChild(b)}}); renumber(g[n]);
   }});
@@ -859,7 +872,7 @@ function relayout(){{
   }});
   ROWS.forEach(function(b){{b.style.display='none'}});
   pool.forEach(function(b){{b.style.display=''}});
-  var all=pool.slice().sort(byEng);
+  var all=pool.slice().sort(byRank);
   // ONLY A 100 ns RUN CAN BE RANKED. The sweep is the triage that decides what
   // earns one, so a swept-but-not-yet-run molecule has no position on this axis
   // -- it gets its own band, ordered by its sweep reading, rather than a zero
