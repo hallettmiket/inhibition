@@ -35,11 +35,34 @@ they are **not** the test, because the design was chosen after seeing them.
 1. **A 10 ns window orders molecules like the full 100 ns** for window occupancy
    (ρ = +0.829, *p* = 0.042) and more weakly for attack-readiness (ρ = +0.600,
    *p* = 0.208).
-2. **BPMD occupancy predicts attack-readiness (ρ = +0.900, *p* = 0.037) far
-   better than it predicts residence (ρ = +0.410, *p* = 0.493)** — and the
+2. ~~**BPMD occupancy predicts attack-readiness (ρ = +0.900, *p* = 0.037) far
+   better than it predicts residence (ρ = +0.410, *p* = 0.493)**~~ — and the
    original pre-registration graded it on residence, where it looks like a null.
    Mechanistically unsurprising in hindsight: BPMD's collective variable **is**
    the warhead→SG distance.
+
+   > **WITHDRAWN 2026-08-11 (#35). Do not quote the +0.900.** The two sides of
+   > that correlation were computed on **different starting poses**. BPMD ran on
+   > 2–3 poses per molecule and kept the best; the 100 ns run always used pose 1.
+   > For 4 of 7 molecules those are not the same pose, and for two of them pose 1
+   > was never put through BPMD at all. The number compares *best-of-N poses*
+   > against *one different pose* — not what the sentence claims.
+   >
+   > #35 asks for it to be re-derived on matched poses. **That is not possible
+   > from what is on disk.** Of the five molecules named, three have no surviving
+   > elevation rows at all, and the remaining two
+   > (`t4_72f5671e89cb`, `t4_9a973be6b946`) carry `warhead_pose_idx` — the
+   > reactive-atom index — not the pose rank, so which pose each BPMD replicate
+   > ran on cannot be recovered. A matched re-derivation needs new compute, not
+   > new analysis.
+   >
+   > A separate defect in the same number, from #35: best-of is taken over three
+   > tries for most molecules and fewer for at least one, and fewer tries
+   > systematically gives a lower best-of.
+   >
+   > **Nothing downstream may inherit this figure**, including the downstream-BPMD
+   > pre-registration #51 asks for. If BPMD-vs-attack-readiness is to be claimed,
+   > it is a fresh measurement on matched poses at equal replicate count.
 3. **Only 1 of 6 elevated poses starts attack-ready**, and that one is the only
    molecule that got anywhere. Starting geometry costs nothing to check.
 
@@ -163,8 +186,11 @@ or Boltz-2 disagree with.
 - **Attack geometry is a proxy for reactivity, not a measurement of it.** Nothing
   here says a molecule reacts; it says the warhead reaches a geometry from which
   reaction is possible. That is discharged at FEP, on the covalent leg.
-- **The BPMD result (ρ = +0.900) is a lead on five points**, found while checking
-  something else. It is being tested here precisely because it was not predicted.
+- ~~**The BPMD result (ρ = +0.900) is a lead on five points**, found while checking
+  something else.~~ **Withdrawn 2026-08-11 (#35)** — the two sides were computed on
+  different starting poses and it cannot be re-derived on matched ones from data
+  on disk. See the note under observation 2. It is not a lead; it is a number
+  that was never measuring what its sentence said.
 
 ## The original MD-priority pre-registration stands
 
