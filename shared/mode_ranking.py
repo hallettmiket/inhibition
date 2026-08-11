@@ -177,9 +177,16 @@ tr.no td{{background:#fffaf9}}
 .b.mid{{background:#faf3e0;color:var(--mid)}}
 .b.no{{background:#fdeceb;color:var(--no)}}
 a{{color:var(--blue)}}
+p.nav{{margin:0 0 .8rem;font-size:13px}}
+p.nav span{{color:var(--muted);margin:0 .4rem}}
 </style></head><body><div class="wrap">
+<p class="nav"><a href="combined.html">&#8592; sweep &amp; MD results</a>
+ <span>&middot;</span> <a href="pipeline.html">how this works</a></p>
 <h1>{html.escape(title)} &mdash; every mode, ranked individually</h1>
-<p class="sub">{html.escape(date_str)} &middot; rank is <strong>within a warhead
+<p class="sub">{html.escape(date_str)} &middot; <strong>the ranking view</strong>
+&mdash; every molecule and every mode the screen scored, simulated or not. The
+<a href="combined.html">other view</a> carries the sweep and MD results, for the
+subset that was simulated. Rank is <strong>within a warhead
 class</strong>, never across &mdash; the S<sub>N</sub>2 angular criterion is
 stricter than the perpendicular one (<a
 href="https://github.com/hallettmiket/inhibition/issues/47">#47</a>), so a global
