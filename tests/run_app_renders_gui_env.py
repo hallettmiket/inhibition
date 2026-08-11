@@ -31,6 +31,8 @@ import traceback
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tests"))
+import gui_harness  # noqa: E402
 APP = REPO / "integration" / "app" / "app.py"
 sys.path.insert(0, str(REPO / "integration" / "app"))
 sys.path.insert(0, str(REPO))
@@ -59,7 +61,7 @@ def _run(panel: str, spec: str | None = None):
     if at.exception:
         raise AssertionError(f"{panel} raised: {at.exception}")
     if spec is not None:
-        at.sidebar.text_area[0].set_value(spec).run()
+        gui_harness.set_spec(at, spec)
         if at.exception:
             raise AssertionError(f"{panel} raised under curation: {at.exception}")
     return at
@@ -71,6 +73,7 @@ def main() -> int:
     print(f"{len(scopes)} panels declared in curate.PANEL_SCOPE\n")
 
     fails = 0
+    unreachable: list[tuple[str, str]] = []
     for s in scopes:
         p = s.panel
         # 1. renders at all
@@ -85,6 +88,12 @@ def main() -> int:
         try:
             at = _run(p, SPEC)
             print(f"  PASS  under filter      {p}")
+        except gui_harness.HarnessLimitation as exc:
+            # NOT a pass. Counted and named, so the summary cannot read as
+            # covered -- which is the whole complaint in #45.
+            unreachable.append((p, str(exc).split(";")[0]))
+            print(f"  UNREACHABLE  under filter  {p}")
+            continue
         except Exception as exc:                       # noqa: BLE001
             fails += 1
             print(f"  FAIL  under filter      {p}\n        {exc}")
@@ -111,7 +120,12 @@ def main() -> int:
             fails += 1
             print(f"  FAIL  refuses a typo    {p}\n        {exc}")
 
-    print(f"\n{'all panels render' if not fails else f'{fails} FAILURES'}")
+    if unreachable:
+        print("\n  NOT COVERED -- the harness cannot drive these, the app is fine:")
+        for panel, why in unreachable:
+            print(f"    {panel}: {why}")
+    print(f"\n{'all panels render' if not fails else f'{fails} FAILURES'}"
+          f"{f'; {len(unreachable)} case(s) not coverable by AppTest' if unreachable else ''}")
     return 1 if fails else 0
 
 

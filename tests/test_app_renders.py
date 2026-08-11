@@ -30,6 +30,8 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tests"))
+import gui_harness  # noqa: E402
 APP = REPO / "integration" / "app" / "app.py"
 sys.path.insert(0, str(REPO / "integration" / "app"))
 
@@ -49,7 +51,10 @@ def _app_test(panel: str, spec: str | None = None):
     at.sidebar.radio[0].set_value(panel).run()
     assert not at.exception, f"{panel} raised: {at.exception}"
     if spec is not None:
-        at.sidebar.text_area[0].set_value(spec).run()
+        try:
+            gui_harness.set_spec(at, spec)
+        except gui_harness.HarnessLimitation as exc:
+            pytest.skip(str(exc))
         assert not at.exception, f"{panel} raised under curation: {at.exception}"
     return at
 
