@@ -108,6 +108,17 @@ WORK = Path("/data/lab_vm/modifiable/inhibition/bpmd_3ikd")
 # the directory lives under append_only and a re-run must not overwrite, so this
 # resolves the newest rather than naming a fixed path.
 POSES = enp.poses_dir()
+# Overridable, because "the current pose set" is not one set. `nac_poses/`
+# is the shortlist export (79 poses); the 100 ns MD tier runs off
+# `nac_v3_poses/` (5,772). Asked for a candidate that lives only in the
+# latter, this correctly refused to find a pose -- but the only way to point
+# it at the right set was to copy a file into a versioned export directory,
+# which would make that export describe a set no export ever produced.
+# --pose-dir says which set, explicitly, in the record of the run.
+def set_poses_dir(d) -> None:
+    global POSES
+    POSES = Path(d)
+
 
 # The receptor as the chemist prepared it — the same file the docking that
 # produced these poses used, so the pose and the protein are in one frame (D0059).
@@ -994,6 +1005,9 @@ def main() -> None:
                     help="measure how the score depends on replica count and "
                          "length, on ONE known-active pose, before any "
                          "production run commits to a protocol")
+    ap.add_argument("--pose-dir", default=None, metavar="DIR",
+                    help="pose set to resolve --pose against; default is "
+                         "the newest export_nac_poses directory")
     ap.add_argument("--pose", default=None, metavar="IDENT",
                     help="a single pose to run (default for --convergence: a "
                          "crystallographic positive)")
@@ -1023,6 +1037,10 @@ def main() -> None:
     ap.add_argument("--report", action="store_true",
                     help="summarise what has actually landed, and exit")
     args = ap.parse_args()
+    if args.pose_dir:
+        set_poses_dir(args.pose_dir)
+        log.info("pose set: %s", POSES)
+
     logging.basicConfig(level=logging.INFO,
                         format=f"%(levelname)s [s{args.shard}] %(message)s")
 
