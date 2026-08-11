@@ -270,6 +270,7 @@ table.sib td{font-family:var(--mono)}
 tr.sibrow{cursor:pointer}
 tr.sibrow:hover{background:var(--blue-pale)}
 tr.sibrow.cur{background:var(--blue-pale);font-weight:700}
+input.mchk{margin:0 .45rem 0 0;vertical-align:-1px;cursor:pointer}
 i.sw{width:11px;height:11px;border-radius:2px;display:inline-block;margin-right:.45rem;
  vertical-align:-1px}
 .win{color:var(--good);font-weight:700}
@@ -337,6 +338,12 @@ function carbonScheme(col){
 // toggles let a reader combine "global" with a class filter, which is a
 // combination with no meaning.
 let SCOPE = '*', SEL = null, V = null, SURF = null;
+// SHOWN holds the modes currently drawn for the selected molecule, so several
+// alternatives can be compared and any of them switched off again. SEL stays the
+// PRIMARY -- the one the facts panel describes -- because a panel of numbers has
+// to be about one mode, and "several are visible" is a different question from
+// "which one am I reading".
+let SHOWN = new Set(), PDBCACHE = {};
 
 function lib(){ return window.$3Dmol || window['3Dmol']; }
 function fmt(x, d){ return (x === null || x === undefined) ? '—' : (+x).toFixed(d); }
@@ -395,12 +402,24 @@ function railHTML(){
 }
 
 function setScope(v){ SCOPE = v; railHTML(); }
+
+function toggleMode(m){
+  // The primary cannot be hidden -- the facts panel is describing it, and a
+  // panel of numbers with nothing drawn beside it reads as a rendering failure.
+  const cur = SEL ? ROWS.find(r => r.i === SEL) : null;
+  if (cur && m === cur.m) return;
+  if (SHOWN.has(m)) SHOWN.delete(m); else SHOWN.add(m);
+  if (SEL) pick(SEL);
+}
 function toggleTheme(){
   const d = document.documentElement.getAttribute('data-theme') === 'dark';
   document.documentElement.setAttribute('data-theme', d ? 'light' : 'dark'); }
 
 async function pick(id){
   const x = ROWS.find(r => r.i === id); if (!x) return;
+  const prev = SEL ? ROWS.find(r => r.i === SEL) : null;
+  if (!prev || prev.p !== x.p) SHOWN = new Set();   // new molecule, new selection
+  SHOWN.add(x.m);                                    // the primary is always drawn
   SEL = id; railHTML();
   document.getElementById('vempty').style.display = 'none';
   document.getElementById('vfull').style.display = '';
@@ -438,7 +457,9 @@ async function pick(id){
   const best = sibs.reduce((a,b) => (b.cr < a.cr ? b : a), sibs[0]);
   document.getElementById('sibs').innerHTML =
     '<h3>modes of ' + x.p + ' — ' + sibs.length + ', ranked against each other</h3>' +
-    '<table class="sib"><thead><tr><th>mode</th><th>class rank</th><th>poses</th>' +
+    '<p class="note" style="margin:.2rem 0 .5rem">Tick to draw a mode; click the '
+    + 'row to read it. Several can be shown at once.</p>'
+    + '<table class="sib"><thead><tr><th>show</th><th>class rank</th><th>poses</th>' +
     '<th>viable</th><th>enrichment</th><th>conditional_eb</th><th>spread</th>' +
     '<th>coherence</th><th>simulated</th></tr></thead><tbody>' +
     sibs.map(function(m){
@@ -447,7 +468,10 @@ async function pick(id){
                   : m.s === 'failed' ? 'sweep failed' : 'never';
       return '<tr class="sibrow' + (m.i === x.i ? ' cur' : '') + '"'
         + ' onclick="pick(\'' + m.i + '\')">'
-        + '<td><i class="sw" style="background:' + col + '"></i>m' + m.m + '</td>'
+        + '<td onclick="event.stopPropagation();toggleMode(' + m.m + ')">'
+        + '<input type="checkbox" class="mchk"' + (SHOWN.has(m.m) ? ' checked' : '')
+        + ' onclick="event.stopPropagation();toggleMode(' + m.m + ')">'
+        + '<i class="sw" style="background:' + col + '"></i>m' + m.m + '</td>'
         + '<td' + (m.i === best.i ? ' class="win"' : '') + '>' + m.cr + '</td>'
         + '<td>' + (m.n === null ? '—' : m.n) + '</td>'
         + '<td>' + (m.vf === null ? '—' : (m.vf*100).toFixed(1) + '%') + '</td>'
@@ -468,9 +492,12 @@ async function pick(id){
     + '(<a href="https://github.com/hallettmiket/inhibition/issues/44">#44</a>).';
 
   try {
-    const res = await fetch('mode_poses/' + x.p + '.pdb');
-    if (!res.ok) throw new Error(res.status);
-    draw(await res.text(), x);
+    if (!PDBCACHE[x.p]){
+      const res = await fetch('mode_poses/' + x.p + '.pdb');
+      if (!res.ok) throw new Error(res.status);
+      PDBCACHE[x.p] = await res.text();
+    }
+    draw(PDBCACHE[x.p], x);
   } catch (e) {
     document.getElementById('gl').innerHTML =
       '<p class="note" style="padding:14px">no pose file for ' + x.p + '</p>';
@@ -499,13 +526,16 @@ function draw(pdbTxt, x){
              {stick:{radius:0.28, colorscheme:'default'},
               cartoon:{color:'#c3ccd8', opacity:0.5}});
   V.addStyle({resi:[__CYS__], atom:'SG'}, {sphere:{radius:0.62}});
-  // ONE MODE AT A TIME (@tt8804). Overlaying a molecule's modes made a single
-  // crowded object out of poses that are alternatives to each other; the sibling
-  // table below switches between them instead.
+  // Draw every mode the reader has ticked. The PRIMARY is thicker and fully
+  // opaque so it stays identifiable in a stack of alternatives; the rest are
+  // thinner and translucent, which is the difference between comparing poses and
+  // producing one unreadable object out of several.
   modes.forEach(function(mo, i){
-    if (mo !== x.m){ V.setStyle({model: i+1}, {}); return; }
+    if (!SHOWN.has(mo)){ V.setStyle({model: i+1}, {}); return; }
+    const primary = (mo === x.m);
     V.setStyle({model: i+1}, {stick:{
-      radius: 0.22,
+      radius: primary ? 0.22 : 0.14,
+      opacity: primary ? 1 : 0.6,
       colorscheme: carbonScheme(MODE_COLS[(mo >= 0 ? mo : 0) % MODE_COLS.length])}});
   });
   if (document.getElementById('c-surf').checked){
