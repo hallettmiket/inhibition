@@ -668,8 +668,14 @@ def classes() -> dict:
     return out
 
 
-def block(ident: str, er, three: str, cls: dict) -> str:
-    rep = MD / ident / "md" / "rep1"
+def block(ident: str, er, three: str, cls: dict,
+          rep_dir: Path | None = None, suffix: str = "",
+          heading: str | None = None) -> str:
+    """One molecule's section. `rep_dir` overrides the default replicate-1 run,
+    and `suffix` keeps element ids unique when the same molecule appears more
+    than once in a document -- getElementById returns the FIRST match, so two
+    sections sharing ids means every control drives the first viewer."""
+    rep = Path(rep_dir) if rep_dir else MD / ident / "md" / "rep1"
     if not rep.is_dir():
         log.warning("%s: no trajectory at %s", ident, rep)
         return ""
@@ -694,7 +700,7 @@ def block(ident: str, er, three: str, cls: dict) -> str:
     nacs = None
     if mpdb.is_file():
         pdb_txt, dsg, labels, lpos = er.surface_payload(mpdb)
-        movie = mov.viewer_html(pdb_txt, dsg, labels, lpos, "", elem_id=f"gl_{ident}")
+        movie = mov.viewer_html(pdb_txt, dsg, labels, lpos, "", elem_id=f"gl_{ident}{suffix}")
         nacs = mp.nac_series(ident, rep, mpdb, total_ns)
     img = mp.figure(ident, s, res, er, nacs)
 
@@ -724,7 +730,7 @@ def block(ident: str, er, three: str, cls: dict) -> str:
             # same contacts in the real geometry, and two figures of one thing
             # invite a reader to look for a difference that is only projection.
             # interaction_map() is kept -- it is the printable version.
-            i3d = interaction_3d(mpdb, rows_c, f"i3_{ident}", rx_atom=rx)
+            i3d = interaction_3d(mpdb, rows_c, f"i3_{ident}{suffix}", rx_atom=rx)
         except Exception as exc:                          # noqa: BLE001
             log.warning("%s: interaction map unavailable: %s", ident, exc)
 
@@ -749,18 +755,18 @@ def block(ident: str, er, three: str, cls: dict) -> str:
                      f"{float(sw.median_dist_a):.2f} &Aring;"))
         rows.append(("median attack angle", f"{float(sw.median_angle_deg):.1f}&deg;"))
     facts = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in rows)
-    dl = (f'<a class="dl" download="{ident}_md.pdb" href="{pdb_href}">'
+    dl = (f'<a class="dl" download="{ident}{suffix}_md.pdb" href="{pdb_href}">'
           f'Download the MD structure (PDB, {pdb_bytes/1024:.0f} KB)</a>'
           if pdb_href else "")
 
     return f"""
 <section class="mol">
-  <h2>{ident}</h2>
+  <h2>{heading or ident}</h2>
   <div class="top">
     <div class="struct">{f'<img alt="" src="{svg}">' if svg else ''}</div>
     <div class="side">
-      <label for="s_{ident}">SMILES</label>
-      <textarea id="s_{ident}" readonly rows="3" onclick="this.select()">{smi}</textarea>
+      <label for="s_{ident}{suffix}">SMILES</label>
+      <textarea id="s_{ident}{suffix}" readonly rows="3" onclick="this.select()">{smi}</textarea>
       <table class="kv">{facts}</table>
       {dl}
     </div>
