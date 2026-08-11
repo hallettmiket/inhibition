@@ -459,7 +459,16 @@ def run_one(ident: str, smiles: str, label: str, *, production_ps: float,
         log.info("  production done (%.0f ps)", production_ps)
         # Measure, and let a measurement failure FAIL THE ROW rather than
         # leaving a complete-looking row with no residence in it.
-        row.update(measure_residence(md_wd / "rep1"))
+        #
+        # THE RUN SAYS WHERE IT WROTE. run_pipeline puts replicate N in rep<N>,
+        # but this read "rep1" regardless: replicate 2 ran its full 100 ns and
+        # then failed measurement against a directory it had never written, so a
+        # finished trajectory produced a row saying "failed". Same defect class
+        # as the rest of this project -- a path taken by DEFAULT rather than by
+        # identity -- and it arrived with the --replicate flag that fixed the
+        # seed. Fixing one half of "replicate" and not the other is how.
+        rep_dir = Path(res.get("equilibration_dir") or (md_wd / f"rep{replicate}"))
+        row.update(measure_residence(rep_dir))
         log.info("  residence: ligand RMSD %.3f nm mean, engaged in %.0f%% of frames",
                  row["explicit_ligand_rmsd_nm_mean"],
                  100 * row["explicit_frac_frames_engaged"])
@@ -468,8 +477,8 @@ def run_one(ident: str, smiles: str, label: str, *, production_ps: float,
         log.warning("  FAILED: %s", row["status"])
     finally:
         if not keep:
-            shutil.rmtree(wd / "md" / "rep1" if (wd / "md" / "rep1").exists() else wd,
-                          ignore_errors=True)
+            r = wd / "md" / f"rep{replicate}"
+            shutil.rmtree(r if r.exists() else wd, ignore_errors=True)
     return row
 
 
