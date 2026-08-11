@@ -310,8 +310,21 @@ v.resize();
 v.zoomTo({{resn:'MOL'}});
 v.zoom(0.75);
 v.render();
-// And re-frame if the window changes, or the canvas keeps a stale viewport.
-window.addEventListener('resize', function(){{ v.resize(); v.render(); }});
+// A ResizeObserver, not a one-shot resize. Two animation frames is a guess
+// about when layout settles; the box can still reflow afterwards (fonts, the
+// histogram image loading above it, a scrollbar appearing), and 3Dmol keeps
+// whatever canvas width it measured. A canvas wider than its box renders the
+// scene around the CANVAS centre, which sits right of the visible centre -- the
+// molecule appears pushed to the right, which is exactly what it did. Observing
+// the element removes the guess.
+const host = document.getElementById('gl');
+let framed = false;
+new ResizeObserver(function(){{
+  v.resize();
+  if (!framed) {{ v.zoomTo({{resn:'MOL'}}); v.zoom(0.75); framed = true; }}
+  v.render();
+}}).observe(host);
+window.addEventListener('load', function(){{ v.resize(); v.render(); }});
 }}); }});
 }});
 </script>

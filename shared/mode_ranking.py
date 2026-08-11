@@ -78,7 +78,8 @@ def _latest(pattern: str) -> Path | None:
 def gather() -> pd.DataFrame:
     """One row per mode: rank, docking-derived scores, and what was simulated."""
     frames = []
-    for tier, score in (("T4", "conditional_eb"), ("T3", "enrichment_conditional")):
+    for tier, score in (("T4", "conditional_eb"), ("T3", "enrichment_conditional"),
+                        ("REF", "conditional_eb")):
         f = _latest(f"rank_v2/rank_v2_{tier}_{score}_*.csv")
         if f is None:
             continue
@@ -86,6 +87,18 @@ def gather() -> pd.DataFrame:
         if "mode" in d.columns:
             d = d[d["mode"].notna()]
         d["tier"] = d.get("tier", tier)
+        # CONTROLS GO THROUGH THE SAME PIPELINE AND MUST BE SEEN IN IT (@tt8804,
+        # repeatedly). They are docked, mode-split and scored by the identical
+        # functions -- rank_v2 puts them in rank_v2_REF_* rather than in a tier
+        # table, because @tt8804 ruled they must never take a rank slot from a
+        # candidate. This view read only the tier tables, so every control was
+        # invisible in it: Sulfopin has been ranked since 2.2.0 as
+        # `ref_Sulfopin__chloroacetamide_m0` and could not be found here.
+        #
+        # They are now included and FLAGGED, not merged: `is_control` drives a
+        # separate badge and they are ranked within their class beside the
+        # candidates, which is the comparison a positive control is for.
+        d["is_control"] = (tier == "REF")
         frames.append(d)
     if not frames:
         return pd.DataFrame()
@@ -132,6 +145,27 @@ def gather() -> pd.DataFrame:
     # GLOBAL RANK IS COMPUTED HERE AND LABELLED BIASED WHEREVER IT IS SHOWN.
     # conditional_eb is not comparable across warhead classes (#47); this exists
     # so the page can answer "where does this sit overall" while saying so.
+    # References carry no class_rank of their own -- they are excluded from the
+    # candidates' per-class competition by design -- so give them one computed
+    # the same way, against the candidates of their class, and mark it.
+    # ON `enrichment_conditional`, NOT `conditional_eb`. rank_v2 does not compute
+    # the empirical-Bayes score for references, and ranking a control on a
+    # statistic the candidates were not ranked on would be a different comparison
+    # wearing the same column name. `enrichment_conditional` is present in BOTH
+    # tables, so the control's position is computed against the candidates of its
+    # class on the identical quantity, and `rank_basis` records which.
+    SCORE = "enrichment_conditional"
+    if "class_rank" in r.columns and SCORE in r.columns:
+        r["rank_basis"] = None
+        for cls, g in r.groupby("warhead_class"):
+            cand = g[~g.is_control.fillna(False)]
+            for i, row in g[g.is_control.fillna(False)].iterrows():
+                v = row.get(SCORE)
+                if pd.isna(v):
+                    continue
+                r.loc[i, "class_rank"] = int((cand[SCORE] > v).sum()) + 1
+                r.loc[i, "rank_basis"] = SCORE
+
     if "conditional_eb" in r.columns:
         r["global_rank"] = r["conditional_eb"].rank(
             ascending=False, method="min", na_option="bottom")
@@ -146,8 +180,17 @@ def idents(r: pd.DataFrame) -> set[str]:
 def _rows_json(r: pd.DataFrame) -> str:
     out = []
     for _, x in r.iterrows():
-        if pd.isna(x.get("class_rank")):
-            continue
+        # UNRANKED MODES ARE EMITTED, NOT DROPPED. A mode with
+        # viable_fraction == 0 has no enrichment_conditional and therefore no
+        # class_rank, and this used to `continue` past it. That silently removed
+        # 1,869 modes -- 23% of the library -- from the ranking view, and it
+        # removed them NON-RANDOMLY: always the zero-viable ones, which are
+        # exactly the stratum the sweep-depth question is about (#59).
+        #
+        # It also made the per-molecule table lie. t3_5b92831a5d23 has SIX modes
+        # and the page said four, because m2 and m4 are zero-viable (@tt8804
+        # spotted it). "Stamp, do not drop" -- gui_spec.md §6.2.
+        pass
         st = ("md" if x.ran_md else "swept" if x.swept
               else "failed" if x.sent else "none")
 
@@ -159,12 +202,14 @@ def _rows_json(r: pd.DataFrame) -> str:
 
         out.append({
             "i": str(x.ident), "p": str(x.parent_ident), "m": int(x["mode"]),
-            "c": str(x.warhead_class), "cr": int(x.class_rank),
+            "c": str(x.warhead_class),
+            "cr": (int(x.class_rank) if pd.notna(x.get("class_rank")) else None),
             "gr": num("global_rank"), "n": num("n_poses_mode"),
             "np": num("n_poses"), "vf": num("viable_fraction", 4),
             "eb": num("conditional_eb", 3), "en": num("enrichment", 2),
             "sp": num("spread_a", 2), "dc": num("dir_coherence", 3),
             "fa": num("frac_attack_ready", 4), "s": st,
+            "ctl": bool(x.get("is_control", False)),
         })
     return json.dumps(out, separators=(",", ":"))
 
@@ -236,6 +281,13 @@ main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
 .t-swept{background:#e8f1fb;color:var(--navy)}
 .t-failed{background:#faf3e0;color:var(--warn)}
 .t-none{background:var(--raise);color:var(--muted)}
+/* A control reads as a different KIND of row, not a better or worse one: an
+   amber accent, because what matters is where it LANDS among the candidates. */
+.t-ctl{background:#fdf0dc;color:#8a5a00}
+.row.ctl{background:#fffaf2;box-shadow:inset 3px 0 0 #d99a2b}
+.row.ctl:hover{background:#fdf3e4}
+:root[data-theme="dark"] .t-ctl{background:#3a2c14;color:#e0b070}
+:root[data-theme="dark"] .row.ctl{background:#1b1710}
 .bar{height:3px;background:var(--rule);border-radius:2px;overflow:hidden;margin-top:2px}
 .bar i{display:block;height:100%;background:var(--blue)}
 #viewer{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--paper)}
@@ -274,6 +326,7 @@ input.mchk{margin:0 .45rem 0 0;vertical-align:-1px;cursor:pointer}
 i.sw{width:11px;height:11px;border-radius:2px;display:inline-block;margin-right:.45rem;
  vertical-align:-1px}
 .win{color:var(--good);font-weight:700}
+.na{color:var(--muted);font-style:italic}
 .warnbox{border-left:3px solid var(--warn);background:#fdf8ea;padding:.6rem .9rem;
  font-size:12px;margin:0 0 12px;border-radius:0 3px 3px 0}
 :root[data-theme="dark"] .warnbox{background:#241f12}
@@ -353,8 +406,9 @@ function isGlobal(){ return SCOPE === '__global__'; }
 function visible(){
   let r = ROWS.slice();
   if (SCOPE !== '*' && !isGlobal()) r = r.filter(x => x.c === SCOPE);
-  if (isGlobal()) r.sort((a,b) => (a.gr === null ? 1e9 : a.gr) - (b.gr === null ? 1e9 : b.gr));
-  else r.sort((a,b) => a.c.localeCompare(b.c) || a.cr - b.cr);
+  const K = x => (x === null || x === undefined) ? 1e9 : x;   // unranked sorts last
+  if (isGlobal()) r.sort((a,b) => K(a.gr) - K(b.gr));
+  else r.sort((a,b) => a.c.localeCompare(b.c) || K(a.cr) - K(b.cr));
   return r;
 }
 
@@ -378,12 +432,15 @@ function railHTML(){
   for (const x of r){
     if (SCOPE === '*' && x.c !== cls){ cls = x.c;
       out.push('<div class="chd">' + cls + '</div>'); }
-    const rank = isGlobal() ? (x.gr === null ? '—' : x.gr) : x.cr;
+    const rank = isGlobal() ? (x.gr === null ? '—' : x.gr)
+                           : (x.cr === null ? '—' : x.cr);
     const pct = x.vf === null ? 0 : Math.round(x.vf * 100);
-    const badge = x.s === 'md' ? '100 ns' : x.s === 'swept' ? 'swept'
+    const badge = x.ctl ? 'control'
+                : x.s === 'md' ? '100 ns' : x.s === 'swept' ? 'swept'
                 : x.s === 'failed' ? 'failed' : 'not run';
     out.push(
-      '<button class="row' + (SEL === x.i ? ' on' : '') + '" onclick="pick(\'' + x.i + '\')">' +
+      '<button class="row' + (SEL === x.i ? ' on' : '') + (x.ctl ? ' ctl' : '') +
+      '" onclick="pick(\'' + x.i + '\')">' +
       '<span class="rk">' + rank + '</span>' +
       '<img class="thumb" loading="lazy" alt="" src="mode_thumbs/' + x.p + '.svg">' +
       '<span class="body"><span class="l1">' +
@@ -391,7 +448,8 @@ function railHTML(){
       '<span class="eng">' + fmt(x.eb, 2) + '</span></span>' +
       '<span class="l2"><span class="wc">' + x.c + '</span>' +
       '<span class="meta">' + (x.n === null ? '—' : x.n) + ' poses · ' + pct + '% viable</span>' +
-      '<span class="tag t-' + x.s + '">' + badge + '</span></span>' +
+      '<span class="tag ' + (x.ctl ? 't-ctl' : 't-' + x.s) + '">' + badge +
+      '</span></span>' +
       '<span class="bar"><i style="width:' + pct + '%"></i></span></span></button>');
   }
   document.getElementById('mhint').textContent =
@@ -429,7 +487,7 @@ async function pick(id){
   // "what does this molecule look like".
   document.getElementById('vstruct').src = 'mode_thumbs/' + x.p + '.svg';
   document.getElementById('vfacts').innerHTML = [
-    ['class rank', x.cr],
+    ['class rank', x.cr === null ? 'unranked' : x.cr],
     ['global rank', x.gr === null ? '—' : x.gr],
     ['poses in mode', x.n === null ? '—' : x.n + ' of ' + (x.np === null ? '?' : x.np)],
     ['viable fraction', x.vf === null ? '—' : (x.vf*100).toFixed(1) + '%'],
@@ -442,7 +500,14 @@ async function pick(id){
   ].map(kv => '<div class="fact"><b>' + kv[1] + '</b><span>' + kv[0] + '</span></div>').join('');
 
   const g = document.getElementById('gwarn');
-  if (x.s === 'none'){
+  if (x.ctl){
+    g.style.display = '';
+    g.innerHTML = '<strong>Control.</strong> Docked, mode-split and scored by the '
+      + 'same functions as every candidate, and ranked here against the candidates '
+      + 'of its own warhead class on <code>enrichment_conditional</code> &mdash; the '
+      + 'statistic both tables carry. It takes no rank slot from a candidate '
+      + '(rank_v2 keeps references in their own table).';
+  } else if (x.s === 'none'){
     g.style.display = '';
     g.innerHTML = '<strong>Never simulated.</strong> This mode was scored and ranked, '
       + 'and no sweep or MD was ever run from it. Every number above is docking-derived.';
@@ -454,9 +519,11 @@ async function pick(id){
   // and it is the one place a reader can see whether the mode that was simulated
   // is the one that scored best.
   const sibs = ROWS.filter(r => r.p === x.p).sort((a,b) => a.m - b.m);
-  const best = sibs.reduce((a,b) => (b.cr < a.cr ? b : a), sibs[0]);
+  const RK = m => (m.cr === null || m.cr === undefined) ? 1e9 : m.cr;
+  const best = sibs.reduce((a,b) => (RK(b) < RK(a) ? b : a), sibs[0]);
   document.getElementById('sibs').innerHTML =
-    '<h3>modes of ' + x.p + ' — ' + sibs.length + ', ranked against each other</h3>' +
+    '<h3>modes of ' + x.p + ' — ' + sibs.length + ' in total, '
+    + sibs.filter(m => m.cr !== null).length + ' ranked</h3>' +
     '<p class="note" style="margin:.2rem 0 .5rem">Tick to draw a mode; click the '
     + 'row to read it. Several can be shown at once.</p>'
     + '<table class="sib"><thead><tr><th>show</th><th>class rank</th><th>poses</th>' +
@@ -472,7 +539,8 @@ async function pick(id){
         + '<input type="checkbox" class="mchk"' + (SHOWN.has(m.m) ? ' checked' : '')
         + ' onclick="event.stopPropagation();toggleMode(' + m.m + ')">'
         + '<i class="sw" style="background:' + col + '"></i>m' + m.m + '</td>'
-        + '<td' + (m.i === best.i ? ' class="win"' : '') + '>' + m.cr + '</td>'
+        + '<td' + (m.i === best.i ? ' class="win"' : '') + '>'
+        + (m.cr === null ? '<span class="na">unranked</span>' : m.cr) + '</td>'
         + '<td>' + (m.n === null ? '—' : m.n) + '</td>'
         + '<td>' + (m.vf === null ? '—' : (m.vf*100).toFixed(1) + '%') + '</td>'
         + '<td>' + fmt(m.en, 2) + '</td><td>' + fmt(m.eb, 3) + '</td>'
