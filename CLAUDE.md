@@ -91,6 +91,20 @@ right*, and add a guard that can actually fail.
   instance of the catalogue's disguise #4 in
   [`how_this_project_breaks.md`](docs/how_this_project_breaks.md), and the
   docstring three lines above it warns against exactly this confusion.
+- **Every docked pose is persisted, always** (@tt8804, 2026-08-11, #44). A
+  screen run MUST write the whole pose cloud grouped by mode, not just each
+  mode's representative. `nac_screen_v2` docks into a `tempfile.mkdtemp` and
+  `rmtree`s it in a `finally`, so by default the 500 poses behind every mode are
+  destroyed the moment the run ends — verified by a filesystem-wide search for
+  `t4_716800c125a7`, which found no `.dlg` or `.pdbqt` anywhere. What survives
+  is one medoid per mode and a per-pose table of measurements with no
+  coordinates. That is why the ranking view can never show the cloud behind a
+  mode, why mode membership cannot be re-derived, and why the pose that was
+  simulated cannot be matched back to its energy rank. **Run with
+  `--all-poses`.** It must come from the SAME run that produced the scores:
+  docking is stochastic with no fixed seed, so a re-dock gives a different cloud
+  and showing it beside the existing numbers puts structures on screen that the
+  scores were not computed from.
 - **Environments live outside the repo**, under `/data/lab_vm/envs/dwi_*`.
   Clone-and-run will not work without them. The shared CPU workhorse is
   `/data/lab_vm/envs/dwi_cheminf`.

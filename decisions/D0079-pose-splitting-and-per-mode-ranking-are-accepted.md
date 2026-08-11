@@ -22,7 +22,8 @@ evidence:
   - 'the collision that hid it: mode 0 is the bare ident in attack_sweep and _m0 in rank_v2, so merge(on="ident") drops every simulated row without erroring'
   - 'fixed: shared/mode_key.py keys on (parent_ident, mode); attack_sweep reads mode from the pose property and always writes _m<mode>'
   - 'pose_rank - 1 == mode holds for all 1,751 exported poses checked, so the old derivation was latent rather than active'
-  - 'unresolved: #47 measures every warhead class with wet-lab anchoring ranking LAST, on a criterion whose difficulty varies by class'
+  - '#47 closed as FALSE: BDHI is a recorded Pin1 anchor, Byun 2023 JACS 10.1021/jacs.3c00598, already in pin1_covalent_cys113_anchors_2.csv when #47 was written'
+  - 'the UNVERIFIED flags on that anchor row are about the fragment SMILES/structure, not about whether BDHI targets Pin1'
 ---
 
 # What is accepted
@@ -59,16 +60,18 @@ property rather than deriving it from `pose_rank`, and always writes `_m<mode>`.
 
 These are not bookkeeping. Each changes what the ranking means.
 
-1. **#47 — the criterion ranks the chemistry we most believe in LAST.** Every
-   warhead class with wet-lab anchoring — chloroacetamide (crystal + known
-   actives), sulfamate_acetamide and sulfonate_acetamide (measured k) — sits at
-   the bottom, medians 0.000–0.001. The classes leading the shortlist, bdhi_c5
-   and bdhi_c4, have **no measured Pin1 activity at all**, and the best-scoring
-   control is the promiscuous naphthoquinone reference. A large part is mechanism
-   bias: `SN2_ANGLE_MIN = 150°` is a far narrower target than
-   `PERPENDICULAR_MAX_OFF_NORMAL = 30°`, and the isotropic nulls do not equalise
-   them. **This is the deepest open problem in the ranking and nothing in this
-   record addresses it.**
+1. ~~**#47**~~ — **withdrawn the same day, and the correction matters.** I listed
+   it as the deepest open problem on the strength of its claim that *"the classes
+   leading our shortlist — bdhi_c5, bdhi_c4 — have no measured Pin1 activity
+   whatsoever"*. That is false, and the project's own reference file already said
+   so: `pin1_covalent_cys113_anchors_2.csv` row 7 records
+   `Byun-2023-BDHI-fragment` with the citation **Byun 2023, JACS,
+   10.1021/jacs.3c00598**. The `UNVERIFIED` flags on that row are about the
+   SMILES and structure of the specific fragment, not about whether BDHI targets
+   Pin1 — reading them as the latter is how the error got in, and I repeated it
+   without checking. BDHI-led ranking is therefore consistent with the criterion
+   working. The residual mechanism-bias point is handled by ranking within a
+   warhead class, which both GUIs do by default. (@tt8804, #47 closed as false.)
 2. **#53's audit half.** The code is fixed; the science is not. Whether mode 0 was
    chosen deliberately is unestablished, the 5 class-leading modes are still
    unswept, and the shortlist has not been re-derived under per-mode selection —
@@ -84,7 +87,13 @@ These are not bookkeeping. Each changes what the ranking means.
 
 # The decision
 
-Pose splitting and per-mode ranking stand. The selection defect is closed. **The
-stage is not closed**, because #47 puts the ranking's meaning in question in a way
-that no amount of correct plumbing repairs, and because it is not yet known
-whether the 2.2.0 shortlist is a shortlist of mode 0s.
+Pose splitting and per-mode ranking stand. The selection defect is closed, and
+#47 -- which I had called the deepest open problem -- is closed as false.
+
+**What is left is one question, and it is answerable without new science:** it is
+not yet known whether the 2.2.0 shortlist is a shortlist of *mode 0s*. The sweep
+is being re-run on the fixed ranking (@tt8804), which settles it.
+
+The other two are forward commitments rather than blockers: every future pose
+generation run persists its whole cloud (#44, now a rule in `CLAUDE.md`), and the
+Sulfopin control gets its own run.
