@@ -672,8 +672,19 @@ chemistries is the cheapest way to turn two points into a distribution.</p>
     # because it indexes the sweep by parent_ident, so the per-mode ranking the
     # pipeline computes was never visible anywhere. Same stable-name treatment
     # as the schematic.
+    # Assets first: the ranking view fetches a depiction and a pose per molecule
+    # rather than inlining 8,096 of each. Existing files are left alone.
+    from shared import mode_assets as massets
+    # Vendored ONCE into the ranking page's <head>, before any viewer script --
+    # loaded at the end of the body it is not defined yet when the viewer looks
+    # for it, and the viewer then draws nothing without erroring.
+    _three_js = (REPO / "scripts" / ".cache_3dmol-min.js")
+    three = _three_js.read_text() if _three_js.is_file() else ""
+    _mr = moderank.gather()
+    _a = massets.write_assets(REPORTS, moderank.idents(_mr))
+    log.info("mode assets: +%d poses, +%d thumbs", _a["poses"], _a["thumbs"])
     (REPORTS / "modes.html").write_text(
-        moderank.build(_full_title, _date.today().isoformat()))
+        moderank.build(_full_title, _date.today().isoformat(), three))
 
     page = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
