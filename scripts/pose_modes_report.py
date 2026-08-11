@@ -125,10 +125,14 @@ def viewer(ident: str, poses, receptor: str, ran_mode: str | None) -> str:
         col = MODE_COLS[i % len(MODE_COLS)]
         blocks.append({"m": mode, "col": col})
         tag = " · ran 100 ns" if mode == ran_mode else ""
+        # NOT `energy_rank`. backfill_pose_rank.py stamps energy_rank = file
+        # position, so it reads 1,2,3,4 for any molecule and means nothing.
+        # Showing it invited the reading "mode 0 holds the lowest-energy pose",
+        # which is the opposite of how the representative is chosen.
         ctl.append(
             f'<label class="mk"><input type="checkbox" id="pm_{ident}_{i}" checked>'
             f'<i style="background:{col}"></i>mode {mode}'
-            f'<em>rank {prank} · energy rank {erank}{tag}</em></label>')
+            f'<em>medoid{tag}</em></label>')
     pdbs = "".join(
         f'<script type="text/plain" id="pm_{ident}_pdb{i}">{pose_pdb(m)}</script>'
         for i, (m, *_r) in enumerate(poses))
@@ -192,6 +196,47 @@ def viewer(ident: str, poses, receptor: str, ran_mode: str | None) -> str:
 </script>"""
 
 
+def per_pose(ident: str) -> pd.DataFrame:
+    """Every docked pose's energy and geometry, from the run that scored them.
+
+    The COORDINATES are gone -- nac_screen_v2 docks in a tempfile.mkdtemp and
+    rmtree's it in a finally, so only each mode's representative survives as
+    structure (#44). The per-pose measurements were written to nac_v3/poses_*
+    and did survive, which is why energies can be shown when poses cannot.
+    """
+    for f in sorted(glob.glob(str(B / "nac_v3/poses_*.csv"))):
+        try:
+            d = pd.read_csv(f)
+        except Exception:                                  # noqa: BLE001
+            continue
+        if "ident" in d.columns and (d.ident == ident).any():
+            return d[d.ident == ident]
+    return pd.DataFrame()
+
+
+def energy_table(pp: pd.DataFrame, n: int = 10) -> str:
+    """The n lowest-energy poses of the whole cloud, with their mode."""
+    if pp.empty:
+        return "<p class='na'>no per-pose record survives for this molecule.</p>"
+    t = pp.nsmallest(n, "energy")
+    head = ("<tr><th>energy rank</th><th>pose</th><th>mode</th><th>energy</th>"
+            "<th>C&ndash;S&gamma;</th><th>angle</th><th>in range</th>"
+            "<th>NAC viable</th></tr>")
+    body = []
+    for _, r in t.iterrows():
+        i = int(r["mode"])
+        col = MODE_COLS[i % len(MODE_COLS)] if i >= 0 else "#8a94a6"
+        yes = "<strong>yes</strong>" if bool(r.viable) else "<span class='na'>no</span>"
+        body.append(
+            f"<tr><td>{int(r.energy_rank)}</td><td>#{int(r.pose_idx)}</td>"
+            f"<td><i class='sw' style='background:{col}'></i>m{i}</td>"
+            f"<td>{r.energy:.2f}</td><td>{r.distance:.2f} &Aring;</td>"
+            f"<td>{r.angle:.1f}&deg;</td>"
+            f"<td>{'yes' if bool(r.in_range) else '<span class=na>no</span>'}</td>"
+            f"<td>{yes}</td></tr>")
+    return f'<table class="modes"><thead>{head}</thead><tbody>{"".join(body)}</tbody></table>'
+
+
 def table(mr: pd.DataFrame, sw: pd.DataFrame, poses) -> str:
     sw_by_mode = {}
     if len(sw) and "mode" in sw.columns:
@@ -232,6 +277,7 @@ def main() -> None:
     ident = args.candidate
 
     mr, sw, poses = mode_rows(ident), sweep_rows(ident), medoids(ident)
+    pp = per_pose(ident)
     if mr.empty:
         raise SystemExit(f"no rank_v2 rows for {ident}")
     rec = "\n".join(l for l in RECEPTOR.read_text().splitlines()
@@ -308,6 +354,22 @@ into. Toggle a mode to show or hide it. Cys113 is in red sticks; the surface
 covers the receptor and is left off Cys113.</p>
 
 {viewer(ident, poses, rec, ran)}
+
+<h2>The ten lowest-energy poses of the {n_poses}</h2>
+<p>Docking energy over the whole cloud, from the run that produced the scores
+above. <strong>Their coordinates no longer exist</strong> &mdash; the screen docks
+in a temporary directory and deletes it, so only each mode's representative
+survives as structure (#44). The measurements survived; the structures did not.</p>
+
+{energy_table(pp)}
+
+<div class="caveat"><strong>The pose that was simulated is NOT the lowest-energy
+one, by design.</strong> <code>nac_screen_v2</code>: <em>"the pose most central to
+its own mode, not its lowest-energy member"</em> &mdash; the medoid of the
+best-anchored quartile. Argmax of a noisy score recovered the crystal pose 6.7% of
+the time against 26.7% for a typical member, so taking the best-scoring pose is
+the thing this pipeline deliberately stopped doing. The energy table above is
+therefore context, not a competing ranking.</div>
 
 <div class="caveat"><strong>These are medoids, not the pose cloud.</strong>
 <code>export_nac_poses</code> writes one representative per mode, so this shows
