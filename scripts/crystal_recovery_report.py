@@ -147,6 +147,26 @@ def main() -> None:
                     if l.startswith(("ATOM", "HETATM")))
     # The three structures the argument is about: the crystal, the pose the
     # pipeline kept, and the closest pose it generated and did not keep.
+    # The pocket wall for the surface: residues near Cys113's SG. A whole-protein
+    # VDW mesh is the expensive call and the far side of the protein is not the
+    # subject.
+    import numpy as _np
+    sg, res = None, {}
+    for ln in RECEPTOR.read_text().splitlines():
+        if not ln.startswith(("ATOM", "HETATM")):
+            continue
+        ri, nm = ln[22:26].strip(), ln[12:16].strip()
+        try:
+            xyz = _np.array([float(ln[30:38]), float(ln[38:46]), float(ln[46:54])])
+        except ValueError:
+            continue
+        res.setdefault(ri, []).append(xyz)
+        if ri == str(CYS_RESI) and nm == "SG":
+            sg = xyz
+    pocket = sorted(int(r) for r, xs in res.items() if r.lstrip("-").isdigit()
+                    and sg is not None
+                    and min(float(_np.linalg.norm(x - sg)) for x in xs) <= 12.0)
+
     closest = poses[int(np.nanargmin(vals))]
     blocks = {"xtal": pdb_block(xtal), "kept": pdb_block(reps[int(np.nanargmin(rvals))]),
               "closest": pdb_block(closest)}
@@ -174,7 +194,8 @@ body>*{{max-width:none}}
 .glbox{{position:relative;width:100%;height:480px;background:#eef1f6;
  border:1px solid var(--rule);border-radius:5px;overflow:hidden}}
 .glbox>div{{position:absolute;inset:0}} .glbox canvas{{position:absolute;top:0;left:0}}
-.key{{display:flex;gap:1.4rem;flex-wrap:wrap;margin:.6rem 0 0;font:600 12px var(--sans)}}
+.key{{display:flex;gap:1.2rem;flex-wrap:wrap;margin:.7rem 0 0;font:600 12px var(--sans)}}
+.key label{{display:flex;align-items:center;gap:.35rem;cursor:pointer;user-select:none}}
 .key i{{width:22px;height:4px;border-radius:2px;display:inline-block;margin-right:.4rem;
  vertical-align:3px}}
 img.h{{width:100%;height:auto;border:1px solid var(--rule);border-radius:5px;background:#fff}}
@@ -204,10 +225,16 @@ at <strong>{kept:.2f} Å</strong>, which is worse than
 <h2>The three structures</h2>
 <div class="glbox"><div id="gl"></div></div>
 <div class="key">
- <span><i style="background:#b3261e"></i>crystal (6VAJ, adduct)</span>
- <span><i style="background:#0f7a54"></i>closest generated pose ({best:.2f} Å)</span>
- <span><i style="background:#8a6d1f"></i>pose the pipeline kept ({kept:.2f} Å)</span>
- <span><i style="background:#b9c7db"></i>Cys113</span>
+ <label><input type="checkbox" id="c-xtal" checked>
+  <i style="background:#b3261e"></i>crystal (6VAJ, adduct)</label>
+ <label><input type="checkbox" id="c-closest" checked>
+  <i style="background:#0f7a54"></i>closest generated pose ({best:.2f} Å)</label>
+ <label><input type="checkbox" id="c-kept" checked>
+  <i style="background:#8a6d1f"></i>pose the pipeline kept ({kept:.2f} Å)</label>
+ <label><input type="checkbox" id="c-surf" checked>
+  <i style="background:#b9c7db"></i>pocket surface</label>
+ <label><input type="checkbox" id="c-cys" checked>
+  <i style="background:#e8c33a"></i>Cys113 sticks</label>
 </div>
 
 <p class="note" style="margin-top:1.4rem">Atoms are matched by maximum common
@@ -233,26 +260,59 @@ adduct/reactant difference. <strong>n = 1 molecule.</strong></p>
 // the fourth distinct cause of a blank viewer in this project in one day.
 // tests/test_viewer_html.py now asserts this ordering.
 window.addEventListener('DOMContentLoaded', function(){{
+// TWO ANIMATION FRAMES BEFORE THE VIEWER IS BUILT. On DOMContentLoaded the box
+// has its markup but not its final laid-out size, so 3Dmol sizes its canvas from
+// stale dimensions: the scene renders into a corner of an oversized canvas and
+// the mouse handlers hit-test against the wrong rectangle, which is why the view
+// could not be rotated. Every other viewer in this repo already waits; this one
+// did not.
+requestAnimationFrame(function(){{ requestAnimationFrame(function(){{
 const M = window.$3Dmol || window['3Dmol'];
 const D = {json.dumps(blocks)};
 const v = M.createViewer(document.getElementById('gl'), {{backgroundColor:'#eef1f6'}});
 v.addModel(document.getElementById('rec').textContent, 'pdb');
-v.setStyle({{}}, {{cartoon:{{color:'#c3ccd8', opacity:0.5}}}});
-v.setStyle({{resi:[{CYS_RESI}]}}, {{stick:{{radius:0.26, colorscheme:'default'}},
-                                   cartoon:{{color:'#c3ccd8',opacity:0.5}}}});
-v.addStyle({{resi:[{CYS_RESI}], atom:'SG'}}, {{sphere:{{radius:0.6}}}});
 // Carbons carry the identity colour; every other element keeps its conventional
 // one, so the chemistry still reads while the three poses stay distinguishable.
 function cs(c){{ return {{prop:'elem', map: Object.assign({{}},
   (M.elementColors||{{}}).defaultColors||{{}}, {{C:c}})}}; }}
-let i = 1;
-[['xtal',0xb3261e],['closest',0x0f7a54],['kept',0x8a6d1f]].forEach(function(kv){{
-  v.addModel(D[kv[0]], 'pdb');
-  v.setStyle({{model:i}}, {{stick:{{radius: kv[0]==='xtal'?0.22:0.17,
-                                   colorscheme: cs(kv[1])}}}});
-  i++;
+const LIG = [['xtal',0xb3261e],['closest',0x0f7a54],['kept',0x8a6d1f]];
+LIG.forEach(function(kv){{ v.addModel(D[kv[0]], 'pdb'); }});
+let SURF = null;
+function restyle(){{
+  v.setStyle({{}}, {{cartoon:{{color:'#c3ccd8', opacity:0.5}}}});
+  if (document.getElementById('c-cys').checked){{
+    v.setStyle({{resi:[{CYS_RESI}]}}, {{stick:{{radius:0.26, colorscheme:'default'}},
+                                       cartoon:{{color:'#c3ccd8',opacity:0.5}}}});
+    v.addStyle({{resi:[{CYS_RESI}], atom:'SG'}}, {{sphere:{{radius:0.6}}}});
+  }}
+  LIG.forEach(function(kv, i){{
+    const on = document.getElementById('c-' + kv[0]).checked;
+    v.setStyle({{model: i+1}}, on
+      ? {{stick:{{radius: kv[0]==='xtal' ? 0.22 : 0.17, colorscheme: cs(kv[1])}}}}
+      : {{}});
+  }});
+  // The pocket wall, shell only and never over Cys113 or a ligand -- a mesh on
+  // top of those hides what the figure is for. `and` rather than a bare `not`,
+  // so the selection cannot leak onto the ligand models.
+  if (SURF){{ try {{ v.removeSurface(SURF.surfid); }} catch(e){{}} SURF = null; }}
+  if (document.getElementById('c-surf').checked){{
+    SURF = v.addSurface(M.SurfaceType.VDW, {{opacity:0.6, color:'#b9c7db'}},
+      {{and:[{{model:0}}, {{resi:{json.dumps(pocket)}}}, {{not:{{resi:[{CYS_RESI}]}}}}]}});
+  }}
+  v.render();
+}}
+['c-xtal','c-closest','c-kept','c-surf','c-cys'].forEach(function(id){{
+  document.getElementById(id).addEventListener('change', restyle);
 }});
-v.zoomTo({{resn:'MOL'}}); v.zoom(0.55); v.resize(); v.render();
+restyle();
+// resize BEFORE framing, so zoomTo computes against the real viewport.
+v.resize();
+v.zoomTo({{resn:'MOL'}});
+v.zoom(0.75);
+v.render();
+// And re-frame if the window changes, or the canvas keeps a stale viewport.
+window.addEventListener('resize', function(){{ v.resize(); v.render(); }});
+}}); }});
 }});
 </script>
 </body></html>"""
