@@ -142,7 +142,7 @@ def viewer(ident: str, poses, receptor: str, ran_mode: str | None) -> str:
 {pdbs}
 <script>
 (function(){{
-  const M = window.$3Dmol || window['3Dmol'];
+  let M = null;
   const N = {len(poses)}, COLS = {json.dumps([b["col"] for b in blocks])};
   let built = false, v = null, surf = null;
   function styleAll() {{
@@ -166,6 +166,8 @@ def viewer(ident: str, poses, receptor: str, ran_mode: str | None) -> str:
   }}
   function boot() {{
     if (built) return; built = true;
+    M = window.$3Dmol || window['3Dmol'];
+    if (!M) {{ built = false; return; }}   // library not parsed yet; retry on load
     requestAnimationFrame(function(){{ requestAnimationFrame(function(){{
       v = M.createViewer(document.getElementById('pm_{ident}_gl'),
                          {{backgroundColor:'#eef1f6'}});
@@ -284,7 +286,12 @@ i.sw{{width:11px;height:11px;border-radius:2px;display:inline-block;
 .na{{color:var(--muted)}}
 .caveat{{border-left:3px solid var(--rule);padding:.1rem 0 .1rem 1rem;
   color:var(--muted);font-size:13.5px;margin:1.2rem 0}}
-</style></head><body>
+</style>
+<!-- 3Dmol is vendored in the HEAD, before any viewer script runs. Loaded at the
+     end of the body it is not defined yet when a viewer's module-level
+     `window.$3Dmol` lookup executes, and the viewer silently draws nothing. -->
+<script>{three}</script>
+</head><body>
 <header class="mast"><h1>{title}</h1>
 <p class="standfirst">Timothy Wu &middot; {byline}</p></header>
 
@@ -315,7 +322,6 @@ simulated.</strong> The 10 ns sweep ran on it, and the 100 ns MD and its
 replicates all started from that same pose. The other modes have no dynamics of
 any kind behind them &mdash; their columns above are docking-derived only.</div>
 
-<script>{three}</script>
 </body></html>"""
 
     dest = sout.Topic("blacksmith", "pose_modes").write(f"pose_modes_{ident}", ".html")
