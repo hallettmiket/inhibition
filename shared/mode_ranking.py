@@ -40,6 +40,34 @@ from shared import mode_key as mk
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
 RECEPTOR = Path("/data/lab_vm/modifiable/inhibition/receptor_3ikd_prep/3IKD_noligand.pdb")
 CYS_RESI = 113
+#: Surface shell: residues with a heavy atom within this of Cys113's SG. A
+#: whole-protein VDW mesh is the expensive call in a 3Dmol viewer and the far
+#: side of the protein is not the subject.
+SURF_SHELL_A = 12.0
+
+
+def pocket_residues() -> list[int]:
+    """Residue numbers forming the pocket wall, from the receptor itself."""
+    import numpy as np
+    if not RECEPTOR.is_file():
+        return []
+    sg, res = None, {}
+    for ln in RECEPTOR.read_text().splitlines():
+        if not ln.startswith(("ATOM", "HETATM")):
+            continue
+        ri, nm = ln[22:26].strip(), ln[12:16].strip()
+        try:
+            xyz = np.array([float(ln[30:38]), float(ln[38:46]), float(ln[46:54])])
+        except ValueError:
+            continue
+        res.setdefault(ri, []).append(xyz)
+        if ri == str(CYS_RESI) and nm == "SG":
+            sg = xyz
+    if sg is None:
+        return []
+    return sorted(int(ri) for ri, xs in res.items()
+                  if ri.lstrip("-").isdigit()
+                  and min(float(np.linalg.norm(x - sg)) for x in xs) <= SURF_SHELL_A)
 
 
 def _latest(pattern: str) -> Path | None:
@@ -219,6 +247,9 @@ main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
  gap:10px 18px;margin-bottom:14px}
 .fact b{display:block;font-family:var(--mono);font-size:1.05rem}
 .fact span{font-size:11px;color:var(--muted)}
+#vstructwrap{border:1px solid var(--rule);border-radius:4px;background:#fff;
+ padding:6px;margin-bottom:10px;display:flex;justify-content:center}
+#vstruct{width:100%;max-width:420px;height:auto}
 #glbox{position:relative;width:100%;height:440px;background:#eef1f6;
  border:1px solid var(--rule);border-radius:4px;overflow:hidden}
 #glbox>div{position:absolute;inset:0}
@@ -226,6 +257,22 @@ main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
 .vctl{display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;padding:.6rem .1rem 0;font-size:12px}
 .vctl label{display:flex;align-items:center;gap:.35rem;cursor:pointer;font-weight:600}
 .note{font-size:12px;color:var(--muted);margin:.9rem 0 0;max-width:78ch}
+#sibs h3{font:600 11px var(--sans);letter-spacing:.05em;text-transform:uppercase;
+ color:var(--muted);margin:1.3rem 0 .4rem}
+table.sib{border-collapse:collapse;width:100%;font-size:12.5px}
+table.sib th,table.sib td{padding:.34rem .6rem;border-bottom:1px solid var(--rule);
+ text-align:right;white-space:nowrap}
+table.sib th{font:600 10px var(--sans);color:var(--muted);text-transform:uppercase;
+ letter-spacing:.05em;border-bottom:2px solid var(--rule)}
+table.sib th:first-child,table.sib td:first-child,
+table.sib th:last-child,table.sib td:last-child{text-align:left}
+table.sib td{font-family:var(--mono)}
+tr.sibrow{cursor:pointer}
+tr.sibrow:hover{background:var(--blue-pale)}
+tr.sibrow.cur{background:var(--blue-pale);font-weight:700}
+i.sw{width:11px;height:11px;border-radius:2px;display:inline-block;margin-right:.45rem;
+ vertical-align:-1px}
+.win{color:var(--good);font-weight:700}
 .warnbox{border-left:3px solid var(--warn);background:#fdf8ea;padding:.6rem .9rem;
  font-size:12px;margin:0 0 12px;border-radius:0 3px 3px 0}
 :root[data-theme="dark"] .warnbox{background:#241f12}
@@ -259,11 +306,12 @@ a{color:var(--blue)}
    <div id="vfull" style="display:none">
     <div id="gwarn" class="warnbox" style="display:none"></div>
     <div class="facts" id="vfacts"></div>
+    <div id="vstructwrap"><img id="vstruct" alt="2D structure"></div>
     <div id="glbox"><div id="gl"></div></div>
     <div class="vctl">
      <label><input type="checkbox" id="c-surf" checked> pocket surface</label>
-     <label><input type="checkbox" id="c-other"> other modes of this molecule</label>
     </div>
+    <div id="sibs"></div>
     <p class="note" id="vnote"></p>
    </div>
   </div>
@@ -272,7 +320,18 @@ a{color:var(--blue)}
 <script type="text/plain" id="recpdb">__RECEPTOR__</script>
 <script>
 const ROWS = __ROWS__;
-const MODE_COLS = ['#0072ce','#7b5ea7','#c2703d','#0f7a54','#b3261e','#8a6d1f'];
+const MODE_COLS = [0x0072ce, 0x7b5ea7, 0xc2703d, 0x0f7a54, 0xb3261e, 0x8a6d1f];
+const MODE_CSS  = ['#0072ce','#7b5ea7','#c2703d','#0f7a54','#b3261e','#8a6d1f'];
+const POCKET = __POCKET__;
+// CARBONS CARRY THE MODE COLOUR; EVERY OTHER ELEMENT KEEPS ITS CONVENTIONAL ONE.
+// Colouring a whole molecule by mode hides its chemistry -- the sulfur, the
+// halogen and the oxygens are what a chemist reads a pose by, and they must look
+// the same in every mode so the only thing that changes is the carbon skeleton.
+function carbonScheme(col){
+  const M = lib();
+  return {prop:'elem',
+          map: Object.assign({}, (M.elementColors||{}).defaultColors||{}, {C: col})};
+}
 // SCOPE is one control: a warhead class name, '*' for every class ranked within
 // itself, or '__global__' for one order across all of them. Two orthogonal
 // toggles let a reader combine "global" with a class filter, which is a
@@ -346,6 +405,10 @@ async function pick(id){
   document.getElementById('vempty').style.display = 'none';
   document.getElementById('vfull').style.display = '';
   document.getElementById('vname').textContent = x.i;
+  // The same depiction the rail uses, at panel size. It is an SVG, so one file
+  // serves both; drawing a second at a larger size would be a second answer to
+  // "what does this molecule look like".
+  document.getElementById('vstruct').src = 'mode_thumbs/' + x.p + '.svg';
   document.getElementById('vfacts').innerHTML = [
     ['class rank', x.cr],
     ['global rank', x.gr === null ? '—' : x.gr],
@@ -365,6 +428,38 @@ async function pick(id){
     g.innerHTML = '<strong>Never simulated.</strong> This mode was scored and ranked, '
       + 'and no sweep or MD was ever run from it. Every number above is docking-derived.';
   } else { g.style.display = 'none'; }
+
+  // EVERY MODE OF THIS MOLECULE, and how they were ranked against each other.
+  // The rail orders modes across the whole library; this is the comparison the
+  // pipeline claims to make -- a molecule's modes competing as separate rows --
+  // and it is the one place a reader can see whether the mode that was simulated
+  // is the one that scored best.
+  const sibs = ROWS.filter(r => r.p === x.p).sort((a,b) => a.m - b.m);
+  const best = sibs.reduce((a,b) => (b.cr < a.cr ? b : a), sibs[0]);
+  document.getElementById('sibs').innerHTML =
+    '<h3>modes of ' + x.p + ' — ' + sibs.length + ', ranked against each other</h3>' +
+    '<table class="sib"><thead><tr><th>mode</th><th>class rank</th><th>poses</th>' +
+    '<th>viable</th><th>enrichment</th><th>conditional_eb</th><th>spread</th>' +
+    '<th>coherence</th><th>simulated</th></tr></thead><tbody>' +
+    sibs.map(function(m){
+      const col = MODE_CSS[(m.m >= 0 ? m.m : 0) % MODE_CSS.length];
+      const badge = m.s === 'md' ? '100 ns' : m.s === 'swept' ? 'swept'
+                  : m.s === 'failed' ? 'sweep failed' : 'never';
+      return '<tr class="sibrow' + (m.i === x.i ? ' cur' : '') + '"'
+        + ' onclick="pick(\'' + m.i + '\')">'
+        + '<td><i class="sw" style="background:' + col + '"></i>m' + m.m + '</td>'
+        + '<td' + (m.i === best.i ? ' class="win"' : '') + '>' + m.cr + '</td>'
+        + '<td>' + (m.n === null ? '—' : m.n) + '</td>'
+        + '<td>' + (m.vf === null ? '—' : (m.vf*100).toFixed(1) + '%') + '</td>'
+        + '<td>' + fmt(m.en, 2) + '</td><td>' + fmt(m.eb, 3) + '</td>'
+        + '<td>' + fmt(m.sp, 2) + '</td><td>' + fmt(m.dc, 3) + '</td>'
+        + '<td><span class="tag t-' + m.s + '">' + badge + '</span></td></tr>';
+    }).join('') + '</tbody></table>' +
+    (sibs.length > 1 && best.s === 'none'
+      ? '<p class="note"><strong>The best-ranked mode of this molecule was never '
+        + 'simulated.</strong> m' + best.m + ' ranks ' + best.cr + ' in '
+        + best.c + '; the sweep took mode 0 (#53).</p>'
+      : '');
 
   document.getElementById('vnote').innerHTML =
     'The pose is this mode\'s <strong>medoid</strong> — the pose most central to '
@@ -397,20 +492,28 @@ function draw(pdbTxt, x){
     V.addModel(b.replace(/MODEL[^\n]*\n/, ''), 'pdb');
   });
   V.setStyle({}, {cartoon:{color:'#c3ccd8', opacity:0.5}});
-  const CC = Object.assign({}, (M.elementColors||{}).defaultColors||{}, {C:0xb3261e});
-  V.setStyle({resi:[__CYS__]}, {stick:{radius:0.26, colorscheme:{prop:'elem', map:CC}},
-                               cartoon:{color:'#c3ccd8', opacity:0.5}});
-  const showOther = document.getElementById('c-other').checked;
+  // CYS113 IN CONVENTIONAL ELEMENT COLOURS, so its sulfur reads as sulfur --
+  // it is the atom the whole screen is aimed at. SG additionally gets a sphere,
+  // because at stick radius a single S is easy to lose against the cartoon.
+  V.setStyle({resi:[__CYS__]},
+             {stick:{radius:0.28, colorscheme:'default'},
+              cartoon:{color:'#c3ccd8', opacity:0.5}});
+  V.addStyle({resi:[__CYS__], atom:'SG'}, {sphere:{radius:0.62}});
+  // ONE MODE AT A TIME (@tt8804). Overlaying a molecule's modes made a single
+  // crowded object out of poses that are alternatives to each other; the sibling
+  // table below switches between them instead.
   modes.forEach(function(mo, i){
-    const on = (mo === x.m) || showOther;
-    V.setStyle({model: i+1}, on ? {stick:{
-      radius: (mo === x.m) ? 0.22 : 0.13,
-      color: MODE_COLS[(mo >= 0 ? mo : 0) % MODE_COLS.length],
-      opacity: (mo === x.m) ? 1 : 0.45}} : {});
+    if (mo !== x.m){ V.setStyle({model: i+1}, {}); return; }
+    V.setStyle({model: i+1}, {stick:{
+      radius: 0.22,
+      colorscheme: carbonScheme(MODE_COLS[(mo >= 0 ? mo : 0) % MODE_COLS.length])}});
   });
   if (document.getElementById('c-surf').checked){
-    SURF = V.addSurface(M.SurfaceType.VDW, {opacity:0.55, color:'#b9c7db'},
-                        {model:0, not:{resi:[__CYS__]}});
+    // The pocket shell only, and never over Cys113 or a ligand: a mesh drawn on
+    // top of those hides the two things the panel exists to show. `and` rather
+    // than a bare `not`, so the selection cannot leak onto the pose models.
+    SURF = V.addSurface(M.SurfaceType.VDW, {opacity:0.62, color:'#b9c7db'},
+      {and:[{model:0}, {resi:POCKET}, {not:{resi:[__CYS__]}}]});
   }
   const sel = modes.indexOf(x.m);
   V.zoomTo(sel >= 0 ? {model: sel+1} : {resn:'MOL'});
@@ -419,7 +522,6 @@ function draw(pdbTxt, x){
 }
 
 document.getElementById('c-surf').addEventListener('change', function(){ if (SEL) pick(SEL); });
-document.getElementById('c-other').addEventListener('change', function(){ if (SEL) pick(SEL); });
 buildScope();
 railHTML();
 </script>
@@ -438,4 +540,5 @@ def build(title: str, date_str: str, three: str = "") -> str:
             .replace("__RECEPTOR__", rec)
             .replace("__THREE__", three)
             .replace("__CYS__", str(CYS_RESI))
+            .replace("__POCKET__", json.dumps(pocket_residues()))
             .replace("__TITLE__", html.escape(title)))

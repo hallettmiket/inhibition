@@ -34,6 +34,7 @@ import glob
 import html
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -681,7 +682,8 @@ chemistries is the cheapest way to turn two points into a distribution.</p>
     _three_js = (REPO / "scripts" / ".cache_3dmol-min.js")
     three = _three_js.read_text() if _three_js.is_file() else ""
     _mr = moderank.gather()
-    _a = massets.write_assets(REPORTS, moderank.idents(_mr))
+    _a = massets.write_assets(REPORTS, moderank.idents(_mr),
+                              force=os.environ.get("MODE_ASSETS_FORCE") == "1")
     log.info("mode assets: +%d poses, +%d thumbs", _a["poses"], _a["thumbs"])
     (REPORTS / "modes.html").write_text(
         moderank.build(_full_title, _date.today().isoformat(), three))

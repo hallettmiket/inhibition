@@ -23,7 +23,7 @@ B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
 POSES = B / "nac_v3_poses"
 
 
-def write_assets(out_dir: Path, idents: set[str]) -> dict:
+def write_assets(out_dir: Path, idents: set[str], force: bool = False) -> dict:
     """Write `<out>/mode_poses/<ident>.pdb` and `<out>/mode_thumbs/<ident>.svg`.
 
     Returns counts. Existing files are left alone -- these are derived, and a
@@ -43,14 +43,30 @@ def write_assets(out_dir: Path, idents: set[str]) -> dict:
         if ident not in idents:
             continue
         pdb_out, svg_out = pd_dir / f"{ident}.pdb", th_dir / f"{ident}.svg"
-        if pdb_out.exists() and svg_out.exists():
+        if not force and pdb_out.exists() and svg_out.exists():
             continue
-        mols = [m for m in Chem.SDMolSupplier(f, removeHs=False, sanitize=False)
-                if m is not None]
+        # HEAVY ATOMS ONLY, in both the depiction and the pose.
+        #
+        # Docked poses carry explicit hydrogens; drawing them gives a 2D
+        # structure furred with H labels that no chemist wants to look at, and a
+        # 3D pose whose sticks are mostly hydrogen. Everything else in this
+        # project displays heavy atoms (the movie PDB has none at all), so these
+        # were the odd ones out. `sanitize=False` on read means RemoveHs needs
+        # its own sanitize first, or it silently returns the molecule unchanged.
+        mols = []
+        for m in Chem.SDMolSupplier(f, removeHs=False, sanitize=False):
+            if m is None:
+                continue
+            try:
+                Chem.SanitizeMol(m)
+                m = Chem.RemoveHs(m)
+            except Exception:                              # noqa: BLE001
+                m = Chem.RemoveHs(m, sanitize=False)
+            mols.append(m)
         if not mols:
             continue
 
-        if not pdb_out.exists():
+        if force or not pdb_out.exists():
             # MODEL n == the pose's own `mode`, so the viewer can select a model
             # by mode number instead of by position in the file. Position is what
             # #53 was about.
@@ -64,11 +80,14 @@ def write_assets(out_dir: Path, idents: set[str]) -> dict:
             pdb_out.write_text("\n".join(parts) + "\n")
             n_pose += 1
 
-        if not svg_out.exists():
+        if force or not svg_out.exists():
             try:
                 flat = Chem.Mol(mols[0])
                 flat.RemoveAllConformers()
                 Chem.SanitizeMol(flat)
+                flat = Chem.RemoveHs(flat)
+                # rdCoordGen, not Compute2DCoords: the default layout puts
+                # visibly wrong angles on substituted centres.
                 rdCoordGen.AddCoords(flat)
                 d = Draw.rdMolDraw2D.MolDraw2DSVG(92, 64)
                 d.drawOptions().bondLineWidth = 1
