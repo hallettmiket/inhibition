@@ -66,8 +66,16 @@ Each encodes a measured distinction, not a preference.
   S<sub>N</sub>2 angular criterion is far stricter than the perpendicular one
   (#47). The toggle makes that visible instead of something the reader must
   remember.
-- **combined / split held-left** — engagement and residence are near-independent
-  (ρ = −0.007, #46). A molecule can rank high and still leave the pocket.
+- **combined / split held-left** — a molecule can rank high on engagement and
+  still leave the pocket, and the two readings answer different questions, so
+  the reader gets to see them apart.
+  **The justification this toggle used to carry is withdrawn** (D0078). It read
+  "engagement and residence are near-independent (ρ = −0.007, #46)". Recomputed
+  on 62 runs from each run's own `rmsd.xvg` at `BOUND_NM = 1.2`, engagement and
+  `residence_frac` give **ρ = +0.684, p = 9×10⁻¹⁰** — strongly related, and in
+  the opposite direction. The −0.007 could not be traced: it is attributed to
+  #46, and #46 does not contain it. The toggle stays, because separating the two
+  readings is still useful; the number that defended it was wrong.
 - **controls** — the crystallographic controls, alone, with the controls page in
   the viewer.
 - **light / dark** — stamps the shell *and* the framed report, and persists.
