@@ -188,6 +188,26 @@ def pose_mode(pose_sdf: Path, pose_rank: int) -> int | None:
     return None
 
 
+class SweepError(RuntimeError):
+    """A sweep could not be run or reused. Named so it cannot pass as a result."""
+
+
+def _finished(rep: Path) -> bool:
+    """True only if mdrun reported it finished this trajectory.
+
+    Existence of `prod.xtc` is not completion -- see run_sweep. GROMACS writes
+    "Finished mdrun" to the log on a clean exit, and that is the only marker
+    here that distinguishes a finished run from one in progress.
+    """
+    log_f, xtc = rep / "prod.log", rep / "prod.xtc"
+    if not (log_f.is_file() and xtc.is_file()):
+        return False
+    try:
+        return "Finished mdrun" in log_f.read_text(errors="replace")
+    except OSError:
+        return False
+
+
 def run_sweep(cand: str, pose: Path, pose_rank: int, gpu: int,
               ps: float, net_charge: int | None) -> Path | None:
     """10 ns of MD through the production script, so the physics is identical."""
@@ -203,12 +223,29 @@ def run_sweep(cand: str, pose: Path, pose_rank: int, gpu: int,
     # the same defect class the per-mode workdir fixed for pose_rank, with the
     # length dimension left open. A 10 ns answer read off 200 ps of dynamics
     # would be indistinguishable from a real one in every artefact downstream.
+    #
+    # AND THE GUARD MUST CHECK COMPLETION, NOT EXISTENCE. `prod.xtc` exists the
+    # moment mdrun starts writing it, so an IN-PROGRESS run satisfied this test
+    # and a second process read the partial trajectory as a finished one. Caught
+    # 2026-08-11 the first time two workers were run: `t4_e0b03662d460_m1` was
+    # 3.4 ns into its 10 ns when a second invocation analysed the same directory
+    # and wrote `status: ok, frac_attack_ready 0.0` in four seconds. A partial
+    # answer stamped ok is indistinguishable from a real one downstream -- the
+    # same defect this docstring already records for the 200 ps case, with the
+    # completeness dimension left open instead of the length one.
     root = SWEEP_ROOT / f"rank{pose_rank}_{int(ps)}ps"
     rep = root / cand / "md" / "rep1"
-    if (rep / "prod.xtc").is_file():
-        log.info("%s: %d ps trajectory already present, not re-running",
+    if _finished(rep):
+        log.info("%s: %d ps trajectory already complete, not re-running",
                  cand, int(ps))
         return rep
+    if (rep / "prod.xtc").is_file():
+        # Present but unfinished: either another process is running it right now,
+        # or one died partway. Neither is a result. Refuse rather than analyse it.
+        raise SweepError(
+            f"{cand}: an unfinished {int(ps)} ps trajectory is already in "
+            f"{rep} — another worker may be running it. Not analysing a partial "
+            f"run as a complete one.")
     cmd = [str(PY), str(REPO / "scripts/md_residence_3ikd.py"),
            "--candidate", cand, "--pose", str(pose),
            "--pose-rank", str(pose_rank), "--production-ps", str(int(ps)),
@@ -268,7 +305,13 @@ def main() -> None:
             rec["status"] = "stage0 only"
             rows.append(rec); continue
 
-        rep = run_sweep(cand, pose, args.pose_rank, args.gpu, args.sweep_ps, None)
+        try:
+            rep = run_sweep(cand, pose, args.pose_rank, args.gpu, args.sweep_ps, None)
+        except SweepError as exc:
+            # Recorded, never dropped, and never as a number: the row says why
+            # there is no reading rather than carrying a value from a partial run.
+            rec["status"] = f"skipped: {exc}"
+            rows.append(rec); log.warning("%s: %s", cand, exc); continue
         if rep is None:
             rec["status"] = "sweep failed"
             rows.append(rec); continue

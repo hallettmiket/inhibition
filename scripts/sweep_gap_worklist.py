@@ -74,6 +74,9 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=400,
                     help="how many rows to emit; the list is ordered so a "
                          "truncated run is still the best-ranked ones")
+    ap.add_argument("--per-class", type=int, default=None,
+                    help="balanced mode: take this many best-ranked unswept "
+                         "modes from EACH warhead class, interleaved")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -84,6 +87,33 @@ def main() -> None:
     gap = d[(~d.sent) & d.global_rank.notna()].sort_values("global_rank")
     log.info("%d modes ranked, %d already sent, %d in the gap",
              len(d), int(d.sent.sum()), len(gap))
+
+    if args.per_class:
+        # BALANCED, AND ROUND-ROBIN SO ANY STOPPING POINT IS BALANCED TOO.
+        #
+        # Equal n PER CLASS, not equal coverage. The library is wildly uneven --
+        # acrylamide is 4,835 modes and chloroacetamide 200 -- so equalising
+        # coverage would spend almost everything on acrylamide, and equalising
+        # count gives each class comparable statistical power, which is what a
+        # per-class comparison needs. The trade is explicit: chloroacetamide
+        # gains far more coverage per sweep than acrylamide does.
+        #
+        # Within a class the order is CLASS rank, not global. Cross-class
+        # ordering compares scores computed under different bars (#47); within a
+        # class it is the criterion's own ordering and is the valid one.
+        #
+        # Interleaved, so a run that stops early has taken roughly the same
+        # number from every class rather than all of the first one.
+        by = {c: g.sort_values("class_rank") for c, g in gap.groupby("warhead_class")}
+        order, i = [], 0
+        while i < args.per_class:
+            for c in sorted(by):
+                if i < len(by[c]):
+                    order.append(by[c].iloc[i])
+            i += 1
+        gap = pd.DataFrame(order)
+        log.info("balanced: %d classes x up to %d = %d rows, interleaved",
+                 len(by), args.per_class, len(gap))
 
     rows, checked = [], 0
     for _, x in gap.iterrows():
@@ -102,8 +132,11 @@ def main() -> None:
             "warhead_class": x.warhead_class,
             "conditional_eb": x.conditional_eb,
             "tier": x.get("tier"),
-            "order_basis": "global rank on conditional_eb (T4 only; "
-                           "cross-class comparison is biased, #47)",
+            "order_basis": ("balanced: equal n per warhead class, ordered by "
+                            "CLASS rank within each, interleaved"
+                            if args.per_class else
+                            "global rank on conditional_eb (T4 only; "
+                            "cross-class comparison is biased, #47)"),
         })
 
     out = pd.DataFrame(rows)
