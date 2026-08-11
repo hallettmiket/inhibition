@@ -76,6 +76,10 @@ def main() -> None:
                          "truncated run is still the best-ranked ones")
     ap.add_argument("--only-class", default=None,
                     help="restrict to one warhead class")
+    ap.add_argument("--v-strata", default=None,
+                    help="strata over VIABLE_FRACTION, 'lo-hi:n,...' — the "
+                         "estimand is P(productive | viable_fraction), which is "
+                         "dimensionless and comparable across classes and targets")
     ap.add_argument("--strata", default=None,
                     help="depth ladder: 'lo-hi:n,lo-hi:n' over class rank, "
                          "interleaved so an early stop still spans the range")
@@ -96,6 +100,51 @@ def main() -> None:
     if args.only_class:
         gap = gap[gap.warhead_class == args.only_class]
         log.info("restricted to %s: %d unswept modes", args.only_class, len(gap))
+
+    if args.v_strata:
+        # THE ESTIMAND IS P(productive | viable_fraction), NOT P(productive | rank).
+        #
+        # Rank is a within-class ordinal: it is not comparable across classes, it
+        # depends on library size, and it is at chance for predicting sweep
+        # outcome (AUC 0.518 over 188 swept modes). `viable_fraction` is the
+        # fraction of a mode's docked poses meeting the near-attack criterion --
+        # dimensionless, defined identically for every class and every target,
+        # and free at ranking time. That makes it the parameter a TARGET-AGNOSTIC
+        # tool can carry a threshold on; a rank cut cannot travel.
+        #
+        # THE ZERO STRATUM IS THE PRIZE. 1,869 modes (28% of the library) have
+        # viable_fraction == 0 and FIVE of them have ever been swept. If a mode
+        # whose docked ensemble contains no near-attack pose cannot sweep
+        # productive, that is a free exclusion of 28% of every future screen. If
+        # it can, the docking-derived criterion is not a filter at all. Either
+        # answer is worth more than any rank curve, and neither is currently
+        # measurable: the stratum is unsampled.
+        buckets = []
+        for part in args.v_strata.split(","):
+            span, n = part.split(":")
+            lo, hi = (float(v) for v in span.split("-"))
+            b = gap[(gap.viable_fraction >= lo) & (gap.viable_fraction <= hi)]
+            # Spread the draw across classes so one class cannot carry a stratum,
+            # then across rank within a class -- a stratum drawn from one class is
+            # a statement about that class, not about viable_fraction.
+            parts = []
+            for _c, g in b.sort_values(["warhead_class", "class_rank"]) \
+                          .groupby("warhead_class"):
+                parts.append(g.iloc[:: max(1, len(g) // 6)].head(6))
+            take = pd.concat(parts) if parts else b.iloc[0:0]
+            take = take.iloc[:: max(1, len(take) // max(1, int(n)))].head(int(n))
+            log.info("  v in [%g,%g]: %d taken of %d unswept, %d classes",
+                     lo, hi, len(take), len(b), take.warhead_class.nunique())
+            buckets.append(take)
+        order, i = [], 0
+        while any(i < len(b) for b in buckets):
+            for b in buckets:
+                if i < len(b):
+                    order.append(b.iloc[i])
+            i += 1
+        gap = pd.DataFrame(order)
+        log.info("v-ladder: %d rows across %d strata, interleaved",
+                 len(gap), len(buckets))
 
     if args.strata:
         # A DEPTH LADDER, TO FIND WHERE A CLASS STOPS BEING WORTH SWEEPING.
