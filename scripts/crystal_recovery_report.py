@@ -225,7 +225,14 @@ is a <em>relative</em> one: where the kept pose sits among the poses that were
 available. That comparison is internally controlled and unaffected by the
 adduct/reactant difference. <strong>n = 1 molecule.</strong></p>
 
+<script type="text/plain" id="rec">{rec}</script>
 <script>
+// EVERY ELEMENT THIS READS IS DECLARED ABOVE IT. The receptor block used to sit
+// after this script, so getElementById('rec') returned null, the block threw on
+// its first line, and the box rendered empty with no error a reader could see --
+// the fourth distinct cause of a blank viewer in this project in one day.
+// tests/test_viewer_html.py now asserts this ordering.
+window.addEventListener('DOMContentLoaded', function(){{
 const M = window.$3Dmol || window['3Dmol'];
 const D = {json.dumps(blocks)};
 const v = M.createViewer(document.getElementById('gl'), {{backgroundColor:'#eef1f6'}});
@@ -246,8 +253,8 @@ let i = 1;
   i++;
 }});
 v.zoomTo({{resn:'MOL'}}); v.zoom(0.55); v.resize(); v.render();
+}});
 </script>
-<script type="text/plain" id="rec">{rec}</script>
 </body></html>"""
 
     dest = sout.Topic("blacksmith", "crystal_recovery").write(
