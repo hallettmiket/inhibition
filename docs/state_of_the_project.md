@@ -269,7 +269,7 @@ within 24 h of being written.*
 |---|---|---:|---:|---:|---:|
 | T_1 de novo (DiffSBDD) | `D1_32.parquet` | 4,803 | 3,233 | 3,233 | 25 (`shortlist_synth`) |
 | T_3 R-group (LibInvent) | `D3_37.parquet` | 5,396 | 4,080 | 4,080 | 25 (`shortlist_synth`) |
-| T_4 warhead x R-group | `D4_49.parquet` | 1,782 | 1,683 | 1,683 | 27 (`shortlist_synth`) |
+| T_4 warhead x R-group | `D4_50.parquet` | 1,783 | 1,683 | 1,684 | 27 (`shortlist_synth`) |
 <!-- AUTO:arms:END -->
 
 <!-- AUTO:t2:BEGIN -->
