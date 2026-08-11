@@ -74,6 +74,11 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=400,
                     help="how many rows to emit; the list is ordered so a "
                          "truncated run is still the best-ranked ones")
+    ap.add_argument("--only-class", default=None,
+                    help="restrict to one warhead class")
+    ap.add_argument("--strata", default=None,
+                    help="depth ladder: 'lo-hi:n,lo-hi:n' over class rank, "
+                         "interleaved so an early stop still spans the range")
     ap.add_argument("--per-class", type=int, default=None,
                     help="balanced mode: take this many best-ranked unswept "
                          "modes from EACH warhead class, interleaved")
@@ -87,6 +92,46 @@ def main() -> None:
     gap = d[(~d.sent) & d.global_rank.notna()].sort_values("global_rank")
     log.info("%d modes ranked, %d already sent, %d in the gap",
              len(d), int(d.sent.sum()), len(gap))
+
+    if args.only_class:
+        gap = gap[gap.warhead_class == args.only_class]
+        log.info("restricted to %s: %d unswept modes", args.only_class, len(gap))
+
+    if args.strata:
+        # A DEPTH LADDER, TO FIND WHERE A CLASS STOPS BEING WORTH SWEEPING.
+        #
+        # The docking-derived `viable_fraction` decays smoothly with class rank
+        # and then collapses -- for bdhi_c5, 37% at rank 1-50 down to 2% by 175
+        # and a median of ZERO past 176, where over half the modes have no pose
+        # meeting the near-attack criterion at all. Ranks 101-175 have never been
+        # swept, so the knee has never been measured, only predicted.
+        #
+        # If a swept mode with viable_fraction ~ 0 really does score 0, that is a
+        # FREE stopping rule for every class: stop where the median crosses the
+        # threshold, and never spend a GPU below it. That is what this ladder
+        # tests, which is why it is weighted onto the transition rather than
+        # spread evenly.
+        #
+        # Interleaved across strata: the deliverable is a CURVE, so a run that
+        # stops early must still span the range rather than fill the top of it.
+        buckets = []
+        for part in args.strata.split(","):
+            span, n = part.split(":")
+            lo, hi = (int(v) for v in span.split("-"))
+            b = gap[(gap.class_rank >= lo) & (gap.class_rank <= hi)] \
+                .sort_values("class_rank")
+            take = b.iloc[:: max(1, len(b) // int(n))].head(int(n))
+            log.info("  stratum %s: %d of %d unswept taken", span, len(take), len(b))
+            buckets.append(take)
+        order, i = [], 0
+        while any(i < len(b) for b in buckets):
+            for b in buckets:
+                if i < len(b):
+                    order.append(b.iloc[i])
+            i += 1
+        gap = pd.DataFrame(order)
+        log.info("ladder: %d rows, interleaved across %d strata",
+                 len(gap), len(buckets))
 
     if args.per_class:
         # BALANCED, AND ROUND-ROBIN SO ANY STOPPING POINT IS BALANCED TOO.
@@ -132,7 +177,10 @@ def main() -> None:
             "warhead_class": x.warhead_class,
             "conditional_eb": x.conditional_eb,
             "tier": x.get("tier"),
-            "order_basis": ("balanced: equal n per warhead class, ordered by "
+            "order_basis": (f"depth ladder over {args.only_class} class rank, "
+                            f"strata {args.strata}, interleaved"
+                            if args.strata else
+                            "balanced: equal n per warhead class, ordered by "
                             "CLASS rank within each, interleaved"
                             if args.per_class else
                             "global rank on conditional_eb (T4 only; "
