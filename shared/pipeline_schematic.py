@@ -1169,11 +1169,24 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
   </div></div>
  <div><p class="n0">Step 2 &middot; pose splitting</p>
   <h2>Pose splitting &mdash; the mess is several binding modes</h2>
+  <p class="mnote" style="margin:0 0 10px">Two passes: by warhead, then by shape.</p>
   <p>We group the poses into <strong>modes</strong> by where the reactive atom sits
   and which way the warhead points.</p>
-  <p>Not by whole-molecule shape — two poses can differ in a far-off ring and still
-  be the same mode. Not by docking energy, which we know carries no signal here.</p>
-  <p>Each mode then becomes its own row in the GUI.</p></div>
+  <p>Not by docking energy, which we know carries no signal here.</p>
+  <p><strong>Then a second pass, on whole-molecule shape.</strong> The first pass
+  is deliberately blind to everything but the warhead, so two poses can place the
+  reactive atom identically and hang the rest of the molecule 5&nbsp;&Aring; apart
+  and still be one mode &mdash; and one representative would have to stand for
+  both. It splits again wherever a mode is wider than the 2&nbsp;&Aring; we claim
+  as pose accuracy, up to five pieces. Sub-splits are lettered
+  &mdash; <strong>1a, 1b</strong> &mdash; and each is a row of its own, ranked and
+  simulated on its own merit.</p>
+  <p>Measured on 82 Pin1 crystal structures: carrying one representative recovers
+  the true pose <strong>22%</strong> of the time, four recovers <strong>39%</strong>
+  (14 cases gained, none lost, <em>p</em> = 1&times;10<sup>&minus;4</sup>), and
+  past five there is nothing left to gain. Sulfopin is why it exists: its 456 poses
+  formed one mode holding both a pose 1.4&nbsp;&Aring; from its crystal structure
+  and the pose we kept at 5.1&nbsp;&Aring;.</p></div>
 </div>
 
 <div class="arrow"><span>{n_split} candidates &rarr; {n_modes} binding modes &darr;</span></div>
@@ -1207,7 +1220,9 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
   single molecule are not kept together &mdash; mol B here lands at ranks
   <strong>1, 3 and 6</strong>.</p>
   <p>Picking this way finds the right pose <strong>93.3%</strong> of the time.
-  Picking by docking energy: <strong>60.0%</strong>.</p>
+  Picking by docking energy: <strong>60.0%</strong>. That is picking the right
+  <em>mode</em>; picking the right pose <em>inside</em> it is what step 2's second
+  pass is for.</p>
   <p>Each row carries <em>which</em> mode was picked, and every ranking is stamped
   <code>rank_validated = False</code> &mdash; an ordering we produced, not proof
   the top molecules bind.</p></div>
@@ -1240,7 +1255,12 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
   how much of the time it still looks ready to react. This is <em>triage</em> — it
   picks what is worth a long run.</p>
   <p>Those go to <strong>100 ns MD</strong>, which asks a different question: does
-  the molecule stay on target at all? That is what the GUI ranks on.</p>
+  the molecule stay on target at all?</p>
+  <p>The results GUI ranks on <strong>max ligand RMSD</strong> over that run
+  &mdash; how far it ever got from where it started, lowest first &mdash; with
+  engagement and held/left shown beside it. <strong>No sweep reading appears in
+  that ranking at all:</strong> triage sitting next to a result reads as a second,
+  competing score, so it lives on each molecule's own page instead.</p>
   <p>A molecule can be attack-ready and still leave. It can also sit there for
   100 ns facing the wrong way.</p></div>
 </div>
@@ -1251,10 +1271,15 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
 <div class="step wide">
  <div class="full"><p class="n0">Elevation</p>
   <h2>What comes out</h2>
-  <p>What survives 100 ns is ranked by target engagement and handed to a chemist.
-  The controls &mdash; Sulfopin and Liu-2022-ZL-Pin13, both known to react &mdash;
-  go through the identical pipeline, so the ranking can be read against chemistry
-  whose answer we already know.</p>
+  <p>What survives 100 ns is handed to a chemist. <strong>Sulfopin sits in the
+  candidate frame</strong>, not in a reference list &mdash; it is docked, split,
+  ranked and swept by the identical path as everything else, so the screen has to
+  place a known nanomolar inhibitor without being told what it is.</p>
+  <p><strong>Two views, and the first one is the pipeline's real first step.</strong>
+  <em>Ranking</em> shows every molecule and every mode the screen scored, with its
+  pose, before anything is simulated &mdash; that is where you decide what earns a
+  sweep. <em>Results</em> shows the sweep and the 100&nbsp;ns runs, for the subset
+  that got one.</p>
   <p class="mnote">Synthesis is roughly one compound a week, so the deliverable is
   a short list, not a score.</p></div>
 </div>
