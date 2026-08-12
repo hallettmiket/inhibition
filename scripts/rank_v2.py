@@ -390,7 +390,12 @@ def main() -> None:
                     choices=("consensus_gnina", "consensus_autodock"))
     ap.add_argument("--quota", type=float, default=DEFAULT_QUOTA)
     ap.add_argument("--floor", type=float, default=CONSENSUS_FLOOR)
-    ap.add_argument("--topic", choices=("nac_v2", "nac_v3"), default="nac_v2",
+    # Not a fixed choice list: a screen run at a different --sub-split writes its
+    # own topic and MUST be rankable separately, because subdividing changes
+    # `consensus` and every score computed from it (#61). Hard-coding the two
+    # production topics made "rank this variant on its own" impossible, which is
+    # the one thing that keeps two scorings from being mixed.
+    ap.add_argument("--topic", default="nac_v2",
                     help="nac_v3 = 2.2.0 per-mode rows at nrun=500")
     ap.add_argument("--top", type=int, default=10)
     args = ap.parse_args()
@@ -551,7 +556,8 @@ def main() -> None:
             if col in meta.columns:
                 ragg[col if col != "canonical_smiles" else "smiles"] = \
                     ragg.reference_name.map(meta[col])
-        dest = OUT.write(f"rank_v2_REF_{args.score}", ".csv")
+        _tag = "" if args.topic in ("nac_v2", "nac_v3") else f"_{args.topic}"
+        dest = OUT.write(f"rank_v2_REF{_tag}_{args.score}", ".csv")
         ragg.to_csv(dest, index=False)
         log.info("references: %d scored -> %s", len(ragg), Path(dest).name)
 
@@ -564,7 +570,14 @@ def main() -> None:
         # rank_v2_<tier>_<n> and letting consumers take the newest is how the
         # overnight selection silently used enrichment_joint -- the 2.0.0
         # quantity -- when the chain had ranked on topn_viable_frac first.
-        dest = OUT.write(f"rank_v2_{tier}_{args.score}", ".csv")
+        # THE TOPIC IS IN THE NAME unless it is the production one. Variant
+        # topics share this output directory, and every reader resolves "latest"
+        # by globbing `rank_v2_T4_<score>_*.csv` -- so a one-molecule sub-split
+        # ranking silently became the ranking the GUI read, and the view went
+        # from 8,097 modes to 6,290 without an error anywhere. A variant must not
+        # be able to shadow production by being newer.
+        _tag = "" if args.topic in ("nac_v2", "nac_v3") else f"_{args.topic}"
+        dest = OUT.write(f"rank_v2_{tier}{_tag}_{args.score}", ".csv")
         ranked.sort_values(["warhead_class", "class_rank"]).to_csv(dest, index=False)
         surv = ranked[ranked.passes]
         print(f"\n{'='*76}\n{tier}: {len(ranked)} molecules, {len(surv)} survive "
