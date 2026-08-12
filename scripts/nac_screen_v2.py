@@ -83,7 +83,8 @@ from shared import outputs as sout                # noqa: E402
 from shared import covalent_protocol as cp        # noqa: E402
 from shared import receptors as R                 # noqa: E402
 from shared import pose_modes as pmod             # noqa: E402
-import nac_screen as ns                           # noqa: E402
+import nac_screen as ns
+from shared import pose_subsplit as psub                           # noqa: E402
 import nac_rank as nr                             # noqa: E402
 
 log = logging.getLogger("nac-v2")
@@ -168,7 +169,8 @@ def gnina_scores(receptor: Path, sdf: Path, gpu: str) -> pd.DataFrame:
 
 
 def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
-        do_gnina: bool, all_poses: bool = False) -> tuple[pd.DataFrame, list[dict]]:
+        do_gnina: bool, all_poses: bool = False,
+        sub_split: int = psub.DEFAULT_MAX_SUB) -> tuple[pd.DataFrame, list[dict]]:
     """Dock one candidate; return (per-pose rows, ONE AGGREGATE ROW PER MODE).
 
     2.2.0 (@tt8804): a binding mode is a candidate, not a property of one. The
@@ -216,6 +218,31 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         # itself, which is the score.
         feat = pmod.features(mol, match)
         labels = pmod.split(feat)
+
+        # ---- SECOND STAGE: subdivide each mode on whole-molecule geometry ----
+        # The first stage is blind to everything but the warhead, by design, so a
+        # mode can hold poses that place the warhead identically and the scaffold
+        # 5 A apart -- and one representative then stands for both. Measured on
+        # the 82-case benchmark, carrying 4-5 representatives instead of 1 lifts
+        # crystal-pose recovery from 22.0% to 39-40% (14 cases gained, 0 lost,
+        # McNemar p = 1.2e-4) and is indistinguishable from carrying every pose.
+        # shared/pose_subsplit.py holds the measurement.
+        #
+        # Sub-modes are renumbered as ORDINARY modes, so rank_v2, the sweep, the
+        # GUI and mode_key all keep working unchanged -- the abstraction gets
+        # finer, nothing else changes shape.
+        if sub_split and sub_split > 1:
+            coords = np.array([mol.GetConformer(i).GetPositions()
+                               for i in range(mol.GetNumConformers())])
+            heavy = [a.GetIdx() for a in mol.GetAtoms() if a.GetAtomicNum() > 1]
+            labels, sub_info = psub.subdivide(labels, coords[:, heavy, :],
+                                              max_sub=sub_split)
+            log.info("  sub-split: %d modes -> %d (%d subdivided, max %d)",
+                     sub_info["modes_in"], sub_info["modes_out"],
+                     sub_info["subdivided"], sub_split)
+        else:
+            sub_info = {"modes_in": None, "modes_out": None, "subdivided": 0,
+                        "max_sub": 1}
         mode_ids = sorted(set(int(l) for l in labels) - {-1})
 
         # ---- EVERY pose is persisted, not the 20 best-scoring --------------
@@ -243,6 +270,12 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
 
         # ---- one aggregate row PER MODE -----------------------------------
         aggs = []
+        # STAMPED ON EVERY ROW. `consensus` depends on how finely modes were
+        # split, so a row that does not say which setting produced it cannot be
+        # compared with one that used another.
+        _sub_stamp = {"sub_split": int(sub_split or 1),
+                      "sub_modes_in": sub_info.get("modes_in"),
+                      "sub_modes_out": sub_info.get("modes_out")}
         for k in mode_ids:
             sel = labels == k
             ident_k = f"{cand.ident}_m{k}"
@@ -289,6 +322,7 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
                 "status": "ok",
             })
             ident_row.update(pmod.identity(feat, labels, k))
+            ident_row.update(_sub_stamp)
             aggs.append(ident_row)
 
         if not aggs:
@@ -417,6 +451,13 @@ def main() -> None:
     # WRITE EVERY POSE, not just each mode's representative (#41). Off by default
     # because it is ~500x the SDF volume across the full library; on for the
     # targeted runs that back the GUI's pose viewer.
+    ap.add_argument("--sub-split", type=int, default=psub.DEFAULT_MAX_SUB,
+                    metavar="N",
+                    help="representatives per mode from the second-stage split "
+                         "(#61). 1 disables it. CHANGES SCORES: subdividing "
+                         "changes `consensus` = mode_size/n_poses, which "
+                         "conditional_eb is computed from, so a library screened "
+                         "with a different value is not score-comparable")
     ap.add_argument("--all-poses", action="store_true",
                     help="also write every docked pose, grouped by mode, to "
                          "nac_v3_allposes/")
@@ -504,7 +545,8 @@ def main() -> None:
     pose_buf, agg_buf, done = [], [], 0
     for i, c in enumerate(cands, 1):
         rows, aggs = one(c, rec_dir, Path(plain_rec), args.nrun, args.gpu,
-                         not args.no_gnina, all_poses=args.all_poses)
+                         not args.no_gnina, all_poses=args.all_poses,
+                         sub_split=args.sub_split)
         # `one` returns ONE ROW PER MODE now, so a molecule contributes several
         # candidates. `done` still counts MOLECULES -- resume and progress are
         # per-molecule, and counting modes would make the chunk size depend on
