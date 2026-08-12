@@ -39,6 +39,19 @@ measured, and no combination of them leaves a prior value comparable:
 Prior numbers are not merely uncertain — they answer a different question.
 
 ### Also in this release
+- **The rank gate counts poses, not a fraction of the cloud** (#65, D0084).
+  `consensus >= 0.05` was exactly `n_poses_mode >= 25` on a 500-pose cloud — a
+  number nothing measured, and one that would silently become 50 if
+  `docking.n_runs` doubled. Replaced by the estimability rule already measured
+  for the sweep, `>= 12` poses. T_4: 5,132 → 6,338 modes ranked, 0 lost; among
+  modes clearing enrichment 4.0, 289 → 434. **No re-dock and no score changed** —
+  only which modes may hold a position. The old rule stays reachable as
+  `--gate consensus_fraction` and every row records which gate ran.
+- **Modes are named by their own index in the ranking view** (#65, D0083). The
+  lettered `0a`/`1b` labels implied that sub-splits of one first-stage mode are
+  variants of each other; measured, 22% of split first-stage clusters hold modes
+  whose median reactive-atom distance spans more than the criterion's entire
+  2.8–4.2 Å window. Display-only — the identities were already flat.
 - `config/target.yaml`: the target and every screen decision in one file, read
   only by `shared/target_config.py`, which **refuses** to supply a sweep floor
   that has not been measured for the target at hand (#59).

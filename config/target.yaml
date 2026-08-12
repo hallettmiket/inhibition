@@ -224,6 +224,46 @@ sweep_rule:
   # discovering later.
 
 # ---------------------------------------------------------------------------
+# What earns a RANK (#65)
+# ---------------------------------------------------------------------------
+ranking:
+  # WHICH MODES ARE REAL ENOUGH TO ORDER. A rank is a claim that one mode beat
+  # another, so a mode whose score is not estimable must not hold a position --
+  # it displaces one that is.
+  #
+  # THIS REPLACES `consensus >= 0.05`, AND THE TWO ARE THE SAME KIND OF TEST
+  # WEARING DIFFERENT UNITS. `consensus` is exactly mode_size / n_poses (checked:
+  # true for all 34,059 rows), and every cloud on this run holds 500 poses -- so
+  # the old gate was, precisely, `n_poses_mode >= 25`. The smallest mode that
+  # passed it holds 25 poses. Nothing measured 25; it is what 0.05 of 500 comes
+  # to.
+  #
+  # WRITING A SIZE FLOOR AS A FRACTION MAKES IT MOVE WHEN THE WORKLOAD DOES.
+  # Raise `docking.n_runs` to 1,000 and the same 0.05 silently becomes "at least
+  # 50 poses", roughly halving what is ranked, with nothing in any output saying
+  # the gate changed. That is the timeout-sized-for-a-smaller-pool defect in a
+  # different costume (`docs/how_this_project_breaks.md`, disguise #3), and it is
+  # why the rule below counts poses instead.
+  #
+  # 12 IS THE MEASURED NUMBER AND IT IS ALREADY IN THIS FILE. It is
+  # `sweep_rule.min_mode_poses`, itself tied to `splitting.stage2.min_mode_size`
+  # -- the size below which a cluster is not treated as a mode at all. Of the
+  # modes clearing enrichment 4.0 that the old gate excluded, 589 held 0-3 poses
+  # and 452 held 4-11: correctly excluded, noise wearing a maximum score. The
+  # 157 holding 12-24 were not, and they are what this recovers.
+  #
+  # MEASURED EFFECT on the 3.0.0 ranking: 17,238 -> 21,637 modes ranked (50.6% ->
+  # 63.5%), 4,399 gained and 0 lost; among modes clearing enrichment 4.0, 325 ->
+  # 518. Nothing is re-docked and no score changes -- only which modes are
+  # allowed to hold a position.
+  mode_gate:
+    parameter: n_poses_mode  # absolute, so it does not move with the cloud
+    min_poses: 12            # == sweep_rule.min_mode_poses; asserted by a test
+  # The old rule, kept REACHABLE so 3.0.0's earlier tables can be reproduced
+  # rather than only described. `rank_v2 --floor 0.05 --gate consensus_fraction`.
+  legacy_consensus_floor: 0.05
+
+# ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
 md:

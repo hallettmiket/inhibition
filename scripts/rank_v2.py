@@ -66,6 +66,7 @@ sys.path.insert(0, str(REPO))
 from shared import nac_criterion as nac           # noqa: E402
 from shared import outputs as sout                # noqa: E402
 from shared import pose_consensus as pc           # noqa: E402
+from shared import target_config as tc            # noqa: E402
 
 log = logging.getLogger("rank-v2")
 OUT = sout.Topic("blacksmith", "rank_v2")
@@ -407,7 +408,42 @@ def add_props(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def filter_and_rank(df: pd.DataFrame, score: str, cons: str,
-                    quota: float, floor: float) -> pd.DataFrame:
+                    quota: float, floor: float,
+                    gate: str = "mode_poses") -> pd.DataFrame:
+    """Rank within each warhead class, over the modes the gate admits.
+
+    TWO GATES, AND WHICH ONE RAN IS RECORDED ON EVERY ROW (#65).
+
+    `mode_poses` (default) admits a mode on its ABSOLUTE population, from
+    `ranking.mode_gate` in config/target.yaml. `consensus_fraction` is the
+    original rule, `consensus >= floor`, kept reachable so 3.0.0's earlier
+    tables can be reproduced rather than only described.
+
+    They are the same test in different units -- `consensus` is exactly
+    mode_size / n_poses -- and that is the objection to the fraction: it divides
+    by a workload parameter, so the threshold it actually enforces moves when
+    `docking.n_runs` moves, silently. On a 500-pose cloud `>= 0.05` is `>= 25
+    poses`; nothing measured 25, and 12 is measured.
+
+    The QUOTA still applies under either gate. In per-mode runs it is set to 1.0
+    and admits everything, so the gate is the whole of the selection there; it
+    is left in place because per-MOLECULE topics still use it.
+    """
+    if gate not in ("mode_poses", "consensus_fraction"):
+        raise ValueError(f"unknown rank gate {gate!r}")
+    col = None
+    if gate == "mode_poses":
+        col = tc.rank_gate_parameter()
+        min_poses = tc.rank_min_mode_poses()
+        if col not in df.columns:
+            # A 2.1.0 frame has no per-mode population, so this gate cannot be
+            # evaluated on it. Refuse rather than fall back to the fraction --
+            # a silent substitution is how two topics come to be ranked by
+            # different rules under one filename (D0080).
+            raise SystemExit(
+                f"the rank gate needs `{col}`, which this topic's aggregates do "
+                f"not carry. Rank it with --gate consensus_fraction, which is "
+                f"the rule those rows were written under.")
     out = []
     for cls, g in df.groupby("warhead_class"):
         g = g.copy()
@@ -415,7 +451,10 @@ def filter_and_rank(df: pd.DataFrame, score: str, cons: str,
         k = max(1, int(round(len(g) * quota)))
         cut = c.nlargest(k).min() if c.notna().any() else np.nan
         g["consensus_cut"] = cut
-        g["passes"] = (c >= cut) & (c >= floor)
+        admits = (g[col] >= min_poses) if gate == "mode_poses" else (c >= floor)
+        g["rank_gate"] = gate
+        g["rank_gate_min"] = min_poses if gate == "mode_poses" else floor
+        g["passes"] = (c >= cut) & admits
         s = g[g.passes].copy()
         s["class_rank"] = s[score].rank(ascending=False, method="min")
         g = g.merge(s[["ident", "class_rank"]], on="ident", how="left")
@@ -433,6 +472,12 @@ def main() -> None:
     ap.add_argument("--consensus", default="consensus_gnina",
                     choices=("consensus_gnina", "consensus_autodock"))
     ap.add_argument("--quota", type=float, default=DEFAULT_QUOTA)
+    ap.add_argument("--gate", default="mode_poses",
+                    choices=("mode_poses", "consensus_fraction"),
+                    help="which modes may hold a rank (#65). `mode_poses` is "
+                         "the measured estimability rule from config; "
+                         "`consensus_fraction` is the original `consensus >= "
+                         "--floor`, kept to reproduce 3.0.0's earlier tables.")
     ap.add_argument("--floor", type=float, default=CONSENSUS_FLOOR)
     # Not a fixed choice list: a screen run at a different --sub-split writes its
     # own topic and MUST be rankable separately, because subdividing changes
@@ -494,8 +539,17 @@ def main() -> None:
             args.floor = 0.05                     # "the mode is real"
         if args.quota == DEFAULT_QUOTA:
             args.quota = 1.0                      # rank every real mode
-        log.info("per-mode: gating on `%s` at floor %.2f, quota %.2f",
-                 args.consensus, args.floor, args.quota)
+        if args.gate == "mode_poses":
+            log.info("per-mode: gating on `%s` >= %d poses (config, #65); "
+                     "quota %.2f. The superseded rule was `consensus >= %.2f`, "
+                     "which on a %d-pose cloud is `>= %d poses`.",
+                     tc.rank_gate_parameter(), tc.rank_min_mode_poses(),
+                     args.quota, args.floor, int(agg.n_poses.median()),
+                     int(np.ceil(args.floor * agg.n_poses.median())))
+        else:
+            log.info("per-mode: gating on `%s` at floor %.2f, quota %.2f "
+                     "(SUPERSEDED rule, kept for reproduction -- #65)",
+                     args.consensus, args.floor, args.quota)
 
     ok = agg[agg.status == "ok"].copy()
     log.info("v2: %d measured, %d ok, %d poses rows", len(agg), len(ok), len(poses))
@@ -640,8 +694,11 @@ def main() -> None:
     # together and dropping T_3 afterwards would leave acrylamide's T_4 rows
     # carrying ranks earned against 4,062 REINVENT molecules that nobody intends
     # to make.
+    # `tc` is imported at module scope. Re-importing it HERE made it a local for
+    # the whole of main(), so the gate's own use of it 150 lines earlier raised
+    # UnboundLocalError -- on a function that had run fine until something else
+    # in main() needed the same module.
     try:
-        from shared import target_config as tc
         want = [str(t).upper() for t in tc.get("run.tiers")]
     except Exception:                                      # noqa: BLE001
         want = ["T3", "T4"]
@@ -654,7 +711,17 @@ def main() -> None:
         g = ok[ok.tier == tier]
         if g.empty:
             continue
-        ranked = filter_and_rank(g, args.score, cons_col, args.quota, args.floor)
+        ranked = filter_and_rank(g, args.score, cons_col, args.quota,
+                                 args.floor, gate=args.gate)
+        # WHAT THE GATE CHANGED, ON EVERY RUN. A selection rule that moves the
+        # ranked population by thousands of modes must say so in the log of the
+        # run that applied it, not only in the record that proposed it.
+        if per_mode and args.gate == "mode_poses":
+            was = int((g[cons_col] >= 0.05).sum())
+            now = int(ranked.passes.sum())
+            log.info("%s: %d modes ranked under the estimability gate, "
+                     "against %d under the superseded `consensus >= 0.05` "
+                     "(%+d)", tier, now, was, now - was)
         # the SCORE goes in the filename. Writing every ordering to
         # rank_v2_<tier>_<n> and letting consumers take the newest is how the
         # overnight selection silently used enrichment_joint -- the 2.0.0

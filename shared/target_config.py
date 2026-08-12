@@ -124,6 +124,38 @@ def sweep_min_mode_poses(cfg: dict | None = None) -> int:
     return int(v)
 
 
+def rank_min_mode_poses(cfg: dict | None = None) -> int:
+    """Poses a mode needs before it may hold a RANK (#65).
+
+    THE SAME QUESTION AS `sweep_min_mode_poses`, ASKED ONE STAGE EARLIER, and
+    kept as its own key so the two can be answered differently without either
+    silently following the other. Ranking asks whether a mode may be ORDERED
+    against its class; sweeping asks whether it may be SIMULATED. That they
+    currently share the value 12 is a fact about this target, asserted by a test
+    rather than achieved by aliasing.
+
+    It replaces `consensus >= 0.05`. `consensus` is mode_size / n_poses, so a
+    fraction floor is a size floor divided by the cloud -- on a 500-pose cloud
+    exactly "at least 25 poses", a number nothing measured, and one that moves
+    to 50 the moment `docking.n_runs` doubles without any output saying so.
+    """
+    v = get("ranking.mode_gate.min_poses", cfg, default=None)
+    if v is None:
+        raise ConfigError(
+            "ranking.mode_gate.min_poses is not set. The rank gate is a "
+            "measured estimability threshold, not a default: see "
+            "config/target.yaml and D0084.")
+    return int(v)
+
+
+def rank_gate_parameter(cfg: dict | None = None) -> str:
+    """The column the rank gate is applied to. Named so it cannot drift silently."""
+    v = get("ranking.mode_gate.parameter", cfg, default=None)
+    if v is None:
+        raise ConfigError("ranking.mode_gate.parameter is not set; see config/target.yaml")
+    return str(v)
+
+
 def sweep_max_depth(cfg: dict | None = None) -> int:
     """Modes per FAMILY that may be swept. A budget ceiling, not a threshold.
 
