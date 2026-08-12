@@ -97,10 +97,20 @@ sweep_rule:
     # all five classes below carry isotropic_null = 0.0816 -- bdhi is
     # sn2_ring_opening, the other two michael_addition, and the null is
     # identical. So the two-class families rank on one scale.
+    # @tt8804, 2026-08-12: "just sweep the two bdhi lists and acrylamide".
+    # THREE LISTS, and bdhi_c4/bdhi_c5 are kept SEPARATE rather than pooled as one
+    # bdhi family. Pooling them is statistically legitimate -- same mechanism,
+    # identical isotropic_null -- but they are two different warheads a chemist
+    # makes differently, and pooling lets the larger list (c5: 1,073 estimable
+    # modes against c4's 789) absorb the quota. Each list gets its own.
+    #
+    # naphthoquinone is descoped. It was the largest block in the ranking (36 of
+    # the top 100 molecules) and its rows remain on disk, so this is reversible by
+    # adding the two classes back here -- nothing else needs to change.
     families:
-      acrylamide:     [acrylamide]
-      naphthoquinone: [naphthoquinone_benzo, naphthoquinone_c2]
-      bdhi:           [bdhi_c4, bdhi_c5]
+      acrylamide: [acrylamide]
+      bdhi_c4:    [bdhi_c4]
+      bdhi_c5:    [bdhi_c5]
 
   # PER FAMILY, NOT GLOBAL, AND THAT IS THE WHOLE POINT OF THE QUOTA. Since all
   # three families share a null they COULD be ranked in one list -- and then
@@ -109,7 +119,12 @@ sweep_rule:
   # because of how it was generated, not because acrylamides are more promising,
   # and the deliverable is a top-5 a chemist can choose across warhead
   # chemistries. Equal depth per family buys that diversity explicitly.
-  max_depth: 400
+  # NON-BINDING AT THE CURRENT FLOOR, AND SAID SO DELIBERATELY. On the 3.0.0
+  # ranking the floor stops each list well short of this: bdhi_c5 at 136,
+  # acrylamide at 85, bdhi_c4 at 57. The cap exists so a future target whose
+  # chemistry is richer cannot silently commit months of GPU time -- it is a
+  # backstop, not the operative rule. The worklist logs which of the two bound.
+  max_depth: 150
 
   # A BUDGET FLOOR, AND IT IS DELIBERATELY NOT `floor` ABOVE. `floor` is the
   # capture-validated threshold: the one the pilot measures, that provably keeps

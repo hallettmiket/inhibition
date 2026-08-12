@@ -257,14 +257,30 @@ def run_sweep(cand: str, pose: Path, pose_rank: int, gpu: int,
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=14400)
     if r.returncode != 0:
         log.warning("%s: sweep failed rc=%d %s", cand, r.returncode, r.stderr[-300:])
-        return None
-    return rep if (rep / "prod.xtc").is_file() else None
+        raise SweepError(f"{cand}: rc={r.returncode} "
+                         f"{(r.stderr or r.stdout or '').strip()[-200:]}")
+    if not (rep / "prod.xtc").is_file():
+        # EXIT 0 AND NO TRAJECTORY IS STILL A FAILURE, AND IT HAS A REASON. This
+        # returned None, which the caller recorded as a bare "sweep failed" -- so
+        # a molecule that could not be parameterised looked exactly like one whose
+        # GPU run crashed, and neither said why. The reason is in the child's own
+        # output; carry it instead of discarding it.
+        tail = (r.stdout or "").strip().splitlines()
+        raise SweepError(f"{cand}: exited 0 but wrote no prod.xtc"
+                         + (f" — {tail[-1][:160]}" if tail else ""))
+    return rep
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--candidates", nargs="+", required=True)
-    ap.add_argument("--pose-dir", default=str(POSES / "nac_v3_poses"))
+    # FROM `run.topic`, NOT A LITERAL. This defaulted to `nac_v3_poses`, so a
+    # sweep launched after the 3.0.0 screen would have simulated 2.2.0's poses
+    # while reporting them against 3.0.0's ranking -- 10 ns of GPU per mode spent
+    # on the wrong structure, with nothing in the output to say which run it came
+    # from. Same defect as D0080, one stage further downstream.
+    ap.add_argument("--pose-dir", default=None,
+                    help="representative poses; defaults to <run.topic>_poses")
     ap.add_argument("--pose-rank", type=int, default=1)
     ap.add_argument("--gpu", type=int, default=1)
     ap.add_argument("--sweep-ps", type=float, default=SWEEP_PS)
@@ -272,6 +288,10 @@ def main() -> None:
                     help="report starting geometry only — costs no GPU at all")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if args.pose_dir is None:
+        from shared import target_config as tc
+        args.pose_dir = str(POSES / f"{tc.get('run.topic')}_poses")
+    log.info("poses from %s", Path(args.pose_dir).name)
     mp = _mp()
 
     rows = []
