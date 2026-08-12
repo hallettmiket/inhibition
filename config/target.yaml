@@ -141,6 +141,26 @@ sweep_rule:
   # floor is a spending rule, not a claim about which molecules react.
   budget_floor: 4.0
 
+  # ESTIMABILITY, AND IT IS NOT THE SAME TEST AS THE FLOOR. `enrichment` is
+  # viable_fraction / null, and viable_fraction is a proportion measured on the
+  # poses IN THE MODE. On two poses it can only be 0, 0.5 or 1.0 -- and 1.0 gives
+  # enrichment 12.25, the arithmetic ceiling, from two observations. Measured on
+  # the 3.0.0 ranking, of the modes clearing enrichment 4.0 that the consensus
+  # gate had excluded: 589 held 0-3 poses, 452 held 4-11, 157 held 12-24, and
+  # NONE held 25 or more. The top of that list is noise wearing a maximum score.
+  #
+  # A floor on enrichment cannot catch this, because a tiny mode's enrichment is
+  # high rather than low. The size requirement is a separate, prior question: is
+  # this proportion estimable at all? 12 matches `splitting.stage2.min_mode_size`
+  # -- the same number below which a cluster is not treated as a mode.
+  #
+  # NOTE this is NOT the `consensus >= 0.05` gate in rank_v2, which is a fraction
+  # OF THE CLOUD and therefore conflates a small mode with a large cloud. After
+  # sub-splitting that gate leaves 52.5% of modes unranked (median consensus
+  # 0.052, sitting exactly on its own threshold) where 2.2.0 left 18.7%. Sweeping
+  # keys on absolute size instead, which does not move when the cloud does.
+  min_mode_poses: 12
+
   # A FREE EXCLUSION, IF IT HOLDS. Modes with viable_fraction == 0 have no docked
   # pose meeting the near-attack criterion, so they clear no floor above zero:
   # 30% of acrylamide, 61% of bdhi, 67% of naphthoquinone. Whether such a mode

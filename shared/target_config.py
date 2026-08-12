@@ -111,6 +111,19 @@ def sweep_budget_floor(cfg: dict | None = None) -> float:
     return float(v)
 
 
+def sweep_min_mode_poses(cfg: dict | None = None) -> int:
+    """Poses a mode needs before its enrichment is worth acting on.
+
+    Asked BEFORE the floor, and it is a different question: the floor asks
+    whether the value is high, this asks whether the value means anything. A
+    two-pose mode scores the arithmetic maximum whenever both poses are viable.
+    """
+    v = get("sweep_rule.min_mode_poses", cfg, default=None)
+    if v is None:
+        raise ConfigError("sweep_rule.min_mode_poses is not set; see config/target.yaml")
+    return int(v)
+
+
 def sweep_max_depth(cfg: dict | None = None) -> int:
     """Modes per FAMILY that may be swept. A budget ceiling, not a threshold.
 

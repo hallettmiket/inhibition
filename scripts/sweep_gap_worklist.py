@@ -259,10 +259,23 @@ def main() -> None:
         # family stopped by the floor ran to its chemistry limit; one stopped by
         # the cap ran out of GPU time with candidates still queued. Those are
         # different claims about the shortlist and they must not look alike.
+        # ESTIMABILITY FIRST, THEN THE FLOOR. A two-pose mode whose two poses are
+        # both viable scores enrichment 12.25 -- the ceiling -- and would sail
+        # over any floor. Asking "is this number meaningful" before "is this
+        # number high" is the only order that removes it.
+        minp = tc.sweep_min_mode_poses()
+        pre = len(gap)
+        if "n_poses_mode" in gap.columns:
+            gap = gap[gap.n_poses_mode >= minp]
+            log.info("estimable: n_poses_mode >= %d keeps %d of %d unswept modes",
+                     minp, len(gap), pre)
+        else:
+            log.warning("n_poses_mode absent -- the estimability test is NOT "
+                        "being applied; tiny modes can reach the top")
         bfloor = tc.sweep_budget_floor()
         pre = len(gap)
         gap = gap[gap.enrichment >= bfloor]
-        log.info("budget floor: enrichment >= %.1f keeps %d of %d unswept modes",
+        log.info("budget floor: enrichment >= %.1f keeps %d of %d estimable modes",
                  bfloor, len(gap), pre)
         by = {f: g.sort_values("enrichment", ascending=False)
               for f, g in gap.groupby("family")}
