@@ -1,0 +1,96 @@
+# The target, and the decisions a screen needs before it can run.
+#
+# The tool is target-agnostic; this file is where a target stops being a
+# hard-coded assumption. Everything below is either a fact about the target or a
+# rule with a measured basis -- never a number someone picked.
+#
+# 3.0.0. Prior numbers do not survive this file: sub-splitting, per-mode
+# selection, physiological salt and the pH 7.4 docked species each change what is
+# measured, and together they invalidate every 2.2.0 value (CHANGELOG rule).
+
+target:
+  name: Pin1
+  domain: catalytic          # the PPIase domain, not the WW domain
+  pdb: 3IKD                  # chemist-prepared; replaced 6VAJ in D0059
+  anchor: Cys113             # the residue the warhead must reach
+  anchor_atom: SG
+
+# ---------------------------------------------------------------------------
+# Pose generation and splitting
+# ---------------------------------------------------------------------------
+docking:
+  n_runs: 500                # per molecule; 500 is far past saturation, see below
+  persist_all_poses: true    # #44 -- a rule, not an option. The cloud must come
+                             # from the SAME run that produced the scores.
+  # 500 runs give >=95% probability of sampling at least one pose within 2 A of
+  # the true one PROVIDED the per-run hit rate exceeds 0.597% (>=99% at 0.917%).
+  # Sulfopin's measured rate is 20.8% [17.4, 24.8], where 13 runs would do.
+  sampling_floor_p: 0.00597
+
+splitting:
+  # Stage 1: mechanistically meaningful modes. Clustered on the reactive atom's
+  # position and the direction the warhead points -- never on energy, never on
+  # the NAC geometry that is later scored.
+  stage1: warhead_position_and_direction
+  # Stage 2 (#61): the first stage is blind to everything but the warhead, so a
+  # mode can hold poses 5 A apart elsewhere in the molecule and one
+  # representative would stand for both.
+  stage2:
+    enabled: true
+    cut_diameter_a: 2.0      # tied to the accuracy being claimed, not chosen
+    max_sub: 5               # 97% of the achievable recovery; k=5 vs k=9 p=1.00
+    min_mode_size: 12
+  # Measured on the 82-case benchmark, recovery of the crystal pose within 2 A:
+  #   1 representative 22.0% | 4 -> 39.0% (14 gained, 0 lost, p=1.2e-4) | 9 41.5%
+
+# ---------------------------------------------------------------------------
+# What earns a simulation (#59)
+# ---------------------------------------------------------------------------
+sweep_rule:
+  # NOT a depth. A rank cut cannot travel between targets: rank is an ordinal
+  # within one warhead class of one library. The floor is on `enrichment`, which
+  # is viable_fraction / isotropic_null -- dimensionless, defined identically for
+  # every class and target, already null-normalised per mechanism so it absorbs
+  # the SN2-vs-perpendicular difficulty gap.
+  parameter: enrichment
+  floor: null                # MEASURED PER TARGET, never inherited. null until
+                             # the pilot below has run and been read.
+  capture_target: 0.95       # the floor must retain 95% of productive modes;
+                             # missing one costs a candidate, a wasted sweep
+                             # costs ~0.5 GPU-h, and the asymmetry is the point
+  pilot:
+    design: stratified_on_viable_fraction
+    strata: ["0-0", "0.0001-0.05", "0.05-0.10", "0.10-0.15", "0.15-1.0"]
+    n_per_stratum: 30        # +/-18 pp on a rate near 0.5; the zero stratum is
+                             # one-sided, where 0/30 bounds it at 10% (rule of 3)
+    spread_across_classes: true
+  select_by: per_mode        # #53 -- NOT one pose per molecule. 2.2.0 sent mode 0
+                             # for 242 of 242 molecules while ranking per mode,
+                             # and 5 modes that rank FIRST in their class were
+                             # never simulated.
+
+# ---------------------------------------------------------------------------
+# Simulation
+# ---------------------------------------------------------------------------
+md:
+  sweep_ps: 10000            # triage: decides what earns a 100 ns run
+  production_ps: 100000
+  salt_molar: 0.15           # #57. Every 2.2.0 system was built with
+                             # `addions ... 0` -- neutralise and stop -- so none
+                             # had salt, at ~0 M against a cell's 0.15
+  bound_rmsd_nm: 1.2
+  replicates: 1              # >1 only where a claim rests on one trajectory
+
+# ---------------------------------------------------------------------------
+# Chemistry the run must agree on before it starts
+# ---------------------------------------------------------------------------
+chemistry:
+  # @tt8804, 2026-08-11: dock the species that exists at assay pH, and correct
+  # the warhead library to match. Docking a neutral form into a pocket whose
+  # recognition is charged gives poses that are plausible and meaningless.
+  docked_species: ph_7.4
+  ph: 7.4
+  # A molecule whose pH 7.4 form could not be built is STAMPED and excluded, not
+  # quietly docked as the neutral -- that substitution is the defect (#58).
+  require_docked_species_ok: true
+  require_inchikey: true     # the only identifier here that survives a lost wedge

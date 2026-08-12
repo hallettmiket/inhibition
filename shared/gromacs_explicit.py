@@ -143,12 +143,36 @@ cpx = combine {{rec LIG}}
 solvatebox cpx {water} {pad}
 addions cpx Na+ 0
 addions cpx Cl- 0
+addionsrand cpx Na+ {n_salt} Cl- {n_salt}
 saveamberparm cpx solv.prmtop solv.inpcrd
 quit
 """
 
 
-def solvate(src: Path, wd: Path) -> dict:
+#: Physiological ionic strength, mol/L (#57). Every 2.2.0 system was built with
+#: `addions ... 0`, which neutralises and stops -- so a neutral ligand got one
+#: counter-ion, a +1 ligand got none, and NO system had salt. Both sit at ~0 M
+#: against a cell's 0.15 M, and electrostatics between a charged ligand and a
+#: charged pocket are unscreened at 0 M. 726 of 1,782 T4 candidates are cations
+#: at pH 7.4, so this is not a corner case.
+SALT_M = 0.15
+#: Waters per ion pair at 0.15 M. 55.5 mol/L water / 0.15 = 370.
+_WATERS_PER_PAIR = 370
+
+
+def n_salt_pairs(n_waters: int, molar: float = SALT_M) -> int:
+    """Ion pairs for `n_waters` at `molar`, by the standard water-count rule.
+
+    Rounded DOWN, and never negative: a box that ends up slightly under the
+    target concentration is a smaller error than one whose charge the
+    neutralising step then has to undo.
+    """
+    if molar <= 0 or n_waters <= 0:
+        return 0
+    return max(0, int(n_waters * molar / 55.5))
+
+
+def solvate(src: Path, wd: Path, salt_molar: float = SALT_M) -> dict:
     """Build an explicitly solvated complex with tleap, and verify it."""
     wd.mkdir(parents=True, exist_ok=True)
     for f in ("ligand.mol2", "ligand.frcmod", "receptor_cys.pdb"):
@@ -157,13 +181,34 @@ def solvate(src: Path, wd: Path) -> dict:
             raise GromacsError(f"{src.name}: missing {f}")
         shutil.copy2(s, wd / f)
 
-    (wd / "solvate.leap").write_text(
-        SOLVATE_LEAP.format(water=WATER_MODEL, pad=BOX_PADDING_A),
-        encoding="utf-8")
-    _run([_bin(AMBER_ENV, "tleap"), "-f", "solvate.leap"], wd, "tleap.log",
-         timeout=3600)
+    # TWO PASSES, because the ion count depends on the water count and the water
+    # count does not exist until the box is built. Pass one solvates and
+    # neutralises; pass two rebuilds the same box with the salt included. tleap
+    # is seconds, and the alternative -- guessing the water count from the box
+    # volume -- puts the concentration off by whatever the protein displaces.
+    def _leap(n_salt: int, log: str):
+        (wd / "solvate.leap").write_text(
+            SOLVATE_LEAP.format(water=WATER_MODEL, pad=BOX_PADDING_A,
+                                n_salt=n_salt),
+            encoding="utf-8")
+        _run([_bin(AMBER_ENV, "tleap"), "-f", "solvate.leap"], wd, log,
+             timeout=3600)
 
+    _leap(0, "tleap_count.log")
     prm, crd = wd / "solv.prmtop", wd / "solv.inpcrd"
+    n_pairs = 0
+    if salt_molar and salt_molar > 0 and prm.is_file() and prm.stat().st_size:
+        import parmed as _pmd
+        _p0 = _pmd.load_file(str(prm))
+        n_pairs = n_salt_pairs(
+            sum(1 for r in _p0.residues if r.name in ("WAT", "HOH")), salt_molar)
+        if n_pairs:
+            _leap(n_pairs, "tleap.log")
+        else:
+            shutil.copy2(wd / "tleap_count.log", wd / "tleap.log")
+    else:
+        shutil.copy2(wd / "tleap_count.log", wd / "tleap.log")
+
     if not prm.is_file() or prm.stat().st_size == 0:
         raise GromacsError(f"{wd.name}: tleap produced no solvated topology")
 
@@ -186,7 +231,13 @@ def solvate(src: Path, wd: Path) -> dict:
 
     p.save(str(wd / "sys.top"), overwrite=True)
     p.save(str(wd / "sys.gro"), overwrite=True)
-    return {"atoms": len(p.atoms), "waters": waters, "ions": ions,
+    # The realised concentration, not the requested one: if tleap placed fewer
+    # ions than asked, the row must say what the box actually contains.
+    realised = (n_pairs * 55.5 / waters) if waters else 0.0
+    return {"salt_molar_requested": float(salt_molar),
+            "salt_pairs": int(n_pairs),
+            "salt_molar_realised": round(float(realised), 4),
+            "atoms": len(p.atoms), "waters": waters, "ions": ions,
             "net_charge": round(float(charge), 4),
             "box_a": [round(float(x), 2) for x in p.box[:3]]}
 

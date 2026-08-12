@@ -16,7 +16,41 @@ Every entry below states whether prior numbers survive it.
 
 ---
 
-## 2.2.0 “Chalcopyrite” — in progress
+## 3.0.0 “Galena” — in progress
+
+**MAJOR: no 2.2.0 number survives this release.** Four changes each alter what is
+measured, and no combination of them leaves a prior value comparable:
+
+- **Second-stage pose splitting** (#61) changes `consensus` = mode_size/n_poses,
+  and every score computed from it. Sized by measurement: on the 82-case
+  benchmark, carrying 4–5 representatives instead of 1 lifts crystal-pose
+  recovery from 22.0% to 39–40% (14 cases gained, 0 lost, McNemar p = 1.2×10⁻⁴),
+  and past 5 there is nothing left (k=5 vs k=9, p = 1.00).
+- **Per-mode selection** (#53). 2.2.0 ranked per mode and then sent **mode 0 for
+  242 of 242 molecules**; 5 modes ranking *first* in their warhead class were
+  never simulated. The 2.2.0 shortlist is a shortlist of mode 0s.
+- **Physiological ionic strength** (#57). Every 2.2.0 system was built with
+  `addions … 0` — neutralise and stop — so **no simulation had salt**, at ~0 M
+  against a cell's 0.15 M, with 726 of 1,782 T₄ candidates cationic at pH 7.4.
+- **The pH 7.4 species is what gets docked** (#58, @tt8804). The pose set and the
+  warhead library disagreed about protonation, which blocked the covalent workup
+  on 41% of the library.
+
+Prior numbers are not merely uncertain — they answer a different question.
+
+### Also in this release
+- `config/target.yaml`: the target and every screen decision in one file, read
+  only by `shared/target_config.py`, which **refuses** to supply a sweep floor
+  that has not been measured for the target at hand (#59).
+- `inchikey` and `docked_smiles` on every candidate frame — 1,783 T₄ and 5,396 T₃
+  rows, 0 duplicate keys. A molecule whose pH 7.4 form cannot be built is stamped
+  and excluded rather than quietly docked as the neutral.
+- Pose clouds persist by rule, not by flag (#44, `CLAUDE.md`).
+- Runs record which pose they simulated (#35, #36).
+
+---
+
+## 2.2.0 “Chalcopyrite” — closed 2026-08-11
 
 Pose splitting and tooling upgrades. Outline: `docs/outline_2.2.0.md`.
 Framework as built: `docs/framework_2.2.0.md`.
