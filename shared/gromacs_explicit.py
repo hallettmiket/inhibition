@@ -143,10 +143,23 @@ cpx = combine {{rec LIG}}
 solvatebox cpx {water} {pad}
 addions cpx Na+ 0
 addions cpx Cl- 0
-addionsrand cpx Na+ {n_salt} Cl- {n_salt}
-saveamberparm cpx solv.prmtop solv.inpcrd
+{salt_line}saveamberparm cpx solv.prmtop solv.inpcrd
 quit
 """
+
+#: `addIonsRand` REFUSES A COUNT OF ZERO, and the two-pass design hands it zero
+#: on every first pass.
+#:
+#: tleap answers `addionsrand cpx Na+ 0 Cl- 0` by printing its own usage --
+#: `UNIT _ion1_ / NUMBER _#ion1_` -- and exiting 21. Those underscored tokens are
+#: tleap's placeholder NAMES, not unsubstituted fields from this template, which
+#: is exactly what made the failure read as a formatting bug here.
+#:
+#: The counting pass exists to learn the water count, so it always has n_salt=0.
+#: Every system built since #57 introduced salt therefore failed at solvation, on
+#: every molecule, before one frame of MD -- the 362 sweep results on disk all
+#: predate the salt code. The line is now emitted only when there is salt to add.
+_SALT_LINE = "addionsrand cpx Na+ {n} Cl- {n}\n"
 
 
 #: Physiological ionic strength, mol/L (#57). Every 2.2.0 system was built with
@@ -189,7 +202,8 @@ def solvate(src: Path, wd: Path, salt_molar: float = SALT_M) -> dict:
     def _leap(n_salt: int, log: str):
         (wd / "solvate.leap").write_text(
             SOLVATE_LEAP.format(water=WATER_MODEL, pad=BOX_PADDING_A,
-                                n_salt=n_salt),
+                                salt_line=(_SALT_LINE.format(n=n_salt)
+                                           if n_salt > 0 else "")),
             encoding="utf-8")
         _run([_bin(AMBER_ENV, "tleap"), "-f", "solvate.leap"], wd, log,
              timeout=3600)
