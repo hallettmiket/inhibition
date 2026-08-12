@@ -197,6 +197,13 @@ def _rows_json(r: pd.DataFrame) -> str:
             "sp": num("spread_a", 2), "dc": num("dir_coherence", 3),
             "fa": num("frac_attack_ready", 4), "s": st,
             "ctl": bool(x.get("is_control", False)),
+            # `mode_label` is 1a / 1b when a first-stage mode was subdivided
+            # (#61) and a plain number otherwise. Absent on every frame screened
+            # before sub-splitting existed, so it falls back to the number.
+            "ml": (str(x["mode_label"]) if pd.notna(x.get("mode_label"))
+                   else str(int(x["mode"]))),
+            "pm": (int(x["parent_mode"]) if pd.notna(x.get("parent_mode"))
+                   else int(x["mode"])),
         })
     return json.dumps(out, separators=(",", ":"))
 
@@ -468,7 +475,8 @@ async function pick(id){
   SEL = id; railHTML();
   document.getElementById('vempty').style.display = 'none';
   document.getElementById('vfull').style.display = '';
-  document.getElementById('vname').textContent = x.i;
+  document.getElementById('vname').textContent =
+    x.i + (x.ml !== String(x.m) ? '   (mode ' + x.ml + ')' : '');
   // The same depiction the rail uses, at panel size. It is an SVG, so one file
   // serves both; drawing a second at a larger size would be a second answer to
   // "what does this molecule look like".
@@ -511,7 +519,10 @@ async function pick(id){
   const best = sibs.reduce((a,b) => (RK(b) < RK(a) ? b : a), sibs[0]);
   document.getElementById('sibs').innerHTML =
     '<h3>modes of ' + x.p + ' — ' + sibs.length + ' in total, '
-    + sibs.filter(m => m.cr !== null).length + ' ranked</h3>' +
+    + sibs.filter(m => m.cr !== null).length + ' ranked'
+    + (new Set(sibs.map(m => m.pm)).size < sibs.length
+       ? ' · lettered rows (1a, 1b) are sub-splits of ONE first-stage mode (#61)'
+       : '') + '</h3>' +
     '<p class="note" style="margin:.2rem 0 .5rem">Tick to draw a mode; click the '
     + 'row to read it. Several can be shown at once.</p>'
     + '<table class="sib"><thead><tr><th>show</th><th>class rank</th><th>poses</th>' +
@@ -526,7 +537,7 @@ async function pick(id){
         + '<td onclick="event.stopPropagation();toggleMode(' + m.m + ')">'
         + '<input type="checkbox" class="mchk"' + (SHOWN.has(m.m) ? ' checked' : '')
         + ' onclick="event.stopPropagation();toggleMode(' + m.m + ')">'
-        + '<i class="sw" style="background:' + col + '"></i>m' + m.m + '</td>'
+        + '<i class="sw" style="background:' + col + '"></i>m' + m.ml + '</td>'
         + '<td' + (m.i === best.i ? ' class="win"' : '') + '>'
         + (m.cr === null ? '<span class="na">unranked</span>' : m.cr) + '</td>'
         + '<td>' + (m.n === null ? '—' : m.n) + '</td>'

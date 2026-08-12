@@ -276,6 +276,8 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         _sub_stamp = {"sub_split": int(sub_split or 1),
                       "sub_modes_in": sub_info.get("modes_in"),
                       "sub_modes_out": sub_info.get("modes_out")}
+        _parent = sub_info.get("parent", {})
+        _label = sub_info.get("label", {})
         for k in mode_ids:
             sel = labels == k
             ident_k = f"{cand.ident}_m{k}"
@@ -323,6 +325,13 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
             })
             ident_row.update(pmod.identity(feat, labels, k))
             ident_row.update(_sub_stamp)
+            # WHICH FIRST-STAGE MODE THIS CAME FROM. Without it a molecule
+            # showing m0..m4 cannot be told apart from one with five genuine
+            # modes, when it may be one mode split five ways.
+            _p = _parent.get(int(k), (int(k), -1))
+            ident_row["parent_mode"] = _p[0]
+            ident_row["sub_index"] = _p[1]
+            ident_row["mode_label"] = _label.get(int(k), str(k))
             aggs.append(ident_row)
 
         if not aggs:

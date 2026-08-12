@@ -80,19 +80,36 @@ def subdivide(labels: np.ndarray, coords: np.ndarray,
     Returns (new_labels, info). New labels are renumbered contiguously from 0, so
     everything downstream keeps treating them as ordinary modes -- the mode
     abstraction gets finer, nothing else changes shape. Unassigned poses stay -1.
+
+    `info["parent"]` maps each new mode to (first_stage_mode, sub_index), and
+    `info["label"]` to its display name: `1a`, `1b`. WITHOUT THAT MAPPING THE
+    PROVENANCE IS GONE -- a molecule showing m0..m4 would be indistinguishable
+    from one with five genuine first-stage modes, when it may be one mode split
+    five ways, and those are different claims about the pose cloud. The ident
+    stays numeric (`_m3`) so `mode_key` and every join keep working; the letter
+    is a display label carried alongside.
     """
     from scipy.cluster.hierarchy import fcluster, linkage
     from scipy.spatial.distance import squareform
 
     labels = np.asarray(labels)
     out = np.full(len(labels), -1, dtype=int)
-    info: dict = {"modes_in": 0, "modes_out": 0, "subdivided": 0}
+    info: dict = {"modes_in": 0, "modes_out": 0, "subdivided": 0,
+                  "parent": {}, "label": {}}
     nxt = 0
+
+    def _claim(parent: int, sub_i: int) -> int:
+        nonlocal nxt
+        new = nxt; nxt += 1
+        info["parent"][new] = (int(parent), int(sub_i))
+        info["label"][new] = f"{parent}{chr(ord('a') + sub_i)}" if sub_i >= 0 \
+            else str(parent)
+        return new
     for m in sorted(set(int(x) for x in labels) - {-1}):
         idx = np.flatnonzero(labels == m)
         info["modes_in"] += 1
         if len(idx) < max(min_size, 2 * 2) or max_sub <= 1:
-            out[idx] = nxt; nxt += 1; info["modes_out"] += 1
+            out[idx] = _claim(m, -1); info["modes_out"] += 1
             continue
         d = _pairwise_rmsd(coords[idx])
         z = linkage(squareform(d, checks=False), method="average")
@@ -113,18 +130,22 @@ def subdivide(labels: np.ndarray, coords: np.ndarray,
             # and a sweep.
             if len(members) < 2 and len(np.unique(sub)) > 1:
                 continue
-            out[members] = nxt; nxt += 1; got += 1
+            out[members] = _claim(m, got); got += 1
         stray = idx[out[idx] < 0]
         if len(stray):
             # Whatever was folded out goes to the largest sub-cluster of its own
             # mode, chosen by size, so no pose is silently dropped.
             sizes = [(int((out[idx] == v).sum()), v) for v in set(out[idx]) if v >= 0]
-            out[stray] = max(sizes)[1] if sizes else nxt
+            out[stray] = max(sizes)[1] if sizes else _claim(m, got)
             if not sizes:
-                nxt += 1; got += 1
+                got += 1
         info["modes_out"] += got
         if got > 1:
             info["subdivided"] += 1
+        elif got == 1:
+            only = int(out[idx][0])
+            info["parent"][only] = (int(m), -1)
+            info["label"][only] = str(m)
     info["max_sub"] = max_sub
     info["min_size"] = min_size
     return out, info
