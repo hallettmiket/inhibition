@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import os
 import logging
 import re
 import sys
@@ -181,19 +182,62 @@ def derived_scores(d: pd.DataFrame) -> pd.DataFrame:
 
 
 def _shards(pattern: str) -> pd.DataFrame:
-    fs = sorted(glob.glob(str(SRC / pattern)))
+    """Every chunk of a topic, OLDEST FIRST, so `keep="last"` means newest.
+
+    The sort used to be lexicographic on the filename, which orders
+    `agg_s0_10` before `agg_s0_9` -- so "last" was whichever chunk happened to
+    sort highest, not the most recent one. That was harmless only while every
+    ident appeared exactly once. The moment a molecule is re-screened into an
+    existing topic (filling in the ~190 whose poses could not be recovered), the
+    dedup below decides which of two runs is believed, and deciding that by
+    string order would silently keep the older measurement.
+    """
+    fs = sorted(glob.glob(str(SRC / pattern)), key=lambda p: (os.path.getmtime(p), p))
     if not fs:
         return pd.DataFrame()
-    return pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)
+    out = []
+    for i, f in enumerate(fs):
+        d = pd.read_csv(f)
+        # WHICH CHUNK EACH ROW CAME FROM, so a re-screen can supersede a whole
+        # molecule rather than only the mode labels that happen to recur.
+        d["_chunk"] = i
+        out.append(d)
+    return pd.concat(out, ignore_index=True)
 
 
 def load_v2() -> tuple[pd.DataFrame, pd.DataFrame]:
     agg = _shards("agg_s*_*.csv")
     if agg.empty:
         raise SystemExit(f"no aggregates under {SRC}")
+    # A RE-SCREEN SUPERSEDES THE WHOLE MOLECULE, NOT JUST THE MODES THAT RECUR.
+    #
+    # `drop_duplicates("ident")` can only replace an ident that appears again. A
+    # re-dock is stochastic, so a molecule that produced 12 modes the first time
+    # may produce 5 the second -- and `_m5`.._m11` from the first run have no
+    # counterpart to be replaced BY. They survived as orphans, and the ranking
+    # carried modes 0-4 from the new docking beside modes 5-11 from the old,
+    # whose poses no longer exist. 79 molecules were in exactly that state.
+    #
+    # So the unit of supersession is the MOLECULE: keep only rows from the newest
+    # chunk that mentions it. Anything else lets two runs describe one pose cloud.
+    if "parent_ident" in agg.columns and "_chunk" in agg.columns:
+        newest = agg.groupby("parent_ident")["_chunk"].transform("max")
+        dropped = int((agg["_chunk"] < newest).sum())
+        if dropped:
+            n_mol = int((agg["_chunk"] < newest).groupby(
+                agg.parent_ident).any().sum())
+            log.info("re-screen: dropped %d rows from %d superseded molecules",
+                     dropped, n_mol)
+        agg = agg[agg["_chunk"] == newest]
     agg = agg.drop_duplicates("ident", keep="last")
     poses = _shards("poses_s*_*.csv")
     if not poses.empty:
+        # Same rule, same reason: a re-screened molecule's per-pose rows come
+        # wholly from its newest chunk. `ident` here is the MOLECULE, so keeping
+        # the newest chunk per ident is the molecule-level supersession.
+        if "_chunk" in poses.columns:
+            newest = poses.groupby("ident")["_chunk"].transform("max")
+            poses = poses[poses["_chunk"] == newest]
         poses = poses.drop_duplicates(["ident", "energy_rank"], keep="last")
     return agg, poses
 
@@ -401,7 +445,17 @@ def main() -> None:
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     global SRC
-    SRC = V3 if args.topic == "nac_v3" else V2
+    # ANY TOPIC RESOLVES TO ITS OWN DIRECTORY. This used to read
+    # `V3 if args.topic == "nac_v3" else V2`, so every topic that was not
+    # literally "nac_v3" -- including nac_v4, the entire 3.0.0 run -- silently
+    # read the 2.1.0 aggregates out of nac_v2 and wrote the result under the
+    # requested topic's filename. The output was labelled nac_v4 and contained
+    # nac_v2: 1,683 + 4,082 per-MOLECULE rows in place of 34,080 per-MODE ones,
+    # with no error anywhere. A topic is a directory name; treating it as a
+    # two-valued flag is what made every third value mean "use the oldest data".
+    SRC = DATA / "00_outputs/blacksmith" / args.topic
+    if not SRC.is_dir():
+        raise SystemExit(f"no such topic: {SRC}")
     log.info("reading %s", SRC)
 
     # THE GATE'S THRESHOLDS WERE CALIBRATED FOR A DIFFERENT QUANTITY.
@@ -422,17 +476,27 @@ def main() -> None:
     # below MIN_POPULATION_FRAC (5%) as noise, so a mode that exists is already a
     # real mode. Re-asking the question with a threshold built for another
     # measurement double-counts it and biases against multi-modal binders.
-    if args.topic == "nac_v3":
+    agg, poses = load_v2()
+
+    # PER-MODE IS A PROPERTY OF THE DATA, NOT OF THE TOPIC'S NAME. This was
+    # `args.topic == "nac_v3"` in two places, so nac_v4 -- rows that ARE per
+    # mode -- was ranked as if it were one row per molecule, and every
+    # mode-aware branch below was skipped. The table says what it is: a per-mode
+    # aggregate carries `parent_ident` and `mode`, and nothing else does.
+    per_mode = "parent_ident" in agg.columns and "mode" in agg.columns
+    log.info("%s: %s rows", args.topic,
+             "per-MODE" if per_mode else "per-MOLECULE")
+
+    if per_mode:
         if args.consensus == "consensus_gnina":
             args.consensus = "consensus"          # the mode population itself
         if args.floor == CONSENSUS_FLOOR:
             args.floor = 0.05                     # "the mode is real"
         if args.quota == DEFAULT_QUOTA:
             args.quota = 1.0                      # rank every real mode
-        log.info("nac_v3: gating on `%s` at floor %.2f, quota %.2f",
+        log.info("per-mode: gating on `%s` at floor %.2f, quota %.2f",
                  args.consensus, args.floor, args.quota)
 
-    agg, poses = load_v2()
     ok = agg[agg.status == "ok"].copy()
     log.info("v2: %d measured, %d ok, %d poses rows", len(agg), len(ok), len(poses))
 
@@ -479,7 +543,9 @@ def main() -> None:
     # every consensus column comes back NaN. Measured, not guessed -- with the
     # recompute in place, 0 of 6,302 molecules passed the gate, because the gate
     # compares NaN and NaN >= NaN is False.
-    per_mode = args.topic == "nac_v3"
+    # `per_mode` was determined from the aggregate's own columns above; it is NOT
+    # recomputed here. Two derivations of the same fact is how the topic literal
+    # survived in one place after being fixed in the other.
     cons = (pd.DataFrame() if per_mode or poses.empty
             else consensus_both(agg, poses, smarts))
     if not cons.empty:
@@ -556,7 +622,14 @@ def main() -> None:
             if col in meta.columns:
                 ragg[col if col != "canonical_smiles" else "smiles"] = \
                     ragg.reference_name.map(meta[col])
-        _tag = "" if args.topic in ("nac_v2", "nac_v3") else f"_{args.topic}"
+        # EVERY FILE NAMES ITS RUN, INCLUDING PRODUCTION. The exemption used to
+        # be `"" if topic in ("nac_v2", "nac_v3")`, which left one privileged
+        # un-suffixed name that meant "the current screen" -- and readers had to
+        # know, out of band, which screen that was. When 3.0.0 arrived the
+        # privileged name still held 2.2.0's tables and nothing said so. Naming
+        # every file removes the privileged slot entirely; `shared/mode_ranking`
+        # resolves production from `run.topic` in config/target.yaml.
+        _tag = f"_{args.topic}"
         dest = OUT.write(f"rank_v2_REF{_tag}_{args.score}", ".csv")
         ragg.to_csv(dest, index=False)
         log.info("references: %d scored -> %s", len(ragg), Path(dest).name)
@@ -576,7 +649,14 @@ def main() -> None:
         # ranking silently became the ranking the GUI read, and the view went
         # from 8,097 modes to 6,290 without an error anywhere. A variant must not
         # be able to shadow production by being newer.
-        _tag = "" if args.topic in ("nac_v2", "nac_v3") else f"_{args.topic}"
+        # EVERY FILE NAMES ITS RUN, INCLUDING PRODUCTION. The exemption used to
+        # be `"" if topic in ("nac_v2", "nac_v3")`, which left one privileged
+        # un-suffixed name that meant "the current screen" -- and readers had to
+        # know, out of band, which screen that was. When 3.0.0 arrived the
+        # privileged name still held 2.2.0's tables and nothing said so. Naming
+        # every file removes the privileged slot entirely; `shared/mode_ranking`
+        # resolves production from `run.topic` in config/target.yaml.
+        _tag = f"_{args.topic}"
         dest = OUT.write(f"rank_v2_{tier}{_tag}_{args.score}", ".csv")
         ranked.sort_values(["warhead_class", "class_rank"]).to_csv(dest, index=False)
         surv = ranked[ranked.passes]

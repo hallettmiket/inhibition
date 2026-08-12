@@ -693,11 +693,22 @@ chemistries is the cheapest way to turn two points into a distribution.</p>
     _three_js = (REPO / "scripts" / ".cache_3dmol-min.js")
     three = _three_js.read_text() if _three_js.is_file() else ""
     _mr = moderank.gather()
+    # HOW MANY MODELS EACH ASSET MUST HOLD. An asset left by an earlier run with
+    # fewer poses than the ranking has modes is STALE, and skipping it on mere
+    # existence is what left 195 molecules showing an empty viewer for every mode
+    # above 0.
+    _need = {}
+    if not _mr.empty and "parent_ident" in _mr.columns:
+        for _p, _g in _mr.groupby("parent_ident"):
+            _need[str(_p)] = int(_g["mode"].max()) + 1
     _a = massets.write_assets(REPORTS, moderank.idents(_mr),
-                              force=os.environ.get("MODE_ASSETS_FORCE") == "1")
-    log.info("mode assets: +%d poses, +%d thumbs", _a["poses"], _a["thumbs"])
+                              force=os.environ.get("MODE_ASSETS_FORCE") == "1",
+                              expected=_need)
+    log.info("mode assets: +%d poses, +%d thumbs, %d molecules with no pose "
+             "from this run", _a["poses"], _a["thumbs"], len(_a.get("stale", [])))
     (REPORTS / "modes.html").write_text(
-        moderank.build(_full_title, _date.today().isoformat(), three))
+        moderank.build(_full_title, _date.today().isoformat(), three,
+                       no_pose=_a.get("stale", [])))
 
     page = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">

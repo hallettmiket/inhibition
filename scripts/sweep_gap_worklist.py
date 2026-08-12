@@ -46,7 +46,10 @@ from shared import mode_ranking as mr                     # noqa: E402
 from shared import outputs as sout                        # noqa: E402
 
 log = logging.getLogger("sweep-gaps")
-POSES = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v3_poses")
+#: Set from `--topic` in `main()`. NOT a hardcoded topic: reading poses from one
+#: run while ranking the tables of another is the defect that cost 2.2.0 and
+#: nearly cost 3.0.0 (see nac_screen_v2.topic_paths).
+POSES = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v4_poses")
 
 
 def resolvable(parent: str, mode: int) -> int | None:
@@ -86,7 +89,20 @@ def main() -> None:
     ap.add_argument("--per-class", type=int, default=None,
                     help="balanced mode: take this many best-ranked unswept "
                          "modes from EACH warhead class, interleaved")
+    ap.add_argument("--by-family", action="store_true",
+                    help="the production rule: restrict to the warhead families "
+                         "in config/target.yaml and take up to `max_depth` "
+                         "best-ranked unswept modes from each, interleaved")
+    ap.add_argument("--max-depth", type=int, default=None,
+                    help="override the per-family cap; defaults to "
+                         "sweep_rule.max_depth in config/target.yaml")
+    ap.add_argument("--topic", default="nac_v4",
+                    help="which run's representative poses to resolve against; "
+                         "must be the run whose tables were ranked")
     args = ap.parse_args()
+    global POSES
+    POSES = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith"
+                 ) / f"{args.topic}_poses"
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     d = mr.gather()
@@ -209,6 +225,62 @@ def main() -> None:
         log.info("balanced: %d classes x up to %d = %d rows, interleaved",
                  len(by), args.per_class, len(gap))
 
+    if args.by_family:
+        # THE PRODUCTION SELECTION RULE (@tt8804, 2026-08-12).
+        #
+        # Two decisions, and they do different jobs. SCOPE says which warhead
+        # chemistry the lab will synthesise -- three families of the nine classes
+        # screened -- and it is cheap: it removes only 14% of the modes, because
+        # acrylamide alone is 76% of what is in scope. DEPTH is what makes the
+        # campaign runnable: 29,255 in-scope modes at a measured 20.9 min median
+        # per 10 ns sweep is 212 days on two GPUs, and 250 per family is 5.4.
+        #
+        # ORDERED ON `enrichment`, WITHIN A FAMILY. Ranking across families would
+        # be defensible here -- unusually, all five in-scope classes carry
+        # isotropic_null = 0.0816, so enrichment is on one scale -- but it would
+        # hand every slot to acrylamide, which is 4,223 of 4,779 in-scope
+        # molecules. The lopsidedness is an artefact of how the library was
+        # generated, not evidence about the chemistry, and the deliverable is a
+        # top-5 a chemist can pick ACROSS warhead types. So the quota is per
+        # family and the diversity is bought explicitly rather than hoped for.
+        #
+        # Interleaved, so a run stopped early has gone equally deep in each
+        # family instead of exhausting the first one.
+        from shared import target_config as tc
+        fam_of = tc.family_of()
+        depth = args.max_depth if args.max_depth is not None else tc.sweep_max_depth()
+        before = len(gap)
+        gap = gap[gap.warhead_class.isin(fam_of)].copy()
+        gap["family"] = gap.warhead_class.map(fam_of)
+        log.info("scope: %d of %d unswept modes in %d families (%s)",
+                 len(gap), before, len(set(fam_of.values())),
+                 ", ".join(sorted(set(fam_of.values()))))
+        # THE FLOOR FIRST, THEN THE CAP, AND THE LOG SAYS WHICH ONE BOUND. A
+        # family stopped by the floor ran to its chemistry limit; one stopped by
+        # the cap ran out of GPU time with candidates still queued. Those are
+        # different claims about the shortlist and they must not look alike.
+        bfloor = tc.sweep_budget_floor()
+        pre = len(gap)
+        gap = gap[gap.enrichment >= bfloor]
+        log.info("budget floor: enrichment >= %.1f keeps %d of %d unswept modes",
+                 bfloor, len(gap), pre)
+        by = {f: g.sort_values("enrichment", ascending=False)
+              for f, g in gap.groupby("family")}
+        order, i = [], 0
+        while i < depth:
+            for f in sorted(by):
+                if i < len(by[f]):
+                    order.append(by[f].iloc[i])
+            i += 1
+        gap = pd.DataFrame(order)
+        for f in sorted(by):
+            n = len(by[f])
+            log.info("  %-16s %5d above floor, %4d taken%s", f, n, min(n, depth),
+                     "  <- CAPPED by max_depth (budget)" if n > depth
+                     else "  (exhausted at the floor)")
+        log.info("by-family: %d rows, floor %.1f, cap %d/family, interleaved",
+                 len(gap), bfloor, depth)
+
     rows, checked = [], 0
     for _, x in gap.iterrows():
         if len(rows) >= args.limit:
@@ -226,7 +298,10 @@ def main() -> None:
             "warhead_class": x.warhead_class,
             "conditional_eb": x.conditional_eb,
             "tier": x.get("tier"),
-            "order_basis": (f"depth ladder over {args.only_class} class rank, "
+            "order_basis": ("per family (config scope), ordered by enrichment "
+                            "within family, interleaved, capped at max_depth"
+                            if args.by_family else
+                            f"depth ladder over {args.only_class} class rank, "
                             f"strata {args.strata}, interleaved"
                             if args.strata else
                             "balanced: equal n per warhead class, ordered by "

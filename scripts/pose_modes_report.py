@@ -40,13 +40,15 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
+from shared import mode_assets as massets                # noqa: E402
 from shared import outputs as sout                       # noqa: E402
 from shared import report_theme as rt                    # noqa: E402
 
 log = logging.getLogger("pose-modes")
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
 RECEPTOR = Path("/data/lab_vm/modifiable/inhibition/receptor_3ikd_prep/3IKD_noligand.pdb")
-POSES = B / "nac_v3_poses"
+#: The production run's poses, from `run.topic` -- one definition, in mode_assets.
+POSES = massets.poses_dir()
 
 #: Cys113 in the crystal numbering the receptor file uses.
 CYS_RESI = 113

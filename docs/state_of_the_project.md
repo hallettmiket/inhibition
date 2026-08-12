@@ -285,7 +285,7 @@ within 24 h of being written.*
 <!-- AUTO:t2:END -->
 
 <!-- AUTO:decisions:BEGIN -->
-**78** decision records.
+**79** decision records.
 <!-- AUTO:decisions:END -->
 
 All six T_2 variants are ranked (size-decorrelated, D0049) and carry rebuilt

@@ -84,8 +84,16 @@ def _latest(pattern: str) -> Path | None:
 def gather() -> pd.DataFrame:
     """One row per mode: rank, docking-derived scores, and what was simulated."""
     frames = []
+    # WHICH RUN THIS IS A VIEW OF, STATED RATHER THAN INFERRED. The pattern used
+    # to be `rank_v2_{tier}_{score}_*.csv` -- the un-suffixed name -- so the view
+    # showed whichever screen last claimed that slot and could not report which
+    # one it was. It now comes from `run.topic` in config/target.yaml, the same
+    # key the ranking stamps into its filenames, so the GUI and the ranking
+    # cannot end up describing different screens.
+    from shared import target_config as tc
+    topic = tc.get("run.topic")
     for tier, score in (("T4", "conditional_eb"), ("T3", "enrichment_conditional")):
-        f = _latest(f"rank_v2/rank_v2_{tier}_{score}_*.csv")
+        f = _latest(f"rank_v2/rank_v2_{tier}_{topic}_{score}_*.csv")
         if f is None:
             continue
         d = pd.read_csv(f)
@@ -187,8 +195,13 @@ def _rows_json(r: pd.DataFrame) -> str:
                 return None
             return round(float(v), nd) if nd is not None else int(v)
 
-        out.append({
-            "i": str(x.ident), "p": str(x.parent_ident), "m": int(x["mode"]),
+        # `i` IS NOT SENT. It is exactly `p + "_m" + m` for all 34,076 rows
+        # (checked, 0 exceptions) and is rebuilt once on load. At ~30 bytes a row
+        # it was a megabyte of the payload restating two fields already present.
+        # `ctl` is omitted when false for the same reason -- it is true for the
+        # control alone, and `"ctl":false` on every other row cost 400 KB.
+        row = {
+            "p": str(x.parent_ident), "m": int(x["mode"]),
             "c": str(x.warhead_class),
             "cr": (int(x.class_rank) if pd.notna(x.get("class_rank")) else None),
             "gr": num("global_rank"), "n": num("n_poses_mode"),
@@ -196,7 +209,6 @@ def _rows_json(r: pd.DataFrame) -> str:
             "eb": num("conditional_eb", 3), "en": num("enrichment", 2),
             "sp": num("spread_a", 2), "dc": num("dir_coherence", 3),
             "fa": num("frac_attack_ready", 4), "s": st,
-            "ctl": bool(x.get("is_control", False)),
             # `mode_label` is 1a / 1b when a first-stage mode was subdivided
             # (#61) and a plain number otherwise. Absent on every frame screened
             # before sub-splitting existed, so it falls back to the number.
@@ -204,7 +216,10 @@ def _rows_json(r: pd.DataFrame) -> str:
                    else str(int(x["mode"]))),
             "pm": (int(x["parent_mode"]) if pd.notna(x.get("parent_mode"))
                    else int(x["mode"])),
-        })
+        }
+        if bool(x.get("is_control", False)):
+            row["ctl"] = True
+        out.append(row)
     return json.dumps(out, separators=(",", ":"))
 
 
@@ -247,7 +262,28 @@ select#scope:focus{outline:2px solid var(--blue);outline-offset:1px}
 .mhint{font-size:11px;color:var(--muted);margin-left:4px}
 main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
 @media(max-width:880px){main{grid-template-columns:1fr;grid-template-rows:250px 1fr}}
-#rail{overflow-y:auto;border-right:1px solid var(--rule);background:var(--rail)}
+/* The rail's COLUMN is the grid child; the banner and the scroller stack inside
+   it. min-height:0 on both, or the scroller refuses to shrink and the whole
+   column grows to the height of the list. */
+#railcol{display:flex;flex-direction:column;min-height:0;min-width:0;
+ border-right:1px solid var(--rule);background:var(--rail)}
+/* `contain:layout paint`, NEVER `strict`. `strict` adds SIZE containment, which
+   makes the element size itself without regard to its contents -- inside a grid
+   row that is not explicitly sized, the rail then contributes zero height and
+   collapses to a strip. Layout and paint containment are what is wanted here:
+   they stop the virtualised window from invalidating the rest of the page. */
+#rail{flex:1;overflow-y:auto;background:var(--rail);
+ position:relative;contain:layout paint}
+#railPad{position:relative;width:100%}
+#railWin{position:absolute;top:0;left:0;right:0;will-change:transform}
+/* Fixed geometry is what makes the window computable without measuring 34,076
+   elements. Both are enforced, not assumed -- a row that overflowed its box
+   would drift the whole list out of register with the scrollbar. */
+.row{height:64px;box-sizing:border-box;overflow:hidden}
+/* The class banner that replaces sticky headers under virtualisation. */
+.railbn{font-family:var(--mono);font-size:.6rem;letter-spacing:.14em;
+ text-transform:uppercase;color:var(--blue);font-weight:600;padding:8px 14px 6px;
+ background:var(--raise);border-bottom:1px solid var(--rule)}
 .chd{font-family:var(--mono);font-size:.6rem;letter-spacing:.14em;
  text-transform:uppercase;color:var(--blue);font-weight:600;padding:10px 14px 6px;
  background:var(--raise);border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:1}
@@ -261,6 +297,10 @@ main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
  border:1px solid var(--rule);border-radius:3px;display:block}
 .body{min-width:0;display:flex;flex-direction:column;gap:3px}
 .l1{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+/* The mode's own label, carrying its mode colour, so a rail row says which
+   binding mode it is without the reader decoding a renumbered ident. */
+.mtag{display:inline-block;padding:0 .3rem;margin-left:.3rem;border-radius:3px;
+  color:#fff;font:600 10px var(--mono);vertical-align:1px}
 .mid-id{font-family:var(--mono);font-size:12.5px;overflow:hidden;
  text-overflow:ellipsis;white-space:nowrap}
 .eng{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--navy);flex:none}
@@ -317,6 +357,19 @@ tr.sibrow{cursor:pointer}
 tr.sibrow:hover{background:var(--blue-pale)}
 tr.sibrow.cur{background:var(--blue-pale);font-weight:700}
 input.mchk{margin:0 .45rem 0 0;vertical-align:-1px;cursor:pointer}
+/* SUB-SPLIT GROUPS (#61). The header names the first-stage mode the rows below
+   it came from; the rows are indented so the hierarchy is readable without
+   reading the labels. Muted, not coloured -- the colour carries mode identity
+   and a second use of it here would compete with the swatches. */
+tr.subhd td{background:var(--blue-pale);font:600 11px var(--sans);
+  color:var(--muted);letter-spacing:.02em;padding-top:.45rem}
+tr.sibrow.sub td:first-child{padding-left:1.5rem}
+button.mini{font:600 10px var(--sans);margin-left:.5rem;padding:.1rem .42rem;
+  border:1px solid var(--rule);border-radius:3px;background:var(--bg);
+  color:var(--fg);cursor:pointer;text-transform:uppercase}
+button.mini:hover{background:var(--blue-pale)}
+span.gp{float:right;font:400 10px var(--mono);color:var(--muted);
+  text-transform:none;letter-spacing:0}
 i.sw{width:11px;height:11px;border-radius:2px;display:inline-block;margin-right:.45rem;
  vertical-align:-1px}
 .win{color:var(--good);font-weight:700}
@@ -339,7 +392,15 @@ a{color:var(--blue)}
  <button class="mbtn" onclick="toggleTheme()">dark</button>
 </div>
 <main>
- <div id="rail"></div>
+ <!-- ONE GRID CHILD. `main` is a two-column grid, so the banner must live INSIDE
+      the rail's column rather than beside it -- as a third child it took column 1
+      and pushed the viewer onto row 2. railPad carries the FULL scroll height so
+      the scrollbar stays honest about how much library there is; railWin holds
+      only the ~40 items actually on screen. -->
+ <div id="railcol">
+  <div class="railbn" id="railBanner" style="display:none"></div>
+  <div id="rail"><div id="railPad"><div id="railWin"></div></div></div>
+ </div>
  <div id="viewer">
   <div id="vhead"><span id="vname">select a mode</span>
    <span class="mhint">medoid pose, in the receptor it was docked into</span></div>
@@ -353,6 +414,7 @@ a{color:var(--blue)}
    computes.</div>
    <div id="vfull" style="display:none">
     <div id="gwarn" class="warnbox" style="display:none"></div>
+    <div id="vmiss" class="warnbox" style="display:none"></div>
     <div class="facts" id="vfacts"></div>
     <div id="vstructwrap"><img id="vstruct" alt="2D structure"></div>
     <div id="glbox"><div id="gl"></div></div>
@@ -368,8 +430,49 @@ a{color:var(--blue)}
 <script type="text/plain" id="recpdb">__RECEPTOR__</script>
 <script>
 const ROWS = __ROWS__;
+// `i` is rebuilt here rather than sent 34,076 times. Everything downstream keeps
+// using `x.i`, so this is a wire-format saving and not a change of shape.
+ROWS.forEach(function(x){ x.i = x.p + '_m' + x.m; });
+// Molecules with NO representative pose from the production run. Their stored
+// asset is from an earlier screen with a different clustering, so its models do
+// not mean what this table's modes mean and NONE of them may be drawn.
+const NOPOSE = new Set(__NOPOSE__);
 const MODE_COLS = [0x0072ce, 0x7b5ea7, 0xc2703d, 0x0f7a54, 0xb3261e, 0x8a6d1f];
 const MODE_CSS  = ['#0072ce','#7b5ea7','#c2703d','#0f7a54','#b3261e','#8a6d1f'];
+// HUE BY FIRST-STAGE MODE, LIGHTNESS BY SUB-SPLIT (#61).
+//
+// Sub-modes were being coloured by their renumbered mode index, so 0a..0e -- one
+// binding mode cut five ways -- came out in five unrelated hues and read as five
+// unrelated modes. That inverts the claim: the whole point of the second stage
+// is that these are ALTERNATIVE SCAFFOLD PLACEMENTS OF ONE WARHEAD GEOMETRY, and
+// a reader comparing them must be able to see that at a glance.
+//
+// One hue per parent mode, five lightness steps within it. Different first-stage
+// modes stay as far apart as they ever were; sub-modes of one parent now read as
+// a family.
+const MODE_HUES = [205, 268, 25, 158, 4, 45];
+function subIx(m){
+  // `ml` is '3' when a mode was never subdivided and '3b' when it was.
+  const s = String((m && m.ml) || '');
+  const c = s.charCodeAt(s.length - 1);
+  return (c >= 97 && c <= 122) ? c - 97 : 0;
+}
+function modeHsl(m){
+  const h = MODE_HUES[Math.abs((m && m.pm) || 0) % MODE_HUES.length];
+  return [h, 54, 32 + Math.min(subIx(m), 4) * 9];
+}
+function modeCss(m){ const c = modeHsl(m); return 'hsl(' + c[0] + ',' + c[1] + '%,' + c[2] + '%)'; }
+function modeHex(m){
+  // 3Dmol wants an integer colour, so the same HSL is converted rather than a
+  // second palette being kept in parallel -- two palettes is how the rail and
+  // the viewer come to disagree about which mode is which colour.
+  const c = modeHsl(m), s = c[1] / 100, l = c[2] / 100;
+  const k = n => (n + c[0] / 30) % 12;
+  const f = n => l - s * Math.min(l, 1 - l) *
+                 Math.max(-1, Math.min(Math.min(k(n) - 3, 9 - k(n)), 1));
+  return (Math.round(f(0) * 255) << 16) | (Math.round(f(8) * 255) << 8)
+         | Math.round(f(4) * 255);
+}
 const POCKET = __POCKET__;
 // CARBONS CARRY THE MODE COLOUR; EVERY OTHER ELEMENT KEEPS ITS CONVENTIONAL ONE.
 // Colouring a whole molecule by mode hides its chemistry -- the sulfur, the
@@ -391,6 +494,11 @@ let SCOPE = '*', SEL = null, V = null, SURF = null;
 // to be about one mode, and "several are visible" is a different question from
 // "which one am I reading".
 let SHOWN = new Set(), PDBCACHE = {};
+// mode number -> that mode's row, for the molecule on screen. The 3D layer only
+// ever knows a mode NUMBER (it comes off the PDB models), but colour and label
+// now depend on the row's `pm`/`ml`, so the lookup has to exist somewhere. One
+// map, rebuilt in pick(), rather than a scan per model per redraw.
+let MBY = {};
 
 function lib(){ return window.$3Dmol || window['3Dmol']; }
 function fmt(x, d){ return (x === null || x === undefined) ? '—' : (+x).toFixed(d); }
@@ -420,40 +528,134 @@ function buildScope(){
   el.value = SCOPE;
 }
 
-function railHTML(){
-  const r = visible(), out = [];
-  let cls = null;
-  for (const x of r){
-    if (SCOPE === '*' && x.c !== cls){ cls = x.c;
-      out.push('<div class="chd">' + cls + '</div>'); }
-    const rank = isGlobal() ? (x.gr === null ? '—' : x.gr)
-                           : (x.cr === null ? '—' : x.cr);
-    const pct = x.vf === null ? 0 : Math.round(x.vf * 100);
-    const badge = x.ctl ? 'known inhibitor'
-                : x.s === 'md' ? '100 ns' : x.s === 'swept' ? 'swept'
-                : x.s === 'failed' ? 'failed' : 'not run';
-    out.push(
-      '<button class="row' + (SEL === x.i ? ' on' : '') + (x.ctl ? ' ctl' : '') +
-      '" onclick="pick(\'' + x.i + '\')">' +
-      '<span class="rk">' + rank + '</span>' +
-      '<img class="thumb" loading="lazy" alt="" src="mode_thumbs/' + x.p + '.svg">' +
-      '<span class="body"><span class="l1">' +
-      '<span class="mid-id">' + x.i + '</span>' +
-      '<span class="eng">' + fmt(x.eb, 2) + '</span></span>' +
-      '<span class="l2"><span class="wc">' + x.c + '</span>' +
-      '<span class="meta">' + (x.n === null ? '—' : x.n) + ' poses · ' + pct + '% viable</span>' +
-      '<span class="tag ' + (x.ctl ? 't-ctl' : 't-' + x.s) + '">' + badge +
-      '</span></span>' +
-      '<span class="bar"><i style="width:' + pct + '%"></i></span></span></button>');
-  }
-  document.getElementById('mhint').textContent =
-    r.length.toLocaleString() + ' modes' +
-    (isGlobal() ? ' · one order across classes scored under different bars (#47)'
-                : ' · rank is within the warhead class');
-  document.getElementById('rail').innerHTML = out.join('');
+// ---------------------------------------------------------------------------
+// THE RAIL IS VIRTUALISED. Only what fits on screen exists in the DOM.
+//
+// It used to render every visible mode as a <button> holding an <img> and eight
+// <span>s, in one innerHTML assignment. At 8,097 modes that was slow and
+// tolerable. Sub-splitting (#61) took the library to 34,076, which is roughly
+// 350,000 nodes and 34,000 lazy images -- and `pick()` called it, so EVERY row
+// click and EVERY mode checkbox rebuilt the whole thing. The page became
+// unusable, and it became unusable because the view scaled with the library
+// instead of with the viewport.
+//
+// Now: one flat ITEMS list (headers and rows), a cumulative offset table, and a
+// window of ~40 items rendered on scroll. Cost is constant in the library size.
+// Selection no longer rebuilds anything -- it moves one CSS class.
+// ONE CLASS LABEL, NOT TWO. The pre-virtualisation rail used a `position:sticky`
+// class header: one element that both marked the boundary and stayed on screen as
+// you scrolled past it. Sticky cannot survive a transformed window, so it was
+// replaced by a banner above the rail -- but the inline header was left in place
+// too, and the two said the same word one under the other (@tt8804: "says
+// acrylamide twice"). The banner is strictly the better of the two: it is
+// readable at every scroll position, not just at the boundary. So the inline
+// headers are gone and every item in the list is a row.
+let ITEMS = [], OFF = [], TOTAL = 0, VIS = [];
+const ROW_H = 64, OVERSCAN = 8;
+
+function rowHTML(x){
+  const rank = isGlobal() ? (x.gr === null ? '—' : x.gr)
+                         : (x.cr === null ? '—' : x.cr);
+  const pct = x.vf === null ? 0 : Math.round(x.vf * 100);
+  const badge = x.ctl ? 'known inhibitor'
+              : x.s === 'md' ? '100 ns' : x.s === 'swept' ? 'swept'
+              : x.s === 'failed' ? 'failed' : 'not run';
+  return '<button class="row' + (SEL === x.i ? ' on' : '') + (x.ctl ? ' ctl' : '') +
+    '" data-i="' + x.i + '" onclick="pick(\'' + x.i + '\')">' +
+    '<span class="rk">' + rank + '</span>' +
+    '<img class="thumb" loading="lazy" alt="" src="mode_thumbs/' + x.p + '.svg">' +
+    '<span class="body"><span class="l1">' +
+    '<span class="mid-id">' + x.p +
+    // THE MODE IS NAMED BY ITS LABEL, NOT ITS INDEX. The rail used to print
+    // the bare ident (`..._m3`), which after sub-splitting is a renumbered
+    // index that says nothing about which binding mode it belongs to. `0d`
+    // says: fourth sub-split of first-stage mode 0.
+    ' <span class="mtag" style="background:' + modeCss(x) + '">m' + x.ml +
+    '</span></span>' +
+    '<span class="eng">' + fmt(x.eb, 2) + '</span></span>' +
+    '<span class="l2"><span class="wc">' + x.c + '</span>' +
+    '<span class="meta">' + (x.n === null ? '—' : x.n) + ' poses · ' + pct + '% viable</span>' +
+    '<span class="tag ' + (x.ctl ? 't-ctl' : 't-' + x.s) + '">' + badge +
+    '</span></span>' +
+    '<span class="bar"><i style="width:' + pct + '%"></i></span></span></button>';
 }
 
-function setScope(v){ SCOPE = v; railHTML(); }
+function buildItems(){
+  // The sort is here and ONLY here. `visible()` slices and sorts 34,076 rows;
+  // doing that inside the render made every scroll frame pay for it.
+  VIS = visible();
+  ITEMS = VIS;
+  // Every item is one row of ROW_H, so the offset of item i IS i * ROW_H and the
+  // window is arithmetic rather than a search. The cumulative table is kept
+  // because it is what makes the geometry explicit and checkable.
+  OFF = new Array(ITEMS.length + 1);
+  for (let i = 0; i <= ITEMS.length; i++) OFF[i] = i * ROW_H;
+  TOTAL = ITEMS.length * ROW_H;
+  document.getElementById('railPad').style.height = TOTAL + 'px';
+  document.getElementById('mhint').textContent =
+    VIS.length.toLocaleString() + ' modes' +
+    (isGlobal() ? ' · one order across classes scored under different bars (#47)'
+                : ' · rank is within the warhead class');
+}
+
+function renderRail(){
+  const el = document.getElementById('rail');
+  const top = el.scrollTop, h = el.clientHeight || 600;
+  // Binary search rather than a scan: at 34,076 items a linear search per scroll
+  // frame is the very cost this is removing.
+  let lo = 0, hi = ITEMS.length - 1, s = 0;
+  while (lo <= hi){ const m = (lo + hi) >> 1;
+    if (OFF[m + 1] <= top) lo = m + 1; else { s = m; hi = m - 1; } }
+  let e = s;
+  while (e < ITEMS.length && OFF[e] < top + h) e++;
+  s = Math.max(0, s - OVERSCAN); e = Math.min(ITEMS.length, e + OVERSCAN);
+  const out = [];
+  for (let i = s; i < e; i++) out.push(rowHTML(ITEMS[i]));
+  const win = document.getElementById('railWin');
+  win.style.transform = 'translateY(' + (ITEMS.length ? OFF[s] : 0) + 'px)';
+  win.innerHTML = out.join('');
+  // THE ONLY CLASS LABEL IN THE RAIL. It names the class of the row at the top of
+  // the viewport, so it both marks the boundary (the text changes as you cross
+  // one) and answers "where am I" deep inside a class -- which is what the old
+  // sticky header did and what an inline header alone cannot.
+  const first = ITEMS[Math.min(Math.max(s, 0) + (s > 0 ? OVERSCAN : 0),
+                               ITEMS.length - 1)];
+  const bn = document.getElementById('railBanner');
+  if (first){
+    bn.textContent = isGlobal()
+      ? 'global order — biased across classes (#47)'
+      : first.c + ' — ranked within the class';
+    bn.style.display = '';
+  } else { bn.style.display = 'none'; }
+}
+
+function railHTML(){ buildItems(); renderRail(); }
+
+// Selection moves a class; it does not rebuild the list. This is the other half
+// of the fix -- virtualising the render is wasted if every click re-renders.
+function markSel(){
+  const win = document.getElementById('railWin');
+  win.querySelectorAll('button.row.on').forEach(b => b.classList.remove('on'));
+  const b = win.querySelector('button.row[data-i="' + SEL + '"]');
+  if (b) b.classList.add('on');
+}
+
+function setScope(v){ SCOPE = v;
+  const el = document.getElementById('rail'); if (el) el.scrollTop = 0;
+  railHTML(); }
+
+function showGroup(pm, on){
+  // Draw or clear a whole sub-split cloud at once. Ticking five boxes one at a
+  // time to see what one binding mode actually looks like is the interaction the
+  // second stage created and did not pay for.
+  const cur = SEL ? ROWS.find(r => r.i === SEL) : null;
+  if (!cur) return;
+  ROWS.filter(r => r.p === cur.p && r.pm === pm).forEach(function(m){
+    if (on) SHOWN.add(m.m);
+    else if (m.m !== cur.m) SHOWN.delete(m.m);   // the primary always stays drawn
+  });
+  pick(SEL);
+}
 
 function toggleMode(m){
   // The primary cannot be hidden -- the facts panel is describing it, and a
@@ -472,11 +674,15 @@ async function pick(id){
   const prev = SEL ? ROWS.find(r => r.i === SEL) : null;
   if (!prev || prev.p !== x.p) SHOWN = new Set();   // new molecule, new selection
   SHOWN.add(x.m);                                    // the primary is always drawn
-  SEL = id; railHTML();
+  SEL = id; markSel();
   document.getElementById('vempty').style.display = 'none';
   document.getElementById('vfull').style.display = '';
+  // Names the sub-split explicitly rather than showing a renumbered index: `0c`
+  // is the third scaffold placement of first-stage mode 0, and "mode 2" -- which
+  // is what the ident says -- is not that.
   document.getElementById('vname').textContent =
-    x.i + (x.ml !== String(x.m) ? '   (mode ' + x.ml + ')' : '');
+    x.i + (x.ml !== String(x.m)
+           ? '   (sub-mode ' + x.ml + ' of first-stage mode ' + x.pm + ')' : '');
   // The same depiction the rail uses, at panel size. It is an SVG, so one file
   // serves both; drawing a second at a larger size would be a second answer to
   // "what does this molecule look like".
@@ -515,8 +721,19 @@ async function pick(id){
   // and it is the one place a reader can see whether the mode that was simulated
   // is the one that scored best.
   const sibs = ROWS.filter(r => r.p === x.p).sort((a,b) => a.m - b.m);
+  MBY = {}; sibs.forEach(function(m){ MBY[m.m] = m; });
   const RK = m => (m.cr === null || m.cr === undefined) ? 1e9 : m.cr;
   const best = sibs.reduce((a,b) => (RK(b) < RK(a) ? b : a), sibs[0]);
+  // Sub-modes grouped under the first-stage mode they came from, in the order
+  // the parents appear. A flat list cannot show that 0a..0e are one mode cut
+  // five ways and m1 is a genuinely different one -- and those are different
+  // claims about the pose cloud.
+  const byPar = [];
+  sibs.forEach(function(m){
+    const g = byPar.find(q => q.pm === m.pm);
+    if (g) g.rows.push(m); else byPar.push({pm: m.pm, rows: [m]});
+  });
+  const nSplit = byPar.filter(g => g.rows.length > 1).length;
   document.getElementById('sibs').innerHTML =
     '<h3>modes of ' + x.p + ' — ' + sibs.length + ' in total, '
     + sibs.filter(m => m.cr !== null).length + ' ranked'
@@ -524,15 +741,35 @@ async function pick(id){
        ? ' · lettered rows (1a, 1b) are sub-splits of ONE first-stage mode (#61)'
        : '') + '</h3>' +
     '<p class="note" style="margin:.2rem 0 .5rem">Tick to draw a mode; click the '
-    + 'row to read it. Several can be shown at once.</p>'
+    + 'row to read it. Several can be shown at once. '
+    + (nSplit
+       ? 'Sub-modes of one first-stage mode share a hue and differ by lightness — '
+         + 'use <b>all</b> on the group header to draw a whole cloud at once.'
+       : '') + '</p>'
     + '<table class="sib"><thead><tr><th>show</th><th>class rank</th><th>poses</th>' +
     '<th>viable</th><th>enrichment</th><th>conditional_eb</th><th>spread</th>' +
     '<th>coherence</th><th>simulated</th></tr></thead><tbody>' +
-    sibs.map(function(m){
-      const col = MODE_CSS[(m.m >= 0 ? m.m : 0) % MODE_CSS.length];
+    byPar.map(function(g){
+      // A GROUP HEADER ONLY WHERE THERE IS A GROUP. A molecule whose modes were
+      // never subdivided gets the flat table it had; inventing a one-row group
+      // for it would imply a second stage that did not happen.
+      const head = g.rows.length < 2 ? '' :
+        '<tr class="subhd"><td colspan="9">'
+        + '<i class="sw" style="background:' + modeCss(g.rows[0]) + '"></i>'
+        + 'first-stage mode ' + g.pm + ' — split into ' + g.rows.length
+        + ' (' + g.rows.map(q => q.ml).join(', ') + ')'
+        + ' <button class="mini" onclick="event.stopPropagation();showGroup('
+        + g.pm + ',1)">all</button>'
+        + '<button class="mini" onclick="event.stopPropagation();showGroup('
+        + g.pm + ',0)">none</button>'
+        + '<span class="gp">' + g.rows.reduce((a,q) => a + (q.n||0), 0)
+        + ' poses across the group</span></td></tr>';
+      return head + g.rows.map(function(m){
+      const col = modeCss(m);
       const badge = m.s === 'md' ? '100 ns' : m.s === 'swept' ? 'swept'
                   : m.s === 'failed' ? 'sweep failed' : 'never';
-      return '<tr class="sibrow' + (m.i === x.i ? ' cur' : '') + '"'
+      return '<tr class="sibrow' + (m.i === x.i ? ' cur' : '')
+        + (g.rows.length > 1 ? ' sub' : '') + '"'
         + ' onclick="pick(\'' + m.i + '\')">'
         + '<td onclick="event.stopPropagation();toggleMode(' + m.m + ')">'
         + '<input type="checkbox" class="mchk"' + (SHOWN.has(m.m) ? ' checked' : '')
@@ -545,6 +782,7 @@ async function pick(id){
         + '<td>' + fmt(m.en, 2) + '</td><td>' + fmt(m.eb, 3) + '</td>'
         + '<td>' + fmt(m.sp, 2) + '</td><td>' + fmt(m.dc, 3) + '</td>'
         + '<td><span class="tag t-' + m.s + '">' + badge + '</span></td></tr>';
+      }).join('');
     }).join('') + '</tbody></table>' +
     (sibs.length > 1 && best.s === 'none'
       ? '<p class="note"><strong>The best-ranked mode of this molecule was never '
@@ -558,6 +796,24 @@ async function pick(id){
     + 'individual poses were not persisted '
     + '(<a href="https://github.com/hallettmiket/inhibition/issues/44">#44</a>).';
 
+  // REFUSED, NOT WARNED ABOUT. The stored asset for these molecules belongs to
+  // an earlier run whose mode numbering is unrelated to this table's, so drawing
+  // model 2 for mode 2 would show a pose from a different clustering of a
+  // different docking run and look entirely normal.
+  if (NOPOSE.has(x.p)){
+    const miss = document.getElementById('vmiss');
+    miss.style.display = '';
+    miss.innerHTML = '<strong>No pose from this run — nothing is drawn.</strong> '
+      + x.p + ' was docked and scored by the current screen (the numbers above '
+      + 'are its own), but its pose files were never written: the screen aimed '
+      + 'them at the previous run\'s directory, where a file already existed, and '
+      + 'the append-only guard skipped the write. The asset still on disk is the '
+      + 'PREVIOUS run\'s, under a different mode numbering, so it is refused '
+      + 'rather than shown. This molecule needs re-docking.';
+    document.getElementById('gl').innerHTML =
+      '<p class="note" style="padding:14px">no pose from this run</p>';
+    return;
+  }
   try {
     if (!PDBCACHE[x.p]){
       const res = await fetch('mode_poses/' + x.p + '.pdb');
@@ -566,8 +822,14 @@ async function pick(id){
     }
     draw(PDBCACHE[x.p], x);
   } catch (e) {
+    // THE REASON, NOT A GUESS AT IT. This said "no pose file for X" for every
+    // failure, including exceptions thrown inside draw() -- so a rendering bug
+    // was reported as a missing file and looked like a data problem. The message
+    // now carries what actually went wrong.
     document.getElementById('gl').innerHTML =
-      '<p class="note" style="padding:14px">no pose file for ' + x.p + '</p>';
+      '<p class="note" style="padding:14px"><strong>No pose drawn.</strong><br>'
+      + String(e && e.message ? e.message : e) + '<br><span class="na">'
+      + 'asset: mode_poses/' + x.p + '.pdb</span></p>';
   }
 }
 
@@ -603,7 +865,7 @@ function draw(pdbTxt, x){
     V.setStyle({model: i+1}, {stick:{
       radius: primary ? 0.22 : 0.14,
       opacity: primary ? 1 : 0.6,
-      colorscheme: carbonScheme(MODE_COLS[(mo >= 0 ? mo : 0) % MODE_COLS.length])}});
+      colorscheme: carbonScheme(modeHex(MBY[mo]))}});
   });
   if (document.getElementById('c-surf').checked){
     // The pocket shell only, and never over Cys113 or a ligand: a mesh drawn on
@@ -616,16 +878,62 @@ function draw(pdbTxt, x){
   V.zoomTo(sel >= 0 ? {model: sel+1} : {resn:'MOL'});
   V.zoom(0.5); V.resize();
   V.render();                       // 3Dmol draws NOTHING without this.
+  // THE ASSET MAY NOT HOLD THIS MODE, AND SILENCE LOOKS IDENTICAL TO A BUG.
+  // 195 molecules carry an asset from an earlier run with a single pose in it
+  // while the ranking lists five modes; asking for model 3 then selects nothing
+  // and the panel renders an empty box. Say which it is.
+  const miss = document.getElementById('vmiss');
+  if (sel < 0){
+    miss.style.display = '';
+    miss.innerHTML = '<strong>This mode has no pose in the stored asset.</strong> '
+      + 'The asset for ' + x.p + ' holds ' + modes.length + ' pose(s) ('
+      + modes.map(q => 'm' + q).join(', ') + ') and this row is m' + x.ml
+      + '. It predates the current screen, so the molecule needs re-docking '
+      + 'before its poses can be shown. The numbers above are unaffected — they '
+      + 'come from the tables, not from this file.';
+  } else { miss.style.display = 'none'; }
 }
 
 document.getElementById('c-surf').addEventListener('change', function(){ if (SEL) pick(SEL); });
+// One render per animation frame at most. A scroll event can fire far more often
+// than the screen refreshes, and rendering per event is how a virtualised list
+// ends up no faster than the thing it replaced.
+(function(){
+  const el = document.getElementById('rail');
+  let queued = false;
+  el.addEventListener('scroll', function(){
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function(){ queued = false; renderRail(); });
+  }, {passive: true});
+  window.addEventListener('resize', function(){ renderRail(); });
+})();
 buildScope();
 railHTML();
+// The rail's clientHeight is 0 until layout settles, so the first window would
+// be sized from the fallback and could come up short. Re-render once the browser
+// has actually laid the page out -- the same double-rAF the 3D panel needs.
+requestAnimationFrame(function(){ requestAnimationFrame(renderRail); });
 </script>
 </body></html>"""
 
 
-def build(title: str, date_str: str, three: str = "") -> str:
+def build(title: str, date_str: str, three: str = "",
+          no_pose: list | None = None) -> str:
+    """`no_pose` names molecules with NO representative from the production run.
+
+    THEIR ASSET MUST NOT BE DRAWN AT ALL, and a warning is not enough. 196
+    molecules kept an asset from 2.2.0 holding that run's five modes while the
+    3.0.0 table lists twelve. Asking for mode 7 drew nothing and was reported;
+    asking for mode 2 drew 2.2.0's mode 2 -- a pose from a DIFFERENT clustering
+    of a different docking run -- silently, beside 3.0.0's numbers. That is the
+    exact defect this whole release exists to remove, reappearing one layer out.
+
+    So the page is given the list and refuses those molecules outright. Refusing
+    is not a limitation to work around: there is no correct pose to show until
+    the molecule is re-docked, and showing a plausible wrong one is worse than
+    showing none.
+    """
     r = gather()
     if r.empty:
         return "<!doctype html><p>no rank tables found</p>"
@@ -634,6 +942,7 @@ def build(title: str, date_str: str, three: str = "") -> str:
            if RECEPTOR.is_file() else "")
     return (_TPL
             .replace("__ROWS__", _rows_json(r))
+            .replace("__NOPOSE__", json.dumps(sorted(no_pose or [])))
             .replace("__RECEPTOR__", rec)
             .replace("__THREE__", three)
             .replace("__CYS__", str(CYS_RESI))

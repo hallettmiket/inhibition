@@ -8,6 +8,16 @@
 # selection, physiological salt and the pH 7.4 docked species each change what is
 # measured, and together they invalidate every 2.2.0 value (CHANGELOG rule).
 
+# THE RUN EVERY DOWNSTREAM STAGE MEANS BY "THE SCREEN".
+#
+# One name, read by the ranking, the GUIs and the sweep worklist, so they cannot
+# disagree about which screen they are describing. Before this existed the
+# production run was whichever topic happened to own the un-suffixed filename,
+# and three separate scripts each decided that with their own `== "nac_v3"`
+# test -- which is how 3.0.0's ranking silently read 2.1.0's aggregates.
+run:
+  topic: nac_v4              # 3.0.0. Bump with the screen, never on its own.
+
 target:
   name: Pin1
   domain: catalytic          # the PPIase domain, not the WW domain
@@ -68,6 +78,99 @@ sweep_rule:
                              # for 242 of 242 molecules while ranking per mode,
                              # and 5 modes that rank FIRST in their class were
                              # never simulated.
+
+  # -------------------------------------------------------------------------
+  # WHICH CHEMISTRY EARNS A SIMULATION, AND HOW DEEP (@tt8804, 2026-08-12)
+  # -------------------------------------------------------------------------
+  # A CAMPAIGN DECISION, NOT A TARGET PROPERTY. The screen still screens all
+  # nine warhead classes and their rows stay on disk; this gates only what earns
+  # GPU time. Narrowing the screen instead would throw away the comparison that
+  # makes an enrichment floor meaningful, and the excluded classes are the
+  # control group for "is this class worth carrying next time".
+  #
+  # The three families are the chemistry the lab will actually synthesise.
+  # Dropping the other four removes 618 of 5,397 molecules but only 4,303 of
+  # 31,505 modes -- 14%. Scope is NOT what makes this affordable; depth is.
+  scope:
+    # POOLING WITHIN A FAMILY IS STATISTICALLY CLEAN, and that was checked
+    # rather than assumed: `enrichment` is viable_fraction / isotropic_null, and
+    # all five classes below carry isotropic_null = 0.0816 -- bdhi is
+    # sn2_ring_opening, the other two michael_addition, and the null is
+    # identical. So the two-class families rank on one scale.
+    families:
+      acrylamide:     [acrylamide]
+      naphthoquinone: [naphthoquinone_benzo, naphthoquinone_c2]
+      bdhi:           [bdhi_c4, bdhi_c5]
+
+  # PER FAMILY, NOT GLOBAL, AND THAT IS THE WHOLE POINT OF THE QUOTA. Since all
+  # three families share a null they COULD be ranked in one list -- and then
+  # acrylamide, which is 4,223 of the 4,779 in-scope molecules and 76% of the
+  # in-scope modes, would take essentially every slot. The library is lopsided
+  # because of how it was generated, not because acrylamides are more promising,
+  # and the deliverable is a top-5 a chemist can choose across warhead
+  # chemistries. Equal depth per family buys that diversity explicitly.
+  max_depth: 400
+
+  # A BUDGET FLOOR, AND IT IS DELIBERATELY NOT `floor` ABOVE. `floor` is the
+  # capture-validated threshold: the one the pilot measures, that provably keeps
+  # 95% of productive modes. It is still null and must stay null until that pilot
+  # runs. This is a different quantity with a different justification -- the
+  # enrichment below which we decline to spend GPU time -- and giving it the same
+  # name would let a budget decision be read as a chemistry result.
+  #
+  # Measured on the 3.0.0 ranking, modes clearing each floor (2 GPUs, 20.9 min
+  # median per sweep):
+  #
+  #     floor   acryl    bdhi   naphtho   total   days
+  #      2.0    3,828     643      706    5,177   37.6
+  #      3.0    1,385     455      482    2,322   16.9
+  #      4.0      803     308      347    1,458   10.6   <- set here
+  #      5.0      423     197      225      845    6.1
+  #
+  # 4.0 WITH max_depth 400 IS CHOSEN FOR ITS SHAPE, not just its total. bdhi
+  # (308) and naphthoquinone (347) both fall UNDER the cap, so they are limited
+  # by chemistry and run to exhaustion; only acrylamide is truncated on budget,
+  # and acrylamide is the family that is over-represented for reasons of library
+  # construction rather than promise. Run the two smaller families first and they
+  # are complete in 4.8 days, with acrylamide open-ended after that.
+  #
+  # WHAT IS STILL UNPROVEN. That docking-derived enrichment predicts sweep
+  # outcome at all. Class rank was at chance for it (AUC 0.518 over 188 swept
+  # modes), and enrichment has not been tested the same way because the 2.2.0
+  # sweeps were run on modes that no longer exist. Until the pilot runs, this
+  # floor is a spending rule, not a claim about which molecules react.
+  budget_floor: 4.0
+
+  # A FREE EXCLUSION, IF IT HOLDS. Modes with viable_fraction == 0 have no docked
+  # pose meeting the near-attack criterion, so they clear no floor above zero:
+  # 30% of acrylamide, 61% of bdhi, 67% of naphthoquinone. Whether such a mode
+  # can still sweep productive is the single most valuable thing the pilot
+  # measures, which is why its design samples that stratum one-sidedly.
+
+  # THE COST BASIS IS MEASURED, NOT ASSUMED. Over 251 completed 10 ns sweeps the
+  # median end-to-end wall time is 20.9 min (p90 30.4; mdrun itself 18.6 min at
+  # 774 ns/day, the rest setup). On two GPUs that is 138 sweeps/day:
+  #
+  #     depth/family    sweeps   days (median)   days (p90)
+  #        100            300         2.2            3.2
+  #        150            450         3.3            4.7
+  #        250            750         5.4            7.9      <- set here
+  #        500          1,500        10.9           15.8
+  #
+  # Sweeping every in-scope mode -- 29,255 projected -- would take 212 days, so
+  # a cap is not a refinement, it is the only thing that makes this runnable.
+  #
+  # THE CAP AND THE FLOOR ARE COMPLEMENTARY AND BOTH APPLY. The floor says "do
+  # not simulate this even if there is budget"; the cap says "there is no more
+  # budget even if it clears the floor". Whichever binds first wins, and a run
+  # must report which did -- a shortlist that stopped on budget is a different
+  # claim from one that stopped on chemistry.
+  #
+  # STILL TO CHECK, ONCE THE 3.0.0 RANKING EXISTS: how many DISTINCT MOLECULES
+  # the top 250 modes of a family cover. Sub-splitting puts ~5.8 modes on each
+  # molecule, so if a family's top modes cluster onto a few molecules, 250 modes
+  # could be 45 compounds -- enough for a top-5, but worth knowing rather than
+  # discovering later.
 
 # ---------------------------------------------------------------------------
 # Simulation

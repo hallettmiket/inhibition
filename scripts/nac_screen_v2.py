@@ -96,16 +96,32 @@ log = logging.getLogger("nac-v2")
 #: dedup would NOT collapse them -- the two tables would simply concatenate into
 #: one frame with two incompatible meanings and no error. Separate topics make
 #: that impossible, and leave the 2.1.0 data intact for comparison.
-OUT = sout.Topic("blacksmith", "nac_v3")
-#: 2.2.0 poses go to their OWN directory, and this is not cosmetic.
+#: The topic every output of a run is keyed on. Rebound ONCE in `main()` from
+#: `--topic`; nothing below may hardcode a topic name again.
+TOPIC = "nac_v3"
+BLACKSMITH = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
+OUT = sout.Topic("blacksmith", TOPIC)
+#: A run's poses go to the SAME topic as its tables, and this is not cosmetic --
+#: it is the defect that cost 2.2.0 and very nearly cost 3.0.0.
 #:
 #: `write_sdf` is guarded by `if not sdf.exists()` -- correct under the
-#: append-only rule, never overwrite. But every molecule already has a file in
-#: `nac_v2_poses` from the 200-run screen, so pointing 2.2.0 at that directory
-#: would have written NONE of the new poses and left every downstream stage
-#: reading the old energy-selected, un-protonated ones. The re-dock would have
-#: completed, reported success, and changed nothing.
-POSE_DIR = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v3_poses")
+#: append-only rule, never overwrite. But `--topic` used to rebind `OUT` alone,
+#: so a re-run wrote its tables to the new topic and its poses to whatever
+#: directory was hardcoded here. Every molecule already had a file there, so the
+#: guard skipped ALL of them: the screen completed, reported success, and left
+#: every downstream stage reading poses from an earlier run.
+#:
+#: That is not hypothetical. Measured 2026-08-12, mid-3.0.0-run: 5,772 of 5,774
+#: representative files were still the Aug-07 2.1.0 ones, 80% of them holding a
+#: single pose, while the tables described modes computed from fresh 500-run
+#: clouds. The 2.2.0 symptom -- "pose counts differ 2 to 15 from the score
+#: table" -- was this, and writing it off did not fix it because the cause is
+#: here, not in the data.
+#:
+#: Deriving both from TOPIC means a new topic is an empty directory, so the
+#: append-only guard protects the previous run instead of silently voiding the
+#: current one.
+POSE_DIR = BLACKSMITH / f"{TOPIC}_poses"
 #: RETIRED. Every pose is persisted now; this survives only so the docstring
 #: below and #23/#30 can refer to what was removed. Nothing reads it.
 KEEP_TOP = 20        # noqa: F841  (retired -- see nac_screen_v2 docstring)
@@ -116,7 +132,65 @@ _COORD_TOL = 0.05
 #: populated for a subset (the molecules actually under review) without
 #: disturbing them. Poses are written in mode order and stamped with `mode`, so
 #: a reader can show one cluster at a time.
-ALL_POSE_DIR = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v3_allposes")
+ALL_POSE_DIR = BLACKSMITH / f"{TOPIC}_allposes"
+
+
+def representative_indices(labels, anchor, dmat, mode_ids) -> list:
+    """One pose index per mode: the typical member of its well-anchored quartile.
+
+    THE REPRESENTATIVE IS A TYPICAL POSE FROM THE WELL-ANCHORED QUARTILE, NOT
+    THE BEST-ANCHORED ONE.
+
+    @tt8804 warned against prioritising attack geometry over realistic poses.
+    Measured on 15 crystal complexes, picking one pose out of the dominant mode:
+
+        ceiling: best pose in the mode              93.3%
+        medoid of the top-25% by anchoring          33.3%   <- adopted
+        medoid of the whole mode                    26.7%
+        argmax anchoring                             6.7%   <- was here
+
+    Anchoring is informative -- across the whole pose population it correlates
+    with being CLOSER to both the crystal and Boltz-2's independent prediction
+    (median rho -0.14 for each). Its ARGMAX is not: the maximum of a noisy score
+    is an outlier, typically a strained pose that happens to point the warhead
+    well. Narrowing on anchoring and then taking a TYPICAL member of what
+    survives beats either alone.
+
+    n = 15, so 33.3% against 26.7% is one molecule and the quartile width is not
+    tuned. What is not one molecule is 6.7% against 26.7%: argmax is the thing to
+    stop doing.
+
+    A FUNCTION, not an inline block, because `rebuild_representatives` has to
+    apply the identical rule to a persisted cloud. Two copies of this would be
+    two definitions of "the representative", free to drift while both looked
+    right -- the same shape of defect as the topic that only half moved.
+    """
+    reps = []
+    for k in mode_ids:
+        idx = np.flatnonzero(np.asarray(labels) == k)
+        a = np.asarray(anchor)[idx]
+        sub = dmat[np.ix_(idx, idx)]
+        if np.all(np.isnan(a)) or len(idx) < 4:
+            reps.append(int(idx[np.argmin(sub.mean(axis=1))]))
+            continue
+        keep = np.flatnonzero(a >= np.nanpercentile(a, 75))
+        if len(keep) < 2:
+            reps.append(int(idx[np.argmin(sub.mean(axis=1))]))
+            continue
+        s2 = sub[np.ix_(keep, keep)]
+        reps.append(int(idx[keep[np.argmin(s2.mean(axis=1))]]))
+    return reps
+
+
+def topic_paths(topic: str) -> tuple:
+    """Every output location for a run, derived from its topic alone.
+
+    One function so there is one place a topic can be forgotten, and so a test
+    can assert the three move together. Returns (OUT, POSE_DIR, ALL_POSE_DIR).
+    """
+    return (sout.Topic("blacksmith", topic),
+            BLACKSMITH / f"{topic}_poses",
+            BLACKSMITH / f"{topic}_allposes")
 
 
 def write_sdf(mol, order: list[int], dest: Path,
@@ -377,20 +451,7 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         # n = 15, so 33.3% against 26.7% is one molecule and the quartile width
         # is not tuned. What is not one molecule is 6.7% against 26.7%: argmax is
         # the thing to stop doing.
-        reps = []
-        for k in mode_ids:
-            idx = np.flatnonzero(labels == k)
-            a = anchor[idx]
-            sub = dmat[np.ix_(idx, idx)]
-            if np.all(np.isnan(a)) or len(idx) < 4:
-                reps.append(int(idx[np.argmin(sub.mean(axis=1))]))
-                continue
-            keep = np.flatnonzero(a >= np.nanpercentile(a, 75))
-            if len(keep) < 2:
-                reps.append(int(idx[np.argmin(sub.mean(axis=1))]))
-                continue
-            s2 = sub[np.ix_(keep, keep)]
-            reps.append(int(idx[keep[np.argmin(s2.mean(axis=1))]]))
+        reps = representative_indices(labels, anchor, dmat, mode_ids)
         if not sdf.exists():                       # append_only: never overwrite
             write_sdf(mol, reps, sdf, modes=mode_ids)
 
@@ -483,7 +544,7 @@ def main() -> None:
     ap.add_argument("--all-poses", action="store_true",
                     default=bool(_cfg("docking.persist_all_poses", False)),
                     help="also write every docked pose, grouped by mode, to "
-                         "nac_v3_allposes/")
+                         "<topic>_allposes/")
     # A NAMED SUBSET, so poses can be filled in for the molecules actually under
     # review without re-docking 5,769 of them.
     ap.add_argument("--only", default=None,
@@ -495,11 +556,19 @@ def main() -> None:
     ap.add_argument("--topic", default="nac_v3",
                     help="output topic; use a fresh one for targeted re-runs")
     args = ap.parse_args()
-    global OUT
-    if args.topic != "nac_v3":
-        OUT = sout.Topic("blacksmith", args.topic)
+    # ALL THREE MOVE TOGETHER, UNCONDITIONALLY. Rebinding `OUT` alone -- and only
+    # when the topic was not the default -- is what sent 3.0.0's tables to nac_v4
+    # and its poses to nac_v3_*, where the append-only guard silently dropped
+    # every one of them. Tables and poses are the same claim about the same run;
+    # a code path that can separate them will eventually separate them.
+    global TOPIC, OUT, POSE_DIR, ALL_POSE_DIR
+    TOPIC = args.topic
+    OUT, POSE_DIR, ALL_POSE_DIR = topic_paths(TOPIC)
     logging.basicConfig(level=(logging.DEBUG if os.environ.get("NACV2_DEBUG") else logging.INFO),
                         format=f"%(levelname)s [s{args.shard}] %(message)s")
+    log.info("topic %s -> tables %s, poses %s, clouds %s",
+             TOPIC, OUT.name if hasattr(OUT, "name") else TOPIC,
+             POSE_DIR.name, ALL_POSE_DIR.name)
     os.nice(19)
 
     R.resolve_3ikd_ian()

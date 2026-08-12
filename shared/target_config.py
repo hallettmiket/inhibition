@@ -64,6 +64,75 @@ def sweep_floor(cfg: dict | None = None) -> float:
     return float(v)
 
 
+def sweep_families(cfg: dict | None = None) -> dict:
+    """{family: [warhead_class, ...]} -- the chemistry that earns a simulation.
+
+    Raises if the scope is absent rather than defaulting to "everything". A run
+    that silently widened its own scope would spend the budget on classes nobody
+    chose, and the shortlist would not say so.
+    """
+    fam = get("sweep_rule.scope.families", cfg, default=None)
+    if not fam:
+        raise ConfigError(
+            "sweep_rule.scope.families is not set. The sweep scope is a campaign "
+            "decision -- which warhead chemistry the lab will synthesise -- and "
+            "it has no safe default. See config/target.yaml.")
+    return {str(k): [str(c) for c in v] for k, v in fam.items()}
+
+
+def sweep_classes(cfg: dict | None = None) -> set:
+    """Every warhead class in scope, flattened."""
+    return {c for cs in sweep_families(cfg).values() for c in cs}
+
+
+def family_of(cfg: dict | None = None) -> dict:
+    """{warhead_class: family}. Inverted once so callers never re-derive it."""
+    out = {}
+    for fam, classes in sweep_families(cfg).items():
+        for c in classes:
+            if c in out:
+                raise ConfigError(f"{c} appears in two families: {out[c]}, {fam}")
+            out[c] = fam
+    return out
+
+
+def sweep_budget_floor(cfg: dict | None = None) -> float:
+    """The enrichment below which we decline to spend GPU time.
+
+    DISTINCT FROM `sweep_floor`, and the distinction is the point. `sweep_floor`
+    is the capture-validated threshold the pilot measures and it refuses until
+    that pilot has run. This one is a spending rule chosen from the ranking's own
+    enrichment distribution and the GPU budget. Sharing a name would let a
+    budget decision be reported as a chemistry result.
+    """
+    v = get("sweep_rule.budget_floor", cfg, default=None)
+    if v is None:
+        raise ConfigError("sweep_rule.budget_floor is not set; see config/target.yaml")
+    return float(v)
+
+
+def sweep_max_depth(cfg: dict | None = None) -> int:
+    """Modes per FAMILY that may be swept. A budget ceiling, not a threshold.
+
+    Distinct from `sweep_floor`, and both apply: the floor is a statement about
+    chemistry (this mode is not worth simulating), the cap is a statement about
+    money (there is no more GPU time). A caller must be able to report which one
+    stopped it, so they are separate numbers with separate readers.
+    """
+    v = get("sweep_rule.max_depth", cfg, default=None)
+    if v is None:
+        raise ConfigError("sweep_rule.max_depth is not set; see config/target.yaml")
+    return int(v)
+
+
+def _scope_line(c: dict) -> str:
+    """One line naming the families in scope and the depth cap, or UNSET."""
+    sr = c.get("sweep_rule", {}) or {}
+    fam = (sr.get("scope", {}) or {}).get("families", {}) or {}
+    shown = ", ".join(f"{k} ({len(v)})" for k, v in fam.items()) or "UNSET"
+    return f"{shown}  max_depth={sr.get('max_depth', 'UNSET')}/family"
+
+
 def summary(cfg: dict | None = None) -> str:
     """One block a run can print so its settings are in its own log."""
     c = cfg if cfg is not None else load()
@@ -80,6 +149,7 @@ def summary(cfg: dict | None = None) -> str:
         f"sweep rule  {c.get('sweep_rule', {}).get('parameter')} >= "
         f"{floor if floor is not None else 'UNSET (pilot required)'}, "
         f"select_by={c.get('sweep_rule', {}).get('select_by')}",
+        f"sweep scope {_scope_line(c)}",
         f"md          sweep {m.get('sweep_ps')} ps, prod {m.get('production_ps')} ps, "
         f"salt {m.get('salt_molar')} M",
         f"chemistry   docked species {c.get('chemistry', {}).get('docked_species')}",
