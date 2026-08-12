@@ -335,6 +335,47 @@ def _stage2(pts) -> str:
 </svg>"""
 
 
+def _stage2b(pts) -> str:
+    """The SECOND pass: one mode, cut again on whole-molecule shape (#61).
+
+    Drawn on mode 1 only, and drawn as a cut through an EXISTING hull rather than
+    as new blobs, because that is what it is: the warhead grouping is unchanged
+    and the cut is inside it. A reader who sees three fresh clouds would think
+    the first pass had been redone.
+    """
+    m = MODES[0]
+    cx, cy, sx, sy = m["cx"], m["cy"], m["sx"] * 2.1, m["sy"] * 2.1
+    col = m["col"]
+    # Two lobes inside the one hull, plus the medoid each contributes.
+    lobes = ""
+    for i, (dx, dy, lab) in enumerate(((-0.42, -0.18, "1a"), (0.40, 0.20, "1b"))):
+        lx, ly = cx + dx * sx, cy + dy * sy
+        lobes += (
+            f"<ellipse cx='{lx:.0f}' cy='{ly:.0f}' rx='{sx * .52:.0f}' "
+            f"ry='{sy * .58:.0f}' fill='{col}' opacity='.16' stroke='{col}' "
+            f"stroke-width='1.2'/>"
+            f"<circle cx='{lx:.0f}' cy='{ly:.0f}' r='4.2' fill='{col}'/>"
+            f"<text x='{lx:.0f}' y='{ly - sy * .58 - 5:.0f}' class='mtag' "
+            f"fill='{col}' text-anchor='middle'>{lab}</text>")
+    others = "".join(
+        f"<ellipse cx='{o['cx']}' cy='{o['cy']}' rx='{o['sx'] * 2.1:.0f}' "
+        f"ry='{o['sy'] * 2.1:.0f}' fill='{o['col']}' opacity='.06' "
+        f"stroke='{o['col']}' stroke-width='1' stroke-dasharray='3 3'/>"
+        f"<text x='{o['cx']}' y='{o['cy'] - o['sy'] * 2.1 - 6:.0f}' class='mtag' "
+        f"fill='{o['col']}' opacity='.5'>mode {o['key']}</text>" for o in MODES[1:])
+    return f"""<svg viewBox="0 0 430 300" class="dia" role="img"
+ aria-label="Mode 1 cut again into sub-modes 1a and 1b on whole-molecule shape">
+{_pocket('2b')}
+{others}
+<ellipse cx='{cx}' cy='{cy}' rx='{sx:.0f}' ry='{sy:.0f}' fill='none'
+ stroke='{col}' stroke-width='1' stroke-dasharray='3 3' opacity='.55'/>
+{_dots(pts, only=m['key'])}
+{lobes}
+<text x="14" y="292" class="cap">mode 1 cut again &mdash; anything wider than
+ 2 &#8491; gets its own row</text>
+</svg>"""
+
+
 #: Mode colours, matching MODES above.
 MODE_COLS = {"1": "#0072ce", "2": "#7b5ea7", "3": "#c2703d"}
 #: Molecule colours, deliberately unlike the mode colours.
@@ -1115,7 +1156,7 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
    can be matched to a shape in the other without being told to. */
 .pair{{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}}
 /* dots -> cloud -> one pose, left to right. */
-.trio{{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;align-items:start}}
+.trio{{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 10px;align-items:start}}
 .trio figure{{margin:0;min-width:0}}
 .trio figcaption{{font-size:9px;color:var(--muted);text-align:center;
  margin-top:3px;line-height:1.3}}
@@ -1163,9 +1204,10 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
 
 <div class="step">
  <div><div class="trio">
-   <figure>{_stage2(pts)}<figcaption>schematic &mdash; one dot per pose</figcaption></figure>
+   <figure>{_stage2(pts)}<figcaption>pass 1 &mdash; by warhead</figcaption></figure>
+   <figure>{_stage2b(pts)}<figcaption>pass 2 &mdash; by shape, inside one mode</figcaption></figure>
    <figure>{real_all}<figcaption>real &mdash; all {real.get('n', 0)} poses, by mode</figcaption></figure>
-   <figure>{real_one}<figcaption>one pose per mode &mdash; the three medoids</figcaption></figure>
+   <figure>{real_one}<figcaption>one pose per mode &mdash; the medoids</figcaption></figure>
   </div></div>
  <div><p class="n0">Step 2 &middot; pose splitting</p>
   <h2>Pose splitting &mdash; the mess is several binding modes</h2>
