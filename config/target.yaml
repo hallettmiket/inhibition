@@ -18,6 +18,22 @@
 run:
   topic: nac_v4              # 3.0.0. Bump with the screen, never on its own.
 
+  # WHICH GENERATION TIERS ARE RANKED (@tt8804, 2026-08-12: "we are only doing
+  # t_4"). Applied BEFORE ranking, so `class_rank` is a position among the
+  # molecules actually in contention rather than a position in a list two thirds
+  # of which is not.
+  #
+  # THIS IS WHY ACRYLAMIDE LOOKED LIKE THE LIBRARY. T_3 is REINVENT de novo
+  # output and it is 96% acrylamide -- 4,062 of 4,249 acrylamide molecules, and
+  # 19,888 of the 34,059 modes. Every other warhead class is 100% T_4 at 162-188
+  # molecules. So "acrylamide is 76% of the in-scope modes" was a statement about
+  # which generator ran, not about which chemistry is promising, and the depth it
+  # implied (85 modes clearing the floor) was 84 T_3 rows and one T_4 row.
+  #
+  # T_3 rows stay on disk and stay screened; this decides what is RANKED and
+  # therefore what the GUI shows and what the sweep can select.
+  tiers: ["T4"]
+
 target:
   name: Pin1
   domain: catalytic          # the PPIase domain, not the WW domain

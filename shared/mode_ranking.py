@@ -92,7 +92,15 @@ def gather() -> pd.DataFrame:
     # cannot end up describing different screens.
     from shared import target_config as tc
     topic = tc.get("run.topic")
+    # TIER SCOPE IS READ HERE TOO, NOT ONLY IN THE RANKING. Dropping a tier from
+    # `rank_v2` stops it writing a NEW file for that tier; it does not remove the
+    # old one, and this reader takes the newest match for each tier
+    # independently. Without the same filter the view would keep showing a T_3
+    # table from before the decision, beside T_4 rows ranked without it.
+    want = {str(t).upper() for t in tc.get("run.tiers", default=["T3", "T4"])}
     for tier, score in (("T4", "conditional_eb"), ("T3", "enrichment_conditional")):
+        if tier not in want:
+            continue
         f = _latest(f"rank_v2/rank_v2_{tier}_{topic}_{score}_*.csv")
         if f is None:
             continue

@@ -634,6 +634,22 @@ def main() -> None:
         ragg.to_csv(dest, index=False)
         log.info("references: %d scored -> %s", len(ragg), Path(dest).name)
 
+    # ONLY THE TIERS IN SCOPE, AND FILTERED BEFORE RANKING. `class_rank` is a
+    # position within a warhead class, so it only means something if the list it
+    # counts against is the list actually in contention. Ranking T_3 and T_4
+    # together and dropping T_3 afterwards would leave acrylamide's T_4 rows
+    # carrying ranks earned against 4,062 REINVENT molecules that nobody intends
+    # to make.
+    try:
+        from shared import target_config as tc
+        want = [str(t).upper() for t in tc.get("run.tiers")]
+    except Exception:                                      # noqa: BLE001
+        want = ["T3", "T4"]
+    skipped = sorted(set(ok.tier) - set(want))
+    if skipped:
+        log.info("tier scope %s: %d of %d rows dropped before ranking (%s)",
+                 want, int((~ok.tier.isin(want)).sum()), len(ok), ", ".join(skipped))
+    ok = ok[ok.tier.isin(want)]
     for tier in ("T3", "T4"):
         g = ok[ok.tier == tier]
         if g.empty:
