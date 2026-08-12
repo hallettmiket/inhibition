@@ -447,17 +447,23 @@ ROWS.forEach(function(x){ x.i = x.p + '_m' + x.m; });
 const NOPOSE = new Set(__NOPOSE__);
 const MODE_COLS = [0x0072ce, 0x7b5ea7, 0xc2703d, 0x0f7a54, 0xb3261e, 0x8a6d1f];
 const MODE_CSS  = ['#0072ce','#7b5ea7','#c2703d','#0f7a54','#b3261e','#8a6d1f'];
-// HUE BY FIRST-STAGE MODE, LIGHTNESS BY SUB-SPLIT (#61).
+// HUE BY FIRST-STAGE CLUSTER, LIGHTNESS BY POSITION WITHIN IT (#61).
 //
-// Sub-modes were being coloured by their renumbered mode index, so 0a..0e -- one
-// binding mode cut five ways -- came out in five unrelated hues and read as five
-// unrelated modes. That inverts the claim: the whole point of the second stage
-// is that these are ALTERNATIVE SCAFFOLD PLACEMENTS OF ONE WARHEAD GEOMETRY, and
-// a reader comparing them must be able to see that at a glance.
+// The colour records PROVENANCE -- which first-stage cluster a mode was cut out
+// of -- so a reader can draw one cluster's rows together and see how they sit
+// relative to each other. That is a genuinely useful comparison and it is why
+// the grouping survives.
 //
-// One hue per parent mode, five lightness steps within it. Different first-stage
-// modes stay as far apart as they ever were; sub-modes of one parent now read as
-// a family.
+// IT IS NOT A STATEMENT THAT THEY ARE ALIKE. This comment used to say the
+// second stage produces "alternative scaffold placements of one warhead
+// geometry", i.e. rows differing only away from the reactive end. Measured on
+// the 3.0.0 run that is false for a large minority: the first stage is a
+// chaining cluster (DBSCAN, eps 3 A with 2 A per radian, so poses in one place
+// join at up to 86 degrees apart and chains extend indefinitely), and 22% of
+// split clusters hold modes whose median reactive-atom distance spans more than
+// the criterion's entire 2.8-4.2 A window. Same hue, opposite sides of the
+// window. The rows are therefore NAMED by their own mode index and the shared
+// hue is labelled as provenance in the group header.
 const MODE_HUES = [205, 268, 25, 158, 4, 45];
 function subIx(m){
   // `ml` is '3' when a mode was never subdivided and '3b' when it was.
@@ -574,11 +580,18 @@ function rowHTML(x){
     '<img class="thumb" loading="lazy" alt="" src="mode_thumbs/' + x.p + '.svg">' +
     '<span class="body"><span class="l1">' +
     '<span class="mid-id">' + x.p +
-    // THE MODE IS NAMED BY ITS LABEL, NOT ITS INDEX. The rail used to print
-    // the bare ident (`..._m3`), which after sub-splitting is a renumbered
-    // index that says nothing about which binding mode it belongs to. `0d`
-    // says: fourth sub-split of first-stage mode 0.
-    ' <span class="mtag" style="background:' + modeCss(x) + '">m' + x.ml +
+    // THE MODE IS NAMED BY ITS OWN INDEX, which is its identity everywhere else
+    // -- `t4_x_m3` in the rank table, the sweep table and the pose file. This
+    // printed the `0d` letter label for a while, on the reasoning that the
+    // letter says which first-stage mode a row came from. It does, and that is
+    // the problem: a lettered name reads as a variant of `0a`, and sub-modes of
+    // one first-stage mode are NOT variants of each other. Measured on this
+    // run, 22% of split first-stage modes hold sub-modes whose median
+    // reactive-atom distance spans more than the criterion's entire 2.8-4.2 A
+    // window, and 18% have some sub-modes inside the window and some outside.
+    // The first-stage origin is still shown -- as provenance, in the group
+    // header and the detail caption, not as the row's name.
+    ' <span class="mtag" style="background:' + modeCss(x) + '">m' + x.m +
     '</span></span>' +
     '<span class="eng">' + fmt(x.eb, 2) + '</span></span>' +
     '<span class="l2"><span class="wc">' + x.c + '</span>' +
@@ -685,12 +698,12 @@ async function pick(id){
   SEL = id; markSel();
   document.getElementById('vempty').style.display = 'none';
   document.getElementById('vfull').style.display = '';
-  // Names the sub-split explicitly rather than showing a renumbered index: `0c`
-  // is the third scaffold placement of first-stage mode 0, and "mode 2" -- which
-  // is what the ident says -- is not that.
+  // The ident names the mode; the first-stage cluster is stated after it as
+  // PROVENANCE. "sub-mode 0c of first-stage mode 0" was the old wording and it
+  // asserted a similarity the geometry does not support -- see the rail.
   document.getElementById('vname').textContent =
     x.i + (x.ml !== String(x.m)
-           ? '   (sub-mode ' + x.ml + ' of first-stage mode ' + x.pm + ')' : '');
+           ? '   (from first-stage cluster ' + x.pm + ', ranked on its own)' : '');
   // The same depiction the rail uses, at panel size. It is an SVG, so one file
   // serves both; drawing a second at a larger size would be a second answer to
   // "what does this molecule look like".
@@ -732,10 +745,12 @@ async function pick(id){
   MBY = {}; sibs.forEach(function(m){ MBY[m.m] = m; });
   const RK = m => (m.cr === null || m.cr === undefined) ? 1e9 : m.cr;
   const best = sibs.reduce((a,b) => (RK(b) < RK(a) ? b : a), sibs[0]);
-  // Sub-modes grouped under the first-stage mode they came from, in the order
-  // the parents appear. A flat list cannot show that 0a..0e are one mode cut
-  // five ways and m1 is a genuinely different one -- and those are different
-  // claims about the pose cloud.
+  // Grouped by the first-stage cluster each mode came from, in the order the
+  // parents appear. The grouping is PROVENANCE and a drawing convenience -- it
+  // records that these rows were cut out of one first-stage cluster, which is
+  // worth seeing because that cluster is chained and often not homogeneous. It
+  // is NOT a claim that the rows in a group are variants of one binding mode;
+  // every number on the row was computed treating it as its own mode.
   const byPar = [];
   sibs.forEach(function(m){
     const g = byPar.find(q => q.pm === m.pm);
@@ -746,13 +761,16 @@ async function pick(id){
     '<h3>modes of ' + x.p + ' — ' + sibs.length + ' in total, '
     + sibs.filter(m => m.cr !== null).length + ' ranked'
     + (new Set(sibs.map(m => m.pm)).size < sibs.length
-       ? ' · lettered rows (1a, 1b) are sub-splits of ONE first-stage mode (#61)'
+       ? ' · every row is its own mode, ranked and swept independently (#61)'
        : '') + '</h3>' +
     '<p class="note" style="margin:.2rem 0 .5rem">Tick to draw a mode; click the '
     + 'row to read it. Several can be shown at once. '
     + (nSplit
-       ? 'Sub-modes of one first-stage mode share a hue and differ by lightness — '
-         + 'use <b>all</b> on the group header to draw a whole cloud at once.'
+       ? 'Rows cut from one first-stage cluster share a hue and differ by '
+         + 'lightness — use <b>all</b> on the group header to draw the whole '
+         + 'cluster at once. <b>A shared hue does not mean the rows are '
+         + 'alike:</b> the first stage chains, so one cluster can hold modes on '
+         + 'opposite sides of the 2.8–4.2 Å window.'
        : '') + '</p>'
     + '<table class="sib"><thead><tr><th>show</th><th>class rank</th><th>poses</th>' +
     '<th>viable</th><th>enrichment</th><th>conditional_eb</th><th>spread</th>' +
@@ -764,8 +782,8 @@ async function pick(id){
       const head = g.rows.length < 2 ? '' :
         '<tr class="subhd"><td colspan="9">'
         + '<i class="sw" style="background:' + modeCss(g.rows[0]) + '"></i>'
-        + 'first-stage mode ' + g.pm + ' — split into ' + g.rows.length
-        + ' (' + g.rows.map(q => q.ml).join(', ') + ')'
+        + 'first-stage cluster ' + g.pm + ' — ' + g.rows.length
+        + ' separate modes (' + g.rows.map(q => 'm' + q.m).join(', ') + ')'
         + ' <button class="mini" onclick="event.stopPropagation();showGroup('
         + g.pm + ',1)">all</button>'
         + '<button class="mini" onclick="event.stopPropagation();showGroup('
@@ -782,7 +800,7 @@ async function pick(id){
         + '<td onclick="event.stopPropagation();toggleMode(' + m.m + ')">'
         + '<input type="checkbox" class="mchk"' + (SHOWN.has(m.m) ? ' checked' : '')
         + ' onclick="event.stopPropagation();toggleMode(' + m.m + ')">'
-        + '<i class="sw" style="background:' + col + '"></i>m' + m.ml + '</td>'
+        + '<i class="sw" style="background:' + col + '"></i>m' + m.m + '</td>'
         + '<td' + (m.i === best.i ? ' class="win"' : '') + '>'
         + (m.cr === null ? '<span class="na">unranked</span>' : m.cr) + '</td>'
         + '<td>' + (m.n === null ? '—' : m.n) + '</td>'
@@ -895,7 +913,7 @@ function draw(pdbTxt, x){
     miss.style.display = '';
     miss.innerHTML = '<strong>This mode has no pose in the stored asset.</strong> '
       + 'The asset for ' + x.p + ' holds ' + modes.length + ' pose(s) ('
-      + modes.map(q => 'm' + q).join(', ') + ') and this row is m' + x.ml
+      + modes.map(q => 'm' + q).join(', ') + ') and this row is m' + x.m
       + '. It predates the current screen, so the molecule needs re-docking '
       + 'before its poses can be shown. The numbers above are unaffected — they '
       + 'come from the tables, not from this file.';
