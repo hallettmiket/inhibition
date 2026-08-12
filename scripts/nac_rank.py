@@ -71,6 +71,20 @@ def latest_frame(subdir: str) -> Path:
     return Path(max(fs, key=lambda p: int(re.search(r"_(\d+)\.parquet", p).group(1))))
 
 
+def _cfg(key: str, default):
+    """One target setting, or `default` if there is no config at all.
+
+    Deliberately tolerant of a MISSING config and intolerant of a missing KEY:
+    an older checkout with no config keeps working, but a config that exists and
+    is silent about something the code needs should fail rather than be guessed.
+    """
+    try:
+        from shared import target_config as tc
+        return tc.get(key, default=default)
+    except Exception:                                      # noqa: BLE001
+        return default
+
+
 def load_candidates() -> list[ns.Candidate]:
     """Every generated candidate carrying a warhead of known mechanism.
 
@@ -89,6 +103,23 @@ def load_candidates() -> list[ns.Candidate]:
         if "rejected_at" in df.columns:
             df = df[df.rejected_at.isna()]
         log.info("%s: %s -> %d candidates", approach, f.name, len(df))
+        # THE SPECIES THAT GETS DOCKED IS THE ONE THE CONFIG NAMES (#58).
+        #
+        # This used `canonical_smiles` unconditionally -- the NEUTRAL form. The
+        # pH 7.4 decision was stamped onto the frame as `docked_smiles` and then
+        # read by nothing, so a re-screen would have docked the neutral species
+        # while every artefact said otherwise. Found by auditing the build rather
+        # than by anything failing, which is how this class of defect always
+        # arrives here.
+        want_ph = _cfg("chemistry.docked_species", "neutral") == "ph_7.4"
+        require_ok = bool(_cfg("chemistry.require_docked_species_ok", False))
+        has_species = "docked_smiles" in df.columns
+        if want_ph and not has_species:
+            raise SystemExit(
+                f"{f.name}: chemistry.docked_species is ph_7.4 but the frame has "
+                "no `docked_smiles` column. Run scripts/stamp_identity.py first; "
+                "docking the neutral form here would be silent (#58).")
+        skipped_species = 0
         for r in df.itertuples():
             cls = getattr(r, "warhead_class", None)
             if cls not in meta:
@@ -96,8 +127,24 @@ def load_candidates() -> list[ns.Candidate]:
             mech, smarts = meta[cls]
             if mech not in KNOWN:
                 continue
-            out.append(ns.Candidate(str(r.candidate_id), r.canonical_smiles,
+            smi = r.canonical_smiles
+            if want_ph:
+                smi = getattr(r, "docked_smiles", None)
+                ok = getattr(r, "docked_species_ok", True)
+                if smi is None or (isinstance(ok, bool) and not ok) or pd.isna(smi):
+                    # Stamped and dropped, never substituted: docking the neutral
+                    # in place of a species we could not build is the exact
+                    # substitution #58 is about.
+                    if require_ok:
+                        skipped_species += 1
+                        continue
+                    smi = r.canonical_smiles
+            out.append(ns.Candidate(str(r.candidate_id), smi,
                                     cls, mech, smarts, approach))
+        if skipped_species:
+            log.warning("%s: %d candidates dropped -- pH 7.4 species could not "
+                        "be built (docked_species_ok = False)",
+                        f.name, skipped_species)
     # Deterministic order, so shard membership does not depend on frame order.
     out.sort(key=lambda c: c.ident)
     log.info("scorable: %d", len(out))

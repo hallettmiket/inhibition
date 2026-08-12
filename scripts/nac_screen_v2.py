@@ -168,6 +168,15 @@ def gnina_scores(receptor: Path, sdf: Path, gpu: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _cfg(key: str, default):
+    """One target setting, tolerant of a missing config, strict about a key."""
+    try:
+        from shared import target_config as tc
+        return tc.get(key, default=default)
+    except Exception:                                      # noqa: BLE001
+        return default
+
+
 def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         do_gnina: bool, all_poses: bool = False,
         sub_split: int = psub.DEFAULT_MAX_SUB) -> tuple[pd.DataFrame, list[dict]]:
@@ -453,14 +462,18 @@ def main() -> None:
     # once. Costs ~25% more wall-clock than 200, not 2.5x: AutoDock-GPU runs the
     # LGA instances concurrently, so ~3.6 s of the per-molecule cost is fixed and
     # only ~0.0032 s is per-run.
-    ap.add_argument("--nrun", type=int, default=500)
+    # Defaults come from config/target.yaml so the screen's settings and the
+    # recorded decisions cannot drift apart; an explicit flag still wins.
+    ap.add_argument("--nrun", type=int, default=_cfg("docking.n_runs", 500))
     ap.add_argument("--chunk", type=int, default=100)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--no-gnina", action="store_true")
     # WRITE EVERY POSE, not just each mode's representative (#41). Off by default
     # because it is ~500x the SDF volume across the full library; on for the
     # targeted runs that back the GUI's pose viewer.
-    ap.add_argument("--sub-split", type=int, default=psub.DEFAULT_MAX_SUB,
+    ap.add_argument("--sub-split", type=int,
+                    default=(_cfg("splitting.stage2.max_sub", psub.DEFAULT_MAX_SUB)
+                             if _cfg("splitting.stage2.enabled", True) else 1),
                     metavar="N",
                     help="representatives per mode from the second-stage split "
                          "(#61). 1 disables it. CHANGES SCORES: subdividing "
@@ -468,6 +481,7 @@ def main() -> None:
                          "conditional_eb is computed from, so a library screened "
                          "with a different value is not score-comparable")
     ap.add_argument("--all-poses", action="store_true",
+                    default=bool(_cfg("docking.persist_all_poses", False)),
                     help="also write every docked pose, grouped by mode, to "
                          "nac_v3_allposes/")
     # A NAMED SUBSET, so poses can be filled in for the molecules actually under
