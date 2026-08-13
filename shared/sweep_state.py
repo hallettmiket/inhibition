@@ -123,6 +123,49 @@ def state(worklist: Path | None = None) -> pd.DataFrame:
     return d
 
 
+def predicts(d: pd.DataFrame) -> dict:
+    """Does the docked ranking predict what the trajectory did?
+
+    THE SWEEP'S OWN HEADLINE, so it belongs on the sweep's page rather than in a
+    message. Spearman of `enrichment` against `frac_attack_ready` over the modes
+    that came back, plus the split between productive and not.
+
+    IT IS RANGE-RESTRICTED AND THE PAGE MUST SAY SO. Every swept mode cleared the
+    enrichment floor, so this measures whether enrichment discriminates ABOVE the
+    floor -- not whether the floor works. Those are different claims, and the
+    second one needs modes sampled from BELOW the floor, which is exactly what
+    `sweep_rule.pilot` is for and has not been run. Reporting r ~ 0 as "the
+    criterion is uninformative" would be the range-restriction mistake in print.
+    """
+    out = {"n": 0}
+    if d.empty or "frac_attack_ready" not in d.columns or "enrichment" not in d.columns:
+        return out
+    # THIS CAMPAIGN ONLY. `state()` also carries every mode ever swept, and those
+    # come from other worklists, other warhead classes and (before the tier
+    # decision) other generation tiers. Pooling them lowers the apparent range
+    # restriction by mixing in modes that were selected under different rules --
+    # which changes the correlation without making it mean more. Measured on
+    # 2026-08-13: pooled gave rho = +0.17 over 128, the campaign alone +0.07 over
+    # 101, and only the second is a statement about the rule now in force.
+    m = d[(d.sweep_state == "ok") & d.enrichment.notna()
+          & d.frac_attack_ready.notna()]
+    if "_queued" in d.columns and bool(d["_queued"].any()):
+        m = m[m["_queued"]]
+    if len(m) < 8:
+        return {"n": int(len(m))}
+    try:
+        from scipy import stats
+        r, p = stats.spearmanr(m.enrichment, m.frac_attack_ready)
+    except Exception:                                      # noqa: BLE001
+        return {"n": int(len(m))}
+    prod = m.frac_attack_ready > 0.01
+    return {"n": int(len(m)), "rho": float(r), "p": float(p),
+            "productive": int(prod.sum()),
+            "enr_prod": float(m[prod].enrichment.median()) if prod.any() else None,
+            "enr_not": float(m[~prod].enrichment.median()) if (~prod).any() else None,
+            "floor": float(m.enrichment.min())}
+
+
 def summary(d: pd.DataFrame) -> dict:
     """Counts by state, for the step nav and the page header."""
     if d.empty:

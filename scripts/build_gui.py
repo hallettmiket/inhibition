@@ -103,6 +103,9 @@ tr:hover td{background:var(--blue-pale)}
 .bar i.g{background:var(--good)}
 .prog{display:flex;height:9px;border-radius:4px;overflow:hidden;border:1px solid var(--rule)}
 .prog i{display:block;height:100%}
+/* Same callout the other pages use, so a caveat looks like a caveat everywhere. */
+.warnbox{border-left:3px solid var(--warn);background:var(--rail);padding:.6rem .9rem;
+ font-size:12px;margin:.7rem 0 .2rem;border-radius:0 3px 3px 0;max-width:95ch}
 """
 
 
@@ -206,7 +209,8 @@ def sweep_json(d, s, worklist: Path | None) -> str:
                          else r.get(k)) for k in cols})
     return json.dumps({"generated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                        "worklist": worklist.name if worklist else None,
-                       "summary": s, "rows": rows}, separators=(",", ":"))
+                       "summary": s, "predicts": ss.predicts(d),
+                       "rows": rows}, separators=(",", ":"))
 
 
 def sweep_page(counts: dict) -> str:
@@ -218,7 +222,35 @@ process table and does not pretend to. The table re-reads
 <code>sweep_state.json</code> every 30 s, so it fills in as runs land.</p>
 <div id="tbl"></div>"""
     js = """
-let ROWS=[], SUM={}, SORT='frac_attack_ready';
+let ROWS=[], SUM={}, PRED={}, SORT='frac_attack_ready';
+// THE SWEEP'S OWN HEADLINE. Does the docked ranking predict what the trajectory
+// did? The answer belongs on this page, updating as runs land, rather than in
+// somebody's message -- and it must carry its own caveat, because every mode
+// here cleared the enrichment floor and a correlation measured inside a
+// selected range says nothing about the selection itself.
+function verdict(){
+  const P=PRED||{};
+  if(!P.n || P.rho===undefined)
+    return '<p class="note">Not enough finished runs yet to ask whether the '
+      +'ranking predicts the outcome ('+(P.n||0)+' so far; needs 8).</p>';
+  const sig = P.p < 0.05;
+  const col = sig ? 'var(--good)' : 'var(--warn)';
+  return '<div class="warnbox" style="border-left-color:'+col+'">'
+    + '<b>Does the ranking predict the sweep?</b> Spearman(enrichment, '
+    + 'attack-ready) = <b>'+P.rho.toFixed(3)+'</b>, p = '+P.p.toFixed(3)
+    + ' over '+P.n+' finished modes. '
+    + (sig ? 'A relationship is detectable.'
+           : 'No relationship is detectable — ordering by enrichment above the '
+             +'floor is not selecting the modes that reach attack geometry.')
+    + '<br>Median enrichment: <b>'+(P.enr_prod!==null?P.enr_prod.toFixed(2):'—')
+    + '</b> among the '+P.productive+' productive, <b>'
+    + (P.enr_not!==null?P.enr_not.toFixed(2):'—')+'</b> among the rest.'
+    + '<br><em>Range-restricted, and that limits the claim.</em> Every mode here '
+    + 'cleared the floor (lowest swept: '+ (P.floor!==undefined?P.floor.toFixed(2):'—')
+    + '). This measures whether enrichment discriminates ABOVE the floor, not '
+    + 'whether the floor works — that needs modes sampled from below it, which '
+    + 'is what the stratified pilot is for and it has not been run.</div>';
+}
 const ORDER={ok:0, pending:1, failed:2, 'not sent':3};
 function f(v,n){return (v===null||v===undefined)?'—':Number(v).toFixed(n);}
 function draw(){
@@ -235,7 +267,8 @@ function draw(){
     + '<i style="background:var(--warn);width:'+pc(s.pending||0)+'"></i>'
     + '<i style="background:var(--bad);width:'+pc(s.failed||0)+'"></i></div>'
     + '<p class="note">'+tot+' modes in this campaign · worklist <code>'
-    + (SUM._wl||'—')+'</code> · updated '+(SUM._t||'')+'</p>';
+    + (SUM._wl||'—')+'</code> · updated '+(SUM._t||'')+'</p>'
+    + verdict();
   // Finished first and best-first within that, because the question this page
   // answers is "what came back and was any of it good".
   const r=ROWS.slice().sort((a,b)=>{
@@ -260,7 +293,8 @@ async function load(){
     const r=await fetch('sweep_state.json?t='+Date.now());
     if(!r.ok) return;
     const j=await r.json();
-    ROWS=j.rows||[]; SUM=j.summary||{}; SUM._t=j.generated; SUM._wl=j.worklist;
+    ROWS=j.rows||[]; SUM=j.summary||{}; PRED=j.predicts||{};
+    SUM._t=j.generated; SUM._wl=j.worklist;
     draw();
   }catch(e){}
 }
