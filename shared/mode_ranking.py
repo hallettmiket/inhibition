@@ -365,18 +365,17 @@ tr.sibrow{cursor:pointer}
 tr.sibrow:hover{background:var(--blue-pale)}
 tr.sibrow.cur{background:var(--blue-pale);font-weight:700}
 input.mchk{margin:0 .45rem 0 0;vertical-align:-1px;cursor:pointer}
-/* SUB-SPLIT GROUPS (#61). The header names the first-stage mode the rows below
-   it came from; the rows are indented so the hierarchy is readable without
-   reading the labels. Muted, not coloured -- the colour carries mode identity
-   and a second use of it here would compete with the swatches. */
-tr.subhd td{background:var(--blue-pale);font:600 11px var(--sans);
-  color:var(--muted);letter-spacing:.02em;padding-top:.45rem}
-tr.sibrow.sub td:first-child{padding-left:1.5rem}
+/* The sub-split GROUP HEADER and its indent are gone (#65). They boxed a
+   molecule's modes into one block per first-stage cluster, each with its own
+   all/none, which read as a distinction between kinds of mode -- and it is not
+   one: both clusters are first-stage clusters, and which one a mode came out of
+   is provenance, not chemistry. The provenance survives as the `cluster` column
+   and the row's hue. */
 button.mini{font:600 10px var(--sans);margin-left:.5rem;padding:.1rem .42rem;
   border:1px solid var(--rule);border-radius:3px;background:var(--bg);
   color:var(--fg);cursor:pointer;text-transform:uppercase}
 button.mini:hover{background:var(--blue-pale)}
-span.gp{float:right;font:400 10px var(--mono);color:var(--muted);
+span.gp{font:400 10px var(--mono);color:var(--muted);
   text-transform:none;letter-spacing:0}
 i.sw{width:11px;height:11px;border-radius:2px;display:inline-block;margin-right:.45rem;
  vertical-align:-1px}
@@ -665,13 +664,18 @@ function setScope(v){ SCOPE = v;
   const el = document.getElementById('rail'); if (el) el.scrollTop = 0;
   railHTML(); }
 
-function showGroup(pm, on){
-  // Draw or clear a whole sub-split cloud at once. Ticking five boxes one at a
-  // time to see what one binding mode actually looks like is the interaction the
-  // second stage created and did not pay for.
+function showModes(on){
+  // Draw or clear EVERY mode of the selected molecule at once.
+  //
+  // This used to be one control per first-stage cluster, so a molecule with two
+  // clusters got two "all" buttons that each drew part of the cloud. That split
+  // the one interaction anybody wants -- see this molecule's modes together --
+  // along a boundary that is provenance rather than chemistry, and @tt8804 read
+  // the two groups as a claim that the clusters are different kinds of thing:
+  // "get rid of the separated selection modes, both are first stage". They are.
   const cur = SEL ? ROWS.find(r => r.i === SEL) : null;
   if (!cur) return;
-  ROWS.filter(r => r.p === cur.p && r.pm === pm).forEach(function(m){
+  ROWS.filter(r => r.p === cur.p).forEach(function(m){
     if (on) SHOWN.add(m.m);
     else if (m.m !== cur.m) SHOWN.delete(m.m);   // the primary always stays drawn
   });
@@ -745,57 +749,40 @@ async function pick(id){
   MBY = {}; sibs.forEach(function(m){ MBY[m.m] = m; });
   const RK = m => (m.cr === null || m.cr === undefined) ? 1e9 : m.cr;
   const best = sibs.reduce((a,b) => (RK(b) < RK(a) ? b : a), sibs[0]);
-  // Grouped by the first-stage cluster each mode came from, in the order the
-  // parents appear. The grouping is PROVENANCE and a drawing convenience -- it
-  // records that these rows were cut out of one first-stage cluster, which is
-  // worth seeing because that cluster is chained and often not homogeneous. It
-  // is NOT a claim that the rows in a group are variants of one binding mode;
-  // every number on the row was computed treating it as its own mode.
-  const byPar = [];
-  sibs.forEach(function(m){
-    const g = byPar.find(q => q.pm === m.pm);
-    if (g) g.rows.push(m); else byPar.push({pm: m.pm, rows: [m]});
-  });
-  const nSplit = byPar.filter(g => g.rows.length > 1).length;
+  // ONE FLAT LIST. Every row is a mode; nothing is nested under anything.
+  //
+  // The rows used to be boxed under a "first-stage cluster N" header with its
+  // own all/none pair, which put a molecule's modes into two selection groups
+  // and made the grouping look like a distinction between kinds of mode. It is
+  // not one: both clusters are first-stage clusters, and the split between them
+  // is provenance -- which connected component of a CHAINING clusterer a mode
+  // was cut out of -- not chemistry. @tt8804: "get rid of the separated
+  // selection modes, both are first stage."
+  //
+  // The provenance is kept, demoted to a column and the row's hue, so a reader
+  // who wants it can still see which modes came out of one cluster.
+  const nClust = new Set(sibs.map(m => m.pm)).size;
   document.getElementById('sibs').innerHTML =
     '<h3>modes of ' + x.p + ' — ' + sibs.length + ' in total, '
     + sibs.filter(m => m.cr !== null).length + ' ranked'
-    + (new Set(sibs.map(m => m.pm)).size < sibs.length
-       ? ' · every row is its own mode, ranked and swept independently (#61)'
-       : '') + '</h3>' +
+    + ' · every row is its own mode, ranked and swept independently (#61)</h3>' +
     '<p class="note" style="margin:.2rem 0 .5rem">Tick to draw a mode; click the '
     + 'row to read it. Several can be shown at once. '
-    + (nSplit
-       ? 'Rows cut from one first-stage cluster share a hue and differ by '
-         + 'lightness — use <b>all</b> on the group header to draw the whole '
-         + 'cluster at once. <b>A shared hue does not mean the rows are '
-         + 'alike:</b> the first stage chains, so one cluster can hold modes on '
-         + 'opposite sides of the 2.8–4.2 Å window.'
+    + '<button class="mini" onclick="showModes(1)">all</button>'
+    + '<button class="mini" onclick="showModes(0)">none</button>'
+    + (nClust < sibs.length
+       ? ' <b>cluster</b> is the first-stage group a mode was cut from, and is '
+         + 'provenance only — the first stage chains, so one cluster can hold '
+         + 'modes on opposite sides of the 2.8–4.2 Å window (#65).'
        : '') + '</p>'
     + '<table class="sib"><thead><tr><th>show</th><th>class rank</th><th>poses</th>' +
     '<th>viable</th><th>enrichment</th><th>conditional_eb</th><th>spread</th>' +
-    '<th>coherence</th><th>simulated</th></tr></thead><tbody>' +
-    byPar.map(function(g){
-      // A GROUP HEADER ONLY WHERE THERE IS A GROUP. A molecule whose modes were
-      // never subdivided gets the flat table it had; inventing a one-row group
-      // for it would imply a second stage that did not happen.
-      const head = g.rows.length < 2 ? '' :
-        '<tr class="subhd"><td colspan="9">'
-        + '<i class="sw" style="background:' + modeCss(g.rows[0]) + '"></i>'
-        + 'first-stage cluster ' + g.pm + ' — ' + g.rows.length
-        + ' separate modes (' + g.rows.map(q => 'm' + q.m).join(', ') + ')'
-        + ' <button class="mini" onclick="event.stopPropagation();showGroup('
-        + g.pm + ',1)">all</button>'
-        + '<button class="mini" onclick="event.stopPropagation();showGroup('
-        + g.pm + ',0)">none</button>'
-        + '<span class="gp">' + g.rows.reduce((a,q) => a + (q.n||0), 0)
-        + ' poses across the group</span></td></tr>';
-      return head + g.rows.map(function(m){
+    '<th>coherence</th><th>cluster</th><th>simulated</th></tr></thead><tbody>' +
+    sibs.map(function(m){
       const col = modeCss(m);
       const badge = m.s === 'md' ? '100 ns' : m.s === 'swept' ? 'swept'
                   : m.s === 'failed' ? 'sweep failed' : 'never';
-      return '<tr class="sibrow' + (m.i === x.i ? ' cur' : '')
-        + (g.rows.length > 1 ? ' sub' : '') + '"'
+      return '<tr class="sibrow' + (m.i === x.i ? ' cur' : '') + '"'
         + ' onclick="pick(\'' + m.i + '\')">'
         + '<td onclick="event.stopPropagation();toggleMode(' + m.m + ')">'
         + '<input type="checkbox" class="mchk"' + (SHOWN.has(m.m) ? ' checked' : '')
@@ -807,8 +794,8 @@ async function pick(id){
         + '<td>' + (m.vf === null ? '—' : (m.vf*100).toFixed(1) + '%') + '</td>'
         + '<td>' + fmt(m.en, 2) + '</td><td>' + fmt(m.eb, 3) + '</td>'
         + '<td>' + fmt(m.sp, 2) + '</td><td>' + fmt(m.dc, 3) + '</td>'
+        + '<td><span class="gp">' + m.pm + '</span></td>'
         + '<td><span class="tag t-' + m.s + '">' + badge + '</span></td></tr>';
-      }).join('');
     }).join('') + '</tbody></table>' +
     (sibs.length > 1 && best.s === 'none'
       ? '<p class="note"><strong>The best-ranked mode of this molecule was never '
