@@ -26,7 +26,11 @@ STEPS = [
     ("index.html", "Home", "target, receptor and the rules this run was given"),
     ("modes.html", "Ranking", "every molecule and every binding mode, scored"),
     ("sweep.html", "Sweep", "10 ns triage: which modes reach attack geometry"),
-    ("combined.html", "MD", "100 ns runs and the shortlist"),
+    # "MD results", not "MD": the other three steps name an OUTPUT (a ranking, a
+    # sweep), and a step called "MD" names a method instead, which reads as a
+    # setting rather than somewhere to go. @tt8804.
+    ("combined.html", "MD results",
+     "100 ns runs, interactions, and the shortlist"),
 ]
 
 CSS = """

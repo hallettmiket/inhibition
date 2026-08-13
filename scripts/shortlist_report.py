@@ -113,6 +113,25 @@ _LEGEND_KEYS = [
      f"heavy atoms within {CONTACT_A} Å, no polar partner"),
 ]
 
+#: The key's own styling, beside the key itself. A second page rendering
+#: `_LEGEND_3D` needs these rules, and a page that has the markup but not the
+#: styles shows three unlabelled grey lines -- which is worse than no key. Kept
+#: here rather than in the page template so there is one definition to import.
+KEY3_CSS = """
+.key3{display:flex;flex-wrap:wrap;gap:.35rem 1.6rem;margin:.55rem 0 .1rem;
+  font:12px var(--sans)}
+.key3 .k{display:flex;align-items:center;gap:.45rem;font-weight:600}
+.key3 .k i{width:24px;height:3px;border-radius:2px;display:inline-block}
+.key3 .k em{font-style:normal;font-weight:400;color:var(--muted);
+  margin-left:.4rem}
+table.occ{border-collapse:collapse;margin:.7rem 0 .2rem;font-size:12.5px}
+table.occ th,table.occ td{padding:.24rem .8rem .24rem 0;text-align:left;
+  border-bottom:1px solid var(--rule)}
+table.occ th{font:600 10px var(--sans);color:var(--muted);text-transform:uppercase}
+table.occ td{font-family:var(--mono)}
+h2.ih{font:600 14px var(--sans);margin:.2rem 0 .3rem}
+"""
+
 _LEGEND_3D = ('<div class="key3">'
               + "".join(
                   f'<span class="k"><i style="background:{c};'
@@ -845,12 +864,7 @@ svg.imap{{width:100%;height:auto;background:var(--card);border:1px solid var(--r
   border-radius:5px}}
 label.sfx{{display:flex;align-items:center;gap:.4rem;font:600 12px var(--sans);
   cursor:pointer;user-select:none}}
-.key3{{display:flex;flex-wrap:wrap;gap:.35rem 1.6rem;margin:.55rem 0 .1rem;
-  font:12px var(--sans)}}
-.key3 .k{{display:flex;align-items:center;gap:.45rem;font-weight:600}}
-.key3 .k i{{width:24px;height:3px;border-radius:2px;display:inline-block}}
-.key3 .k em{{font-style:normal;font-weight:400;color:var(--muted);
-  margin-left:.4rem}}
+{KEY3_CSS}
 a.dl{{display:inline-block;margin-top:.7rem;font:600 12px var(--sans);
   color:var(--blue);text-decoration:none;border:1px solid var(--blue);
   border-radius:4px;padding:.35rem .7rem}}

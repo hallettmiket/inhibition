@@ -305,6 +305,20 @@ def figure(ident: str, s: dict, res: dict, er, nacs: dict | None = None) -> str:
     return er._png(fig, plt)
 
 
+def _key3_css() -> str:
+    """The interaction key's styles, from the module that owns the key.
+
+    Imported rather than copied, and imported LAZILY so a report can still be
+    built if `shortlist_report`'s heavier dependencies are unavailable -- the
+    page then loses the key's styling, not the run's numbers.
+    """
+    try:
+        import shortlist_report as sr
+        return sr.KEY3_CSS
+    except Exception:                                      # noqa: BLE001
+        return ""
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--candidate", required=True)
@@ -429,6 +443,58 @@ def main() -> None:
                     f"The trajectory rendered no viewer: <code>{exc}</code>. "
                     "The figures and residence numbers above are unaffected — "
                     "they are computed from the trajectory directly.", "warn")
+    # ---- WHAT THE MOLECULE ACTUALLY TOUCHED (@tt8804, #63) -----------------
+    # The interaction map, from the SAME movie the viewer above shows, so the
+    # picture and the contact list cannot describe different frames.
+    #
+    # IMPORTED, NOT REIMPLEMENTED. `shortlist_report` already defines contact
+    # occupancy, the representative frame, the 3D interaction view and the
+    # colour key -- and the key is the part that must not fork: a colour meaning
+    # "polar" on one page and something else on another is worse than no colour
+    # at all. Importing across scripts/ is how nac_rank and nac_screen are
+    # already used here.
+    inter_block = ""
+    if not args.no_movie and mpdb.is_file():
+        try:
+            import shortlist_report as sr
+            rows_c, nfr = sr.contacts(mpdb)
+            rx = None
+            try:
+                rx = sr.reactive_atom_index(
+                    sr.ligand_mol(mpdb, str(s.get("smiles", ""))),
+                    s.get("warhead_class"))
+            except Exception:                          # noqa: BLE001
+                pass                    # the view degrades to no anchor, not to nothing
+            i3d = sr.interaction_3d(mpdb, rows_c, f"i3_{args.candidate}",
+                                    rx_atom=rx)
+            if i3d:
+                occ = "".join(
+                    f"<tr><td>{r[0]}{r[1]}</td><td>{r[2]*100:.0f}%</td>"
+                    f"<td>{r[3]*100:.0f}%</td></tr>"
+                    for r in rows_c[:12] if r[2] >= 0.20)
+                inter_block = (
+                    '<h2 class="ih">Interactions</h2>'
+                    '<p class="note">Contacts over ' + str(nfr) +
+                    ' frames of the same trajectory. Occupancy is the fraction '
+                    'of frames in which the residue is in contact; polar is the '
+                    'fraction with an N/O–N/O pair inside the cutoff. Every line '
+                    'in the 3D view joins the actual closest atom pair in the '
+                    'representative frame — nothing here is projected.</p>'
+                    + i3d
+                    + ('<table class="occ"><thead><tr><th>residue</th>'
+                       '<th>occupancy</th><th>polar</th></tr></thead><tbody>'
+                       + occ + "</tbody></table>" if occ else ""))
+                log.info("interaction map: %d residues over %d frames",
+                         len([r for r in rows_c if r[2] >= 0.20]), nfr)
+        except Exception as exc:                       # noqa: BLE001
+            # Same rule as the movie: a failed figure is RECORDED, never dropped,
+            # so an absent map reads as a failure and not as "nothing touched".
+            log.warning("interaction map failed: %s", exc)
+            inter_block = rt.callout(
+                "Interaction map unavailable",
+                f"Contacts could not be computed: <code>{exc}</code>. The "
+                "residence numbers above are unaffected.", "warn")
+
     verdict = ("Held" if not res["dissociated"] else
                f"Left at {res['left_at_ns']:.0f} ns")
 
@@ -472,6 +538,13 @@ def main() -> None:
          f'<span class="hint">surface by charge, ligand in yellow, CA-fitted</span>'
          f'</summary><div class="pbody">{movie_block}</div></details>')
         if movie_block else "",
+        # Directly after the movie, because it is the same trajectory read a
+        # different way: the movie shows what moved, this shows what it touched.
+        (f'<details class="panel"><summary>Interactions'
+         f'<span class="hint">contact occupancy over the run, drawn on the '
+         f'representative frame</span>'
+         f'</summary><div class="pbody">{inter_block}</div></details>')
+        if inter_block else "",
         '<details class="panel"><summary>How it was selected, and what that is worth'
         '<span class="hint">the 10 ns triage sweep — not a result</span></summary>'
         '<div class="pbody">',
@@ -509,7 +582,9 @@ def main() -> None:
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>{args.candidate} — 100 ns residence</title>"
-        f"<style>{rt.CSS}{mov.VIEWER_CSS}</style></head><body>\n"
+        # The interaction key's styles come from the module that OWNS the key,
+        # so the swatches cannot say one thing here and another on the shortlist.
+        f"<style>{rt.CSS}{mov.VIEWER_CSS}{_key3_css()}</style></head><body>\n"
         + "\n".join(body) + "\n</body></html>")
     print(f"{args.candidate}: {verdict}, residence {res['residence_frac']:.3f} "
           f"-> {dest}")
