@@ -710,6 +710,13 @@ chemistries is the cheapest way to turn two points into a distribution.</p>
         moderank.build(_full_title, _date.today().isoformat(), three,
                        no_pose=_a.get("stale", [])))
 
+    # The stepper (#63), from the one module that defines it. Counts come from
+    # the same places the pages do, so the nav cannot disagree with the page it
+    # sits on.
+    from shared import gui_shell as _gs
+    _stepcss = _gs.CSS
+    _stepnav = _gs.nav("combined.html", moderank._step_counts(_mr))
+
     page = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(_full_title)}</title><style>
@@ -820,6 +827,7 @@ iframe{{flex:1;width:100%;border:0;background:var(--paper)}}
  --blue-pale:#16283a;--rule:#25333f;--muted:#93a3b4;--paper:#0e151c;
  --raise:#16202a;--rail:#121b24;--good:#4fc4a0;--bad:#e08a70}}
 :root[data-theme="dark"] .thumb{{background:#fff}}
+{_stepcss}
 </style></head><body>
 <div id="topbar">
  <h1 title="Pick a molecule on the left; its pose, movie and plots load on the right.">{html.escape(_full_title)}</h1>
@@ -834,10 +842,12 @@ iframe{{flex:1;width:100%;border:0;background:var(--paper)}}
  <span class="mhint" id="mhint"></span>
  <a class="mbtn lnk" href="pipeline.html" target="_blank" rel="noopener"
     title="how a molecule becomes a row: docking, modes, criteria, ranking, sweep, MD">how this works &#8599;</a>
- <a class="mbtn lnk" href="modes.html" target="_blank" rel="noopener"
-    title="every binding mode ranked individually, and which were never simulated (#53)">every mode &#8599;</a>
  <button id="theme" class="mbtn tbtn" onclick="toggleTheme()" title="light / dark">dark</button>
 </div>
+<!-- THE SAME STEPPER AS EVERY OTHER PAGE (#63). The "every mode" link is gone
+     from the topbar: it opened the Ranking page in a NEW TAB, which is the
+     opposite of one instrument with four steps. -->
+{_stepnav}
 <main>
  <div id="rail"><div class="legend">ranked by <b>max ligand RMSD</b> over the
   100&nbsp;ns run, lowest first &mdash; how far the molecule ever got from where it

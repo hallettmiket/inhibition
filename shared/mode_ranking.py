@@ -386,6 +386,7 @@ i.sw{width:11px;height:11px;border-radius:2px;display:inline-block;margin-right:
 :root[data-theme="dark"] .warnbox{background:#241f12}
 :root[data-theme="dark"] .thumb{background:#fff}
 a{color:var(--blue)}
+__STEPCSS__
 </style></head><body>
 <div id="topbar">
  <h1 title="Pick a mode on the left; its pose and scores load on the right.">__TITLE__ — ranking</h1>
@@ -394,10 +395,13 @@ a{color:var(--blue)}
    title="rank within one warhead class, within every class, or across all of them"></select>
  <span class="mhint" id="mhint"></span>
  <span class="msep"></span>
- <a class="mbtn lnk" href="combined.html" title="the sweep and 100 ns MD results">results &#8599;</a>
  <a class="mbtn lnk" href="pipeline.html" title="how a molecule becomes a row">how this works &#8599;</a>
  <button class="mbtn" onclick="toggleTheme()">dark</button>
 </div>
+<!-- THE SAME STEPPER AS EVERY OTHER PAGE (#63). The ad-hoc "results" link that
+     sat in the topbar is gone: two routes to one page, only one of which knows
+     where you are, is what made these read as separate tools. -->
+__STEPNAV__
 <main>
  <!-- ONE GRID CHILD. `main` is a two-column grid, so the banner must live INSIDE
       the rail's column rather than beside it -- as a third child it took column 1
@@ -960,4 +964,30 @@ def build(title: str, date_str: str, three: str = "",
             .replace("__THREE__", three)
             .replace("__CYS__", str(CYS_RESI))
             .replace("__POCKET__", json.dumps(pocket_residues()))
+            .replace("__STEPCSS__", _gs().CSS)
+            .replace("__STEPNAV__", _gs().nav("modes.html", _step_counts(r)))
             .replace("__TITLE__", html.escape(title)))
+
+
+def _gs():
+    from shared import gui_shell
+    return gui_shell
+
+
+def _step_counts(r) -> dict:
+    """Counts under each step label, so the funnel is visible from any page.
+
+    Read from the same sources the pages themselves use -- the ranking frame in
+    hand, and `sweep_state.json` if the sweep page has been built. Absent counts
+    are omitted rather than shown as 0: "not measured yet" and "measured, none"
+    are different claims and a bare 0 makes the second.
+    """
+    out = {"modes.html": f"{len(r):,} modes"} if r is not None and len(r) else {}
+    try:
+        import json as _j
+        j = _j.loads((B / "mdprio_reports" / "sweep_state.json").read_text())
+        s = j.get("summary", {})
+        out["sweep.html"] = f"{s.get('ok', 0)} ok · {s.get('pending', 0)} pending"
+    except Exception:                                      # noqa: BLE001
+        pass
+    return out
