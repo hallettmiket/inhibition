@@ -105,9 +105,12 @@ tr:hover td{background:var(--blue-pale)}
 .prog i{display:block;height:100%}
 /* Table left, inspector right -- the same shape as the ranking view, so moving
    between the two pages does not mean relearning where things are. */
-#two{display:grid;grid-template-columns:1fr 360px;gap:18px;align-items:start}
+#two{display:grid;grid-template-columns:1fr 420px;gap:18px;align-items:start}
 @media(max-width:1000px){#two{grid-template-columns:1fr}}
-#side{position:sticky;top:0}
+#side{position:sticky;top:0;max-height:calc(100vh - 110px);overflow-y:auto}
+#side details{margin:.6rem 0}
+#side summary{font:600 12px var(--sans);cursor:pointer}
+#side .hint{font-weight:400;color:var(--muted);margin-left:.4rem}
 #side table{font-size:12px}
 #side table td:first-child{color:var(--muted)}
 tr.pick{cursor:pointer}
@@ -258,6 +261,17 @@ process table and does not pretend to. The table re-reads
       <span>Cys113 in element colours, sphere on Sγ</span>
     </div>
     <div id="sfacts"></div>
+    <!-- The same three things the MD page shows, for the 10 ns run: the pose,
+         the movie, and the trajectory plots. Details, so a 9 MB movie is
+         fetched only when asked for. -->
+    <details id="smovwrap" style="display:none"><summary>10 ns movie
+      <span class="hint">ligand in yellow, CA-fitted</span></summary>
+      <div class="pvbox" style="height:300px"><div id="smov"></div></div>
+      <div class="pvctl"><button class="mbtn" onclick="playPause()"
+        id="playbtn">play</button><span id="frameno"></span></div>
+    </details>
+    <img id="splot" class="pvstruct" style="display:none;max-height:none"
+         alt="10 ns RMSD and warhead-sulfur distance">
   </aside>
 </div>"""
     js = """
@@ -347,6 +361,47 @@ function pick(id){
      .map(k=>'<tr><td>'+k[0]+'</td><td>'+k[1]+'</td></tr>').join('')
     +'</tbody></table>';
   load3d(par, mode);
+  // The plot is an <img> and costs one request; the movie is ~9 MB and is
+  // fetched only if the reader opens it. Both are named by MODE, not by
+  // molecule -- two modes of one molecule are different trajectories.
+  const pl=document.getElementById('splot');
+  pl.onerror=function(){ pl.style.display='none'; };
+  pl.onload =function(){ pl.style.display=''; };
+  pl.src='sweep_assets/'+id+'.png';
+  const mw=document.getElementById('smovwrap');
+  mw.style.display=''; mw.open=false; MOVID=id; MOVLOADED=false;
+}
+// --- the 10 ns movie, loaded on demand -------------------------------------
+let MOVID=null, MOVLOADED=false, MV=null, PLAYING=false, MTIMER=null;
+async function loadMovie(){
+  if(MOVLOADED||!MOVID) return; MOVLOADED=true;
+  const box=document.getElementById('smov');
+  box.innerHTML='<div class="pvempty">loading 10 ns movie…</div>';
+  try{
+    const r=await fetch('sweep_assets/'+MOVID+'.pdb');
+    if(!r.ok) throw new Error('no movie for this mode ('+r.status+')');
+    const txt=await r.text(); const M=pvLib();
+    box.innerHTML='';
+    MV=M.createViewer(box,{backgroundColor:'#eef1f6'});
+    MV.addModelsAsFrames(txt,'pdb');       // frames ARE animation here
+    MV.setStyle({},{cartoon:{color:'#c3ccd8',opacity:0.45}});
+    MV.setStyle({resn:'MOL'},{stick:{radius:0.20,colorscheme:'yellowCarbon'}});
+    MV.setStyle({resi:[PV_CYS]},{stick:{radius:0.26,colorscheme:'default'}});
+    MV.zoomTo({resn:'MOL'}); MV.zoom(0.55);
+    requestAnimationFrame(function(){requestAnimationFrame(function(){
+      MV.resize(); MV.render(); });});
+    MV.render();
+  }catch(e){
+    box.innerHTML='<div class="pvempty"><b>No movie.</b><br>'
+      +String(e.message||e)+'</div>';
+  }
+}
+function playPause(){
+  if(!MV) return;
+  PLAYING=!PLAYING;
+  document.getElementById('playbtn').textContent=PLAYING?'pause':'play';
+  if(PLAYING){ MV.animate({loop:'forward',reps:0}); }
+  else{ MV.stopAnimate(); }
 }
 async function load3d(par, mode){
   try{
@@ -362,6 +417,9 @@ async function load3d(par, mode){
       '<div class="pvempty"><b>No pose drawn.</b><br>'+String(e.message||e)+'</div>';
   }
 }
+document.addEventListener('toggle', function(e){
+  if(e.target && e.target.id==='smovwrap' && e.target.open) loadMovie();
+}, true);
 function redraw(){ if(SEL){ const p=SEL.replace(/_m\\d+$/,'');
   const m=parseInt((SEL.match(/_m(\\d+)$/)||[0,'-1'])[1],10); load3d(p,m); } }
 

@@ -173,3 +173,24 @@ def test_the_mode_is_read_from_the_model_record_not_counted():
     from shared import pose_viewer as pv
     assert "MODEL" in pv.mount_js(113, "[]")
     assert "exec(b)" in pv.mount_js(113, "[]")
+
+
+def test_sweep_assets_are_named_per_mode_not_per_molecule():
+    """Two modes of one molecule are DIFFERENT trajectories. Naming an asset
+    after the parent would let one mode's movie stand for another's, which is
+    the collision `shared/mode_key` exists to prevent."""
+    src = (REPO / "scripts" / "sweep_assets.py").read_text()
+    assert 'OUT / f"{ident}.pdb"' in src and 'OUT / f"{ident}.png"' in src
+    assert 'OUT / f"{parent}' not in src
+
+
+def test_the_distance_panel_reads_the_window_from_the_criterion():
+    """A hand-typed 2.8-4.2 here could drift from the number that scores."""
+    src = (REPO / "scripts" / "sweep_assets.py").read_text()
+    assert "nac.NAC_DIST_MIN" in src and "nac.NAC_DIST_MAX" in src
+
+
+def test_only_a_finished_sweep_supplies_assets():
+    """A partial trajectory rendered as a whole one is the #53 neighbourhood."""
+    src = (REPO / "scripts" / "sweep_assets.py").read_text()
+    assert "Finished mdrun" in src

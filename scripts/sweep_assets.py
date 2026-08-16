@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""
+Purpose: per-mode 10 ns assets — movie and trajectory plots — for the Sweep page.
+Author: Timothy Wu (with Claude Code)
+Date: 2026-08-16
+Input: --worklist <sweep_gaps_N.csv> [--limit N]
+Output: mdprio_reports/sweep_assets/<ident>.{pdb,png}
+
+@tt8804: "sweep results should show rmsd and 10 ns md movie, it should look just
+like MD results but with the sweep info also in a table on the viewer side".
+
+NOTHING IS RE-SIMULATED, AND ALMOST NOTHING IS RE-COMPUTED. Every finished sweep
+already left `rmsd.xvg`, `mindist.xvg` and `numcont.xvg` beside its trajectory --
+1,001 rows each, written by the run itself. The plots read those. The movie is
+`md_movie.build_movie_pdb`, the SAME function the 100 ns page uses, pointed at
+the sweep's rep directory: 3 seconds per mode, so the whole campaign is minutes.
+
+THE DISTANCE PANEL CARRIES THE CRITERION'S OWN WINDOW. A distance trace without
+the 2.8-4.2 A band is a line that a reader has to hold a threshold against in
+their head; with it, "did this molecule ever get into position" is answered by
+looking. The band is read from `nac_criterion`, not typed in here, so the picture
+and the score cannot disagree about what attack range means.
+
+ASSETS ARE PER MODE, NOT PER MOLECULE. A molecule can have several modes swept
+and they are different trajectories -- naming a file by the parent would let one
+mode's movie stand for another's, which is the mistake `mode_key` exists to stop.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import glob
+import io
+import logging
+import sys
+from pathlib import Path
+
+import numpy as np
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+log = logging.getLogger("sweep-assets")
+OUT = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
+           "mdprio_reports/sweep_assets")
+SWEEP_ROOT = Path("/data/lab_vm/modifiable/inhibition/attack_sweep_10ns")
+
+
+def rep_dir(parent: str) -> Path | None:
+    """The rep directory holding this molecule's finished 10 ns run.
+
+    Searched rather than constructed: the runner names the parent directory
+    `rank<N>_<ps>ps` after the pose rank it was given, and that rank is not
+    recoverable from the ident. A finished run is one whose prod.log says so --
+    the same completeness test the sweep's own resume guard uses, because a
+    partial trajectory analysed as a whole one is how #53's neighbours happened.
+    """
+    for p in sorted(SWEEP_ROOT.glob(f"*/{parent}/md/rep1")):
+        log_f = p / "prod.log"
+        if log_f.is_file() and "Finished mdrun" in log_f.read_text(errors="replace"):
+            return p
+    return None
+
+
+def _xvg(path: Path):
+    """(x, y) from a GROMACS .xvg, comments dropped."""
+    if not path.is_file():
+        return None, None
+    xs, ys = [], []
+    for ln in path.read_text(errors="replace").splitlines():
+        if not ln or ln[0] in "#@":
+            continue
+        f = ln.split()
+        if len(f) >= 2:
+            try:
+                xs.append(float(f[0])); ys.append(float(f[1]))
+            except ValueError:
+                continue
+    return np.array(xs), np.array(ys)
+
+
+def plots(rep: Path, ident: str) -> str:
+    """RMSD and warhead-to-sulfur distance over the 10 ns, as base64 PNG."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from shared import nac_criterion as nac
+
+    t_r, rmsd = _xvg(rep / "rmsd.xvg")
+    t_d, dist = _xvg(rep / "mindist.xvg")
+    if t_r is None and t_d is None:
+        return ""
+    fig, ax = plt.subplots(2, 1, figsize=(7.2, 3.9), dpi=150, sharex=True)
+    if t_r is not None:
+        ax[0].plot(t_r / 1000.0, rmsd, lw=1.0, color="#0072ce")
+        ax[0].set_ylabel("ligand RMSD (nm)")
+    if t_d is not None:
+        # THE WINDOW THE SCORE USES, drawn from the criterion itself.
+        ax[1].axhspan(nac.NAC_DIST_MIN, nac.NAC_DIST_MAX, color="#0f7a54",
+                      alpha=0.13, lw=0)
+        ax[1].plot(t_d / 1000.0, dist * 10.0, lw=1.0, color="#b3261e")
+        ax[1].set_ylabel("warhead–S$\\gamma$ (Å)")
+        ax[1].text(0.995, nac.NAC_DIST_MAX, " attack range", ha="right",
+                   va="bottom", fontsize=7, color="#0f7a54",
+                   transform=ax[1].get_yaxis_transform())
+    ax[1].set_xlabel("time (ns)")
+    for a in ax:
+        for s in ("top", "right"):
+            a.spines[s].set_visible(False)
+    fig.suptitle(ident, fontsize=8, color="#5b6b80", y=0.995)
+    fig.tight_layout()
+    buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    ap.add_argument("--worklist", required=True)
+    ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--force", action="store_true")
+    args = ap.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+    import pandas as pd
+    from shared import md_movie as mov
+
+    wl = pd.read_csv(args.worklist)
+    OUT.mkdir(parents=True, exist_ok=True)
+    idents = list(wl.ident.astype(str))[:args.limit]
+    n_mov = n_png = 0
+    miss: dict = {}
+    for i, ident in enumerate(idents, 1):
+        parent = ident.rsplit("_m", 1)[0]
+        pdb, png = OUT / f"{ident}.pdb", OUT / f"{ident}.png"
+        if not args.force and pdb.is_file() and png.is_file():
+            continue
+        rep = rep_dir(parent)
+        if rep is None:
+            miss[parent] = "no finished 10 ns run"
+            continue
+        try:
+            if args.force or not pdb.is_file():
+                mov.build_movie_pdb(rep, pdb, total_ps=10_000.0)
+                n_mov += 1
+            if args.force or not png.is_file():
+                b64 = plots(rep, ident)
+                if b64:
+                    png.write_bytes(base64.b64decode(b64)); n_png += 1
+        except Exception as exc:                           # noqa: BLE001
+            # Recorded, never dropped: a molecule with no movie must read as a
+            # failure to build one, not as a run that did not happen.
+            miss[ident] = str(exc)[:90]
+        if i % 25 == 0:
+            log.info("  %d/%d  movies +%d  plots +%d", i, len(idents), n_mov, n_png)
+    print(f"\n  {n_mov} movies, {n_png} plots -> {OUT}")
+    if miss:
+        print(f"  {len(miss)} without assets:")
+        for k, v in list(miss.items())[:6]:
+            print(f"    {k}: {v}")
+
+
+if __name__ == "__main__":
+    main()
