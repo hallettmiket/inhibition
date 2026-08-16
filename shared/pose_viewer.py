@@ -75,10 +75,24 @@ function mountPose(elemId, pdbText, mode, recTxt){
   PV.setStyle({resi:[PV_CYS]}, {stick:{radius:0.28, colorscheme:'default'},
                                 cartoon:{color:'#c3ccd8', opacity:0.5}});
   PV.addStyle({resi:[PV_CYS], atom:'SG'}, {sphere:{radius:0.62}});
+  // ONE addModel PER POSE, and each block's mode is READ from its MODEL record.
+  //
+  // NOT `addModelsAsFrames`: that builds a SINGLE model with n frames, so
+  // `{model: i+1}` addresses a model that does not exist and 3Dmol dereferences
+  // undefined -- "Cannot read properties of undefined (reading 'setStyle')",
+  // which is what this viewer did on its first run. Frames are for animation;
+  // these are alternatives to be styled independently.
+  //
+  // Reading the mode from the record rather than counting positions is #53 one
+  // layer down: a re-sorted file would silently renumber every pose.
+  const blocks = pdbText.split('ENDMDL').filter(function(b){
+    return b.indexOf('MODEL') >= 0; });
   const modes = [];
-  (pdbText.match(/^MODEL\\s+(-?\\d+)/gm) || []).forEach(function(l){
-    modes.push(parseInt(l.replace(/^MODEL\\s+/, ''), 10)); });
-  PV.addModelsAsFrames(pdbText, 'pdb');
+  blocks.forEach(function(b){
+    const m = /MODEL\\s+(-?\\d+)/.exec(b);
+    modes.push(m ? parseInt(m[1], 10) : -1);
+    PV.addModel(b.replace(/MODEL[^\\n]*\\n/, ''), 'pdb');
+  });
   let shown = modes.indexOf(mode);
   modes.forEach(function(mo, i){
     PV.setStyle({model: i+1}, (mo === mode)

@@ -151,3 +151,25 @@ def test_the_page_puts_the_library_and_data_before_the_code_that_uses_them():
 def test_a_missing_pose_asset_is_reported_not_left_blank():
     from shared import pose_viewer as pv
     assert "pvempty" in pv.CSS
+
+
+def test_poses_are_separate_models_not_frames():
+    """`addModelsAsFrames` builds ONE model with n frames, so `{model: i+1}`
+    addresses nothing and 3Dmol dereferences undefined -- "Cannot read
+    properties of undefined (reading 'setStyle')". Frames animate; these are
+    alternatives to be styled independently."""
+    from shared import pose_viewer as pv
+    # Comments are stripped: the prose above the fix names the broken call in
+    # order to explain it, and matching that would make this test unfailable.
+    js = "\n".join(ln for ln in pv.mount_js(113, "[]").splitlines()
+                   if not ln.lstrip().startswith("//"))
+    assert "addModelsAsFrames" not in js
+    assert "addModel(" in js
+    assert "split('ENDMDL')" in js, "poses are not split per MODEL block"
+
+
+def test_the_mode_is_read_from_the_model_record_not_counted():
+    """Counting file position is #53, one layer down."""
+    from shared import pose_viewer as pv
+    assert "MODEL" in pv.mount_js(113, "[]")
+    assert "exec(b)" in pv.mount_js(113, "[]")
