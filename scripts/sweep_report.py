@@ -152,38 +152,50 @@ def main() -> None:
     # so the page stays self-contained like every other report.
     parent = ident.rsplit("_m", 1)[0]
     mode_n = int(ident.rsplit("_m", 1)[1]) if "_m" in ident else -1
-    svg = REPORTS / "mode_thumbs" / f"{parent}.svg"
+    # THE DEPICTION, NOT A SECOND 3D PANEL. @tt8804: "get rid of the pose I can
+    # just see the pose in the movie, I want to see the structure". The movie
+    # already shows the molecule in the pocket, from the trajectory this page is
+    # about; a static pose beside it answered a question nothing had asked while
+    # the one thing the page never showed was what the molecule IS.
+    #
+    # Drawn here rather than reusing the 96x64 rail thumbnail: that one exists to
+    # be recognised at a glance in a list, and a chemist reading a report needs to
+    # read the atoms.
     struct = ""
-    if svg.is_file():
-        b = base64.b64encode(svg.read_bytes()).decode()
-        struct = (f'<img src="data:image/svg+xml;base64,{b}" alt="structure" '
-                  f'style="max-width:340px;width:100%;background:#fff;'
-                  f'border:1px solid var(--rule);border-radius:4px;padding:6px">')
-    pose_block = ""
-    ppdb = REPORTS / "mode_poses" / f"{parent}.pdb"
-    if ppdb.is_file():
-        try:
-            from shared import mode_ranking as mr
-            from shared import pose_viewer as pv
-            import json as _json
-            rec = "\n".join(l for l in mr.RECEPTOR.read_text().splitlines()
-                            if l.startswith(("ATOM", "HETATM")))
-            three = (REPO / "scripts/.cache_3dmol-min.js").read_text()
-            pose_block = (
-                f"<style>{pv.CSS}</style>"
-                f'<div class="pvbox" style="height:320px"><div id="pvp"></div></div>'
-                f'<pre id="recpdb" style="display:none">{html.escape(rec)}</pre>'
-                f'<pre id="posepdb" style="display:none">'
-                f'{html.escape(ppdb.read_text())}</pre>'
-                f"<script>{three}</script>"
-                f"<script>{pv.mount_js(mr.CYS_RESI, _json.dumps(mr.pocket_residues()))}"
-                f"mountPose('pvp', document.getElementById('posepdb').textContent,"
-                f" {mode_n}, document.getElementById('recpdb').textContent);</script>")
-        except Exception as exc:                           # noqa: BLE001
-            pose_block = rt.callout(
-                "Pose unavailable",
-                f"<code>{html.escape(str(exc))}</code>", "warn")
-
+    try:
+        from rdkit import Chem, RDLogger
+        from rdkit.Chem import Draw, rdCoordGen
+        RDLogger.DisableLog("rdApp.*")
+        smi = None
+        for sub, stem in (("04_t4_combinatorial", "D4"), ("03_t3_reinvent", "D3")):
+            fs = sorted(glob.glob(f"/data/lab_vm/append_only/inhibition/{sub}/{stem}_*.parquet"),
+                        key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+            if not fs:
+                continue
+            fr = pd.read_parquet(fs[-1])
+            hit = fr[fr.candidate_id.astype(str) == parent]
+            if len(hit):
+                smi = str(hit.iloc[0].canonical_smiles); break
+        m = Chem.MolFromSmiles(smi) if smi else None
+        if m is not None:
+            # rdCoordGen, not Compute2DCoords: the default layout puts visibly
+            # wrong angles on substituted centres, and this is the figure a
+            # chemist decides from.
+            rdCoordGen.AddCoords(m)
+            d2 = Draw.rdMolDraw2D.MolDraw2DSVG(560, 300)
+            d2.drawOptions().bondLineWidth = 2
+            d2.drawOptions().addStereoAnnotation = True
+            Draw.rdMolDraw2D.PrepareAndDrawMolecule(d2, m)
+            d2.FinishDrawing()
+            b = base64.b64encode(d2.GetDrawingText().encode()).decode()
+            struct = (f'<img src="data:image/svg+xml;base64,{b}" alt="structure" '
+                      f'style="max-width:620px;width:100%;background:#fff;'
+                      f'border:1px solid var(--rule);border-radius:4px;padding:10px">'
+                      f'<p class="mono" style="font-size:11px;color:var(--muted);'
+                      f'word-break:break-all">{html.escape(smi or "")}</p>')
+    except Exception as exc:                               # noqa: BLE001
+        struct = rt.callout("Structure unavailable",
+                            f"<code>{html.escape(str(exc))}</code>", "warn")
     blocks = [
         rt.masthead(ident, f"{verdict} &middot; 10 ns attack-geometry sweep",
                     "sweep result",
@@ -195,10 +207,10 @@ def main() -> None:
         f'approaches.</p>',
         # STRUCTURE FIRST. Everything below is about a molecule, and the page
         # used to never show which one.
-        ('<details class="panel" open><summary>Structure and simulated pose'
-         '<span class="hint">the depiction, and the mode that was run</span>'
-         '</summary><div class="pbody">'
-         f'{struct}{pose_block}</div></details>') if (struct or pose_block) else "",
+        ('<details class="panel" open><summary>Structure'
+         '<span class="hint">what the molecule is — the pose is in the movie'
+         '</span></summary><div class="pbody">'
+         f'{struct}</div></details>') if struct else "",
         (f'<details class="panel" open><summary>Trajectory plots'
          f'<span class="hint">ligand RMSD with its maximum, and warhead–Cys113 '
          f'distance against the attack window</span></summary><div class="pbody">'
