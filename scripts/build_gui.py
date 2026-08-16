@@ -163,7 +163,12 @@ def home(counts: dict, s: dict, worklist: Path | None) -> str:
         '<div class="cards">'
         + "".join(f'<div class="card"><b>{v}</b><span>{k}</span></div>'
                   for k, v in [
-                      ("molecules screened", counts.get("molecules", "—")),
+                      # "RANKED", NOT "SCREENED", and the difference is 4,000
+                      # molecules. The screen ran 5,697; the ranking carries the
+                      # 1,634 that are T_4 (D0081). A card labelled "screened"
+                      # showing the ranked count understates the screen by 4x and
+                      # would be read as the funnel's first step.
+                      ("molecules ranked (T_4)", counts.get("molecules", "—")),
                       ("binding modes ranked", counts.get("modes", "—")),
                       ("modes on this campaign", s.get("ok", 0) + s.get("pending", 0)
                                                  + s.get("failed", 0)),
