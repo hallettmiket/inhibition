@@ -103,16 +103,32 @@ tr:hover td{background:var(--blue-pale)}
 .bar i.g{background:var(--good)}
 .prog{display:flex;height:9px;border-radius:4px;overflow:hidden;border:1px solid var(--rule)}
 .prog i{display:block;height:100%}
-/* Table left, inspector right -- the same shape as the ranking view, so moving
-   between the two pages does not mean relearning where things are. */
-#two{display:grid;grid-template-columns:1fr 420px;gap:18px;align-items:start}
+/* A NARROW SELECTOR AND A LARGE VIEWER -- the proportions of the MD results and
+   ranking pages, which is what "look just like MD results" means in practice.
+   The first attempt gave the table 1fr and the inspector 420px, so the thing
+   being selected FROM dominated the thing being looked AT, and the plots ended
+   up in a 420px column below the fold. Reversed: the rail is fixed and the
+   viewer takes everything else. */
+#two{display:grid;grid-template-columns:380px 1fr;gap:18px;align-items:start;
+ min-height:0}
 @media(max-width:1000px){#two{grid-template-columns:1fr}}
-#side{position:sticky;top:0;max-height:calc(100vh - 110px);overflow-y:auto}
-#side details{margin:.6rem 0}
-#side summary{font:600 12px var(--sans);cursor:pointer}
-#side .hint{font-weight:400;color:var(--muted);margin-left:.4rem}
-#side table{font-size:12px}
+#tbl{max-height:calc(100vh - 250px);overflow-y:auto;border:1px solid var(--rule);
+ border-radius:4px}
+#tbl table{font-size:11.5px}
+#tbl th{font-size:9px;padding:.3rem .4rem}
+#tbl td{padding:.28rem .4rem}
+/* The rail is 380px, so only the columns that decide a click survive: which
+   mode, how it did, and how strongly. The rest is on the viewer side, where
+   there is room to read it. */
+#tbl td.dim,#tbl th.dim{display:none}
+#side{min-width:0}
+#side details{margin:.7rem 0}
+#side summary{font:600 12.5px var(--sans);cursor:pointer;padding:.3rem 0}
+#side .hint{font-weight:400;color:var(--muted);margin-left:.4rem;font-size:11px}
+#side table{font-size:12.5px}
 #side table td:first-child{color:var(--muted)}
+#sgrid{display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start}
+@media(max-width:1200px){#sgrid{grid-template-columns:1fr}}
 tr.pick{cursor:pointer}
 tr.pick.cur td{background:var(--blue-pale);font-weight:700}
 /* Same callout the other pages use, so a caveat looks like a caveat everywhere. */
@@ -252,26 +268,35 @@ process table and does not pretend to. The table re-reads
 <div id="two">
   <div id="tbl"></div>
   <aside id="side">
-    <div id="sname" class="note" style="margin:0 0 6px">select a mode</div>
-    <img id="sstruct" class="pvstruct" alt="" style="display:none">
-    <div class="pvbox"><div id="pv"></div></div>
-    <div class="pvctl">
-      <label><input type="checkbox" id="pv-surf" checked onchange="redraw()">
-        pocket surface</label>
-      <span>Cys113 in element colours, sphere on Sγ</span>
+    <div id="sname" class="note" style="margin:0 0 8px">select a mode</div>
+    <div id="sgrid">
+      <div>
+        <img id="sstruct" class="pvstruct" alt="" style="display:none">
+        <div class="pvbox" style="height:250px"><div id="pv"></div></div>
+        <div class="pvctl">
+          <label><input type="checkbox" id="pv-surf" checked onchange="redraw()">
+            pocket surface</label>
+        </div>
+        <div id="sfacts"></div>
+      </div>
+      <div id="sright">
+        <!-- The trajectory, at a size worth looking at. This is the panel the
+             narrow-rail layout exists to make room for. -->
+        <img id="splot" style="display:none;width:100%;border:1px solid var(--rule);
+             border-radius:4px;background:#fff"
+             alt="10 ns RMSD and warhead-sulfur distance">
+        <div id="splotmiss" class="note" style="display:none"></div>
+      </div>
     </div>
-    <div id="sfacts"></div>
     <!-- The same three things the MD page shows, for the 10 ns run: the pose,
          the movie, and the trajectory plots. Details, so a 9 MB movie is
          fetched only when asked for. -->
     <details id="smovwrap" style="display:none"><summary>10 ns movie
-      <span class="hint">ligand in yellow, CA-fitted</span></summary>
-      <div class="pvbox" style="height:300px"><div id="smov"></div></div>
+      <span class="hint">ligand in yellow, CA-fitted — 126 frames</span></summary>
+      <div class="pvbox" style="height:420px"><div id="smov"></div></div>
       <div class="pvctl"><button class="mbtn" onclick="playPause()"
-        id="playbtn">play</button><span id="frameno"></span></div>
+        id="playbtn">play</button></div>
     </details>
-    <img id="splot" class="pvstruct" style="display:none;max-height:none"
-         alt="10 ns RMSD and warhead-sulfur distance">
   </aside>
 </div>"""
     js = """
@@ -328,18 +353,21 @@ function draw(){
     const d=(ORDER[a.sweep_state]??9)-(ORDER[b.sweep_state]??9); if(d) return d;
     return (b.frac_attack_ready??-1)-(a.frac_attack_ready??-1);});
   document.getElementById('tbl').innerHTML =
-    '<table><thead><tr><th>mode</th><th>class</th><th>state</th>'
-    + '<th>attack-ready</th><th>visits</th><th>in window</th><th>median d (Å)</th>'
-    + '<th>enrichment</th><th>class rank</th></tr></thead><tbody>'
+    '<table><thead><tr><th>mode</th><th>state</th>'
+    + '<th>ready</th><th>visits</th><th class="dim">in window</th>'
+    + '<th class="dim">median d (Å)</th><th class="dim">enrichment</th>'
+    + '<th class="dim">class rank</th></tr></thead><tbody>'
     + r.map(x=>{
       const cls='t-'+(x.sweep_state||'').replace(' ','');
       const bad=x.sweep_state==='failed'&&x.status?' title="'+String(x.status).replace(/"/g,'')+'"':'';
       return '<tr onclick="pick(\\''+x.ident+'\\')" class="pick'
-        +(SEL===x.ident?' cur':'')+'"><td>'+x.ident+'</td><td>'+(x.warhead_class||'—')+'</td>'
+        +(SEL===x.ident?' cur':'')+'"><td>'+x.ident.replace(/^t4_/,'')+'</td>'
         +'<td'+bad+'><span class="tag '+cls+'">'+(x.sweep_state||'')+'</span></td>'
         +'<td>'+f(x.frac_attack_ready,3)+'</td><td>'+f(x.n_visits,0)+'</td>'
-        +'<td>'+f(x.frac_in_window,3)+'</td><td>'+f(x.median_dist_a,2)+'</td>'
-        +'<td>'+f(x.enrichment,2)+'</td><td>'+f(x.class_rank,0)+'</td></tr>';}).join('')
+        +'<td class="dim">'+f(x.frac_in_window,3)+'</td>'
+        +'<td class="dim">'+f(x.median_dist_a,2)+'</td>'
+        +'<td class="dim">'+f(x.enrichment,2)+'</td>'
+        +'<td class="dim">'+f(x.class_rank,0)+'</td></tr>';}).join('')
     + '</tbody></table>';
 }
 // --- structure and pose, the same assets the ranking view draws -------------
@@ -364,9 +392,14 @@ function pick(id){
   // The plot is an <img> and costs one request; the movie is ~9 MB and is
   // fetched only if the reader opens it. Both are named by MODE, not by
   // molecule -- two modes of one molecule are different trajectories.
-  const pl=document.getElementById('splot');
-  pl.onerror=function(){ pl.style.display='none'; };
-  pl.onload =function(){ pl.style.display=''; };
+  const pl=document.getElementById('splot'), ms=document.getElementById('splotmiss');
+  // An absent figure SAYS it is absent. Hiding it silently is why "I don't see
+  // the rmsd plots at all" was ambiguous between "not built yet" and "broken".
+  pl.onerror=function(){ pl.style.display='none'; ms.style.display='';
+    ms.innerHTML='<b>No trajectory figure for this mode yet.</b><br>'
+      +'Assets are built per mode by <code>scripts/sweep_assets.py</code>; '
+      +'this one has not been generated, or its 10 ns run did not finish.'; };
+  pl.onload =function(){ pl.style.display=''; ms.style.display='none'; };
   pl.src='sweep_assets/'+id+'.png';
   const mw=document.getElementById('smovwrap');
   mw.style.display=''; mw.open=false; MOVID=id; MOVLOADED=false;

@@ -64,17 +64,32 @@ def rep_dir(parent: str) -> Path | None:
 
 
 def _xvg(path: Path):
-    """(x, y) from a GROMACS .xvg, comments dropped."""
+    """(x, y) from a GROMACS .xvg, with x converted to NANOSECONDS.
+
+    THE UNIT IS READ FROM THE FILE, NOT ASSUMED. These traces declare
+    `@ xaxis label "Time (ns)"` and run 0 -> 10.0; the first version of this
+    divided by 1000 on the assumption they were picoseconds, and every plot came
+    out with a 10 ns run spanning 0.010 ns. The axis was wrong by three orders of
+    magnitude and the shape of the trace looked entirely normal, which is why it
+    survived a review -- @tt8804 caught it by reading the tick labels.
+    """
     if not path.is_file():
         return None, None
+    scale = 1.0
     xs, ys = [], []
     for ln in path.read_text(errors="replace").splitlines():
+        if ln.startswith("@") and "xaxis" in ln and "label" in ln:
+            lab = ln.lower()
+            if "(ps)" in lab:
+                scale = 1e-3
+            elif "(fs)" in lab:
+                scale = 1e-6
         if not ln or ln[0] in "#@":
             continue
         f = ln.split()
         if len(f) >= 2:
             try:
-                xs.append(float(f[0])); ys.append(float(f[1]))
+                xs.append(float(f[0]) * scale); ys.append(float(f[1]))
             except ValueError:
                 continue
     return np.array(xs), np.array(ys)
@@ -93,13 +108,23 @@ def plots(rep: Path, ident: str) -> str:
         return ""
     fig, ax = plt.subplots(2, 1, figsize=(7.2, 3.9), dpi=150, sharex=True)
     if t_r is not None:
-        ax[0].plot(t_r / 1000.0, rmsd, lw=1.0, color="#0072ce")
+        ax[0].plot(t_r, rmsd, lw=1.0, color="#0072ce")
         ax[0].set_ylabel("ligand RMSD (nm)")
+        # MAX RMSD MARKED, because it is the number the 100 ns page RANKS on --
+        # how far the molecule ever got from where it started. A trace without it
+        # makes the reader eyeball the peak, and the eye reads a noisy maximum
+        # low. Drawn as a line plus its value so the plot states it outright.
+        mx = float(np.nanmax(rmsd))
+        ax[0].axhline(mx, color="#8a6d1f", ls="--", lw=1.0)
+        ax[0].text(0.995, mx, f" max {mx:.3f} nm ", ha="right", va="bottom",
+                   fontsize=7.5, color="#8a6d1f",
+                   transform=ax[0].get_yaxis_transform())
+        ax[0].set_ylim(0, max(mx * 1.18, 0.05))
     if t_d is not None:
         # THE WINDOW THE SCORE USES, drawn from the criterion itself.
         ax[1].axhspan(nac.NAC_DIST_MIN, nac.NAC_DIST_MAX, color="#0f7a54",
                       alpha=0.13, lw=0)
-        ax[1].plot(t_d / 1000.0, dist * 10.0, lw=1.0, color="#b3261e")
+        ax[1].plot(t_d, dist * 10.0, lw=1.0, color="#b3261e")
         ax[1].set_ylabel("warhead–S$\\gamma$ (Å)")
         ax[1].text(0.995, nac.NAC_DIST_MAX, " attack range", ha="right",
                    va="bottom", fontsize=7, color="#0f7a54",
@@ -119,6 +144,9 @@ def main() -> None:
     ap.add_argument("--worklist", required=True)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--plots-only", action="store_true",
+                    help="rebuild the figures and leave the movies alone -- "
+                         "plots are ~1 s, movies ~3 s and rarely change")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -133,17 +161,22 @@ def main() -> None:
     for i, ident in enumerate(idents, 1):
         parent = ident.rsplit("_m", 1)[0]
         pdb, png = OUT / f"{ident}.pdb", OUT / f"{ident}.png"
-        if not args.force and pdb.is_file() and png.is_file():
+        want_mov = not args.plots_only
+        # `--plots-only` REGENERATES the figures. Skipping when the PNG exists
+        # made the flag a no-op in exactly the case it is for -- rebuilding the
+        # plots after changing how they are drawn -- and the run printed
+        # "0 plots" while looking like it had succeeded.
+        if not (args.force or args.plots_only) and png.is_file() and pdb.is_file():
             continue
         rep = rep_dir(parent)
         if rep is None:
             miss[parent] = "no finished 10 ns run"
             continue
         try:
-            if args.force or not pdb.is_file():
+            if want_mov and (args.force or not pdb.is_file()):
                 mov.build_movie_pdb(rep, pdb, total_ps=10_000.0)
                 n_mov += 1
-            if args.force or not png.is_file():
+            if args.force or args.plots_only or not png.is_file():
                 b64 = plots(rep, ident)
                 if b64:
                     png.write_bytes(base64.b64decode(b64)); n_png += 1
