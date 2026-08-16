@@ -9,6 +9,7 @@ had simply not been swept yet.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -108,3 +109,45 @@ def test_the_modules_import_without_touching_the_filesystem(name):
     """A GUI helper that reads /data at import time cannot be tested anywhere."""
     import importlib
     importlib.reload(importlib.import_module(f"shared.{name}"))
+
+
+# --------------------------------------------------------------------------
+# the sweep page's pose viewer -- the four ways a 3Dmol panel comes up blank
+# --------------------------------------------------------------------------
+
+def test_the_pose_viewer_calls_render():
+    """3Dmol draws nothing without it. Cost: one round of "I can't see anything"."""
+    from shared import pose_viewer as pv
+    assert "render()" in pv.mount_js(113, "[]")
+
+
+def test_the_pose_container_has_an_explicit_height():
+    """A zero-height container yields a 0x0 canvas and no error."""
+    from shared import pose_viewer as pv
+    assert re.search(r"\.pvbox\{[^}]*height:\d+px", pv.CSS)
+
+
+def test_the_canvas_is_sized_after_layout_settles():
+    """Sizing before the grid settles gives an off-centre, unrotatable view."""
+    from shared import pose_viewer as pv
+    js = pv.mount_js(113, "[]")
+    assert js.count("requestAnimationFrame") >= 2, "needs the double rAF"
+
+
+def test_the_page_puts_the_library_and_data_before_the_code_that_uses_them():
+    """Both inversions produce a silently blank viewer."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "build_gui", REPO / "scripts" / "build_gui.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    page = m._page("t", "sweep.html", {}, "<div id='b'></div>",
+                   extra_js="USECODE", head_js="<script>LIBRARY</script>",
+                   tail_data="<pre id='recpdb'>DATA</pre>")
+    assert page.index("LIBRARY") < page.index("USECODE")
+    assert page.index("DATA") < page.index("USECODE")
+
+
+def test_a_missing_pose_asset_is_reported_not_left_blank():
+    from shared import pose_viewer as pv
+    assert "pvempty" in pv.CSS

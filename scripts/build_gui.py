@@ -103,21 +103,33 @@ tr:hover td{background:var(--blue-pale)}
 .bar i.g{background:var(--good)}
 .prog{display:flex;height:9px;border-radius:4px;overflow:hidden;border:1px solid var(--rule)}
 .prog i{display:block;height:100%}
+/* Table left, inspector right -- the same shape as the ranking view, so moving
+   between the two pages does not mean relearning where things are. */
+#two{display:grid;grid-template-columns:1fr 360px;gap:18px;align-items:start}
+@media(max-width:1000px){#two{grid-template-columns:1fr}}
+#side{position:sticky;top:0}
+#side table{font-size:12px}
+#side table td:first-child{color:var(--muted)}
+tr.pick{cursor:pointer}
+tr.pick.cur td{background:var(--blue-pale);font-weight:700}
 /* Same callout the other pages use, so a caveat looks like a caveat everywhere. */
 .warnbox{border-left:3px solid var(--warn);background:var(--rail);padding:.6rem .9rem;
  font-size:12px;margin:.7rem 0 .2rem;border-radius:0 3px 3px 0;max-width:95ch}
 """
 
 
-def _page(title: str, current: str, counts: dict, body: str, extra_js: str = "") -> str:
+def _page(title: str, current: str, counts: dict, body: str, extra_js: str = "",
+          extra_css: str = "", head_js: str = "", tail_data: str = "") -> str:
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)}</title>
-<style>{BASE_CSS}{gs.CSS}</style></head><body>
+<style>{BASE_CSS}{gs.CSS}{extra_css}</style>
+{head_js}</head><body>
 <div id="topbar"><h1>{html.escape(title)}</h1><span class="msep"></span>
 <button class="mbtn" onclick="tt()">dark</button></div>
 {gs.nav(current, counts)}
 <main>{body}</main>
+{tail_data}
 <script>
 function tt(){{const d=document.documentElement.getAttribute('data-theme')==='dark';
 document.documentElement.setAttribute('data-theme',d?'light':'dark');}}
@@ -219,13 +231,35 @@ def sweep_json(d, s, worklist: Path | None) -> str:
 
 
 def sweep_page(counts: dict) -> str:
+    """The table, plus one pose in the pocket -- same assets as the ranking view.
+
+    The 3Dmol library and the receptor are vendored INTO the page and placed
+    BEFORE the script that uses them. Both orderings have already produced a
+    silently blank viewer in this project: a library loaded at the end of the
+    body is undefined when the viewer looks for it, and a data element parsed
+    after the code that reads it yields an empty string with no error.
+    """
     body = """
 <div id="head"></div>
 <p class="note">10 ns triage. <b>Pending</b> means the mode is on the active
 worklist with no result yet — queued or mid-trajectory; this page cannot see the
 process table and does not pretend to. The table re-reads
-<code>sweep_state.json</code> every 30 s, so it fills in as runs land.</p>
-<div id="tbl"></div>"""
+<code>sweep_state.json</code> every 30 s, so it fills in as runs land.
+<b>Click a row</b> to see the structure and the pose that was simulated.</p>
+<div id="two">
+  <div id="tbl"></div>
+  <aside id="side">
+    <div id="sname" class="note" style="margin:0 0 6px">select a mode</div>
+    <img id="sstruct" class="pvstruct" alt="" style="display:none">
+    <div class="pvbox"><div id="pv"></div></div>
+    <div class="pvctl">
+      <label><input type="checkbox" id="pv-surf" checked onchange="redraw()">
+        pocket surface</label>
+      <span>Cys113 in element colours, sphere on Sγ</span>
+    </div>
+    <div id="sfacts"></div>
+  </aside>
+</div>"""
     js = """
 let ROWS=[], SUM={}, PRED={}, SORT='frac_attack_ready';
 // THE SWEEP'S OWN HEADLINE. Does the docked ranking predict what the trajectory
@@ -286,13 +320,51 @@ function draw(){
     + r.map(x=>{
       const cls='t-'+(x.sweep_state||'').replace(' ','');
       const bad=x.sweep_state==='failed'&&x.status?' title="'+String(x.status).replace(/"/g,'')+'"':'';
-      return '<tr><td>'+x.ident+'</td><td>'+(x.warhead_class||'—')+'</td>'
+      return '<tr onclick="pick(\\''+x.ident+'\\')" class="pick'
+        +(SEL===x.ident?' cur':'')+'"><td>'+x.ident+'</td><td>'+(x.warhead_class||'—')+'</td>'
         +'<td'+bad+'><span class="tag '+cls+'">'+(x.sweep_state||'')+'</span></td>'
         +'<td>'+f(x.frac_attack_ready,3)+'</td><td>'+f(x.n_visits,0)+'</td>'
         +'<td>'+f(x.frac_in_window,3)+'</td><td>'+f(x.median_dist_a,2)+'</td>'
         +'<td>'+f(x.enrichment,2)+'</td><td>'+f(x.class_rank,0)+'</td></tr>';}).join('')
     + '</tbody></table>';
 }
+// --- structure and pose, the same assets the ranking view draws -------------
+let SEL=null, PDBC={};
+function pick(id){
+  SEL=id; draw();
+  const x=ROWS.find(r=>r.ident===id); if(!x) return;
+  const par=id.replace(/_m\\d+$/,''), mode=parseInt((id.match(/_m(\\d+)$/)||[0,'-1'])[1],10);
+  document.getElementById('sname').innerHTML='<b>'+id+'</b>'
+    +(x.mode_label&&x.mode_label!==String(mode)?' &middot; mode '+x.mode_label:'');
+  const im=document.getElementById('sstruct');
+  im.src='mode_thumbs/'+par+'.svg'; im.style.display='';
+  document.getElementById('sfacts').innerHTML=
+    '<table><tbody>'
+    +[['state',x.sweep_state],['attack-ready',f(x.frac_attack_ready,3)],
+      ['visits',f(x.n_visits,0)],['in window',f(x.frac_in_window,3)],
+      ['median distance',f(x.median_dist_a,2)+' Å'],
+      ['enrichment',f(x.enrichment,2)],['class rank',f(x.class_rank,0)]]
+     .map(k=>'<tr><td>'+k[0]+'</td><td>'+k[1]+'</td></tr>').join('')
+    +'</tbody></table>';
+  load3d(par, mode);
+}
+async function load3d(par, mode){
+  try{
+    if(!PDBC[par]){
+      const r=await fetch('mode_poses/'+par+'.pdb');
+      if(!r.ok) throw new Error('no pose asset ('+r.status+')');
+      PDBC[par]=await r.text();
+    }
+    mountPose('pv', PDBC[par], mode, document.getElementById('recpdb').textContent);
+  }catch(e){
+    // The reason, not a guess at it -- an empty box reads as a broken page.
+    document.getElementById('pv').innerHTML=
+      '<div class="pvempty"><b>No pose drawn.</b><br>'+String(e.message||e)+'</div>';
+  }
+}
+function redraw(){ if(SEL){ const p=SEL.replace(/_m\\d+$/,'');
+  const m=parseInt((SEL.match(/_m(\\d+)$/)||[0,'-1'])[1],10); load3d(p,m); } }
+
 async function load(){
   try{
     const r=await fetch('sweep_state.json?t='+Date.now());
@@ -304,7 +376,20 @@ async function load(){
   }catch(e){}
 }
 load(); setInterval(load, 30000);"""
-    return _page("DWI covalent screen — Sweep", "sweep.html", counts, body, js)
+    # ORDER IS THE WHOLE POINT. The 3Dmol library goes in <head>, before any
+    # code that names it; the receptor goes in the body BEFORE the script that
+    # reads it. Both inversions have produced a silently blank viewer here.
+    from shared import mode_ranking as mr
+    from shared import pose_viewer as pv
+    lib = (REPO / "scripts" / ".cache_3dmol-min.js")
+    three = f"<script>{lib.read_text()}</script>" if lib.is_file() else ""
+    rec = ("\n".join(l for l in mr.RECEPTOR.read_text().splitlines()
+                     if l.startswith(("ATOM", "HETATM")))
+           if mr.RECEPTOR.is_file() else "")
+    tail = f'<pre id="recpdb" style="display:none">{html.escape(rec)}</pre>'
+    vjs = pv.mount_js(mr.CYS_RESI, json.dumps(mr.pocket_residues()))
+    return _page("DWI covalent screen — Sweep", "sweep.html", counts, body,
+                 vjs + js, extra_css=pv.CSS, head_js=three, tail_data=tail)
 
 
 def main() -> None:
@@ -336,6 +421,7 @@ def main() -> None:
     }
     (OUT / "index.html").write_text(home(counts, s, wl))
     (OUT / "sweep.html").write_text(sweep_page(nav_counts))
+    log.info("sweep page: viewer assets from %s", mr.B.name)
     print(f"  index.html + sweep.html + sweep_state.json -> {OUT}")
     print(f"  {s}")
 
