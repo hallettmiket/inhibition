@@ -236,20 +236,13 @@ def _md() -> pd.DataFrame:
 
 
 def _version() -> tuple[str, str]:
-    """Current version and its codename, read from the CHANGELOG's first entry.
+    """Delegates to `report_theme.release()` -- one reader for the release.
 
-    Not a constant in this file. A version literal here would be a pin, and pins
-    in this repo go stale silently -- the CHANGELOG is where the release is
-    actually declared, so ask it.
+    This one was correct; `mdprio_report` carried a literal that was two
+    releases stale. Two readers of the same fact is one too many.
     """
-    import re
-    p = REPO / "CHANGELOG.md"
-    if p.is_file():
-        m = re.search(r'^##\s+([0-9]+\.[0-9]+\.[0-9]+)\s+[""“”"]?([^""“”"\n—-]*)',
-                      p.read_text(), re.M)
-        if m:
-            return m.group(1), m.group(2).strip().strip('"“”')
-    return "", ""
+    from shared import report_theme as _rt
+    return _rt.release()
 
 
 def _sweep_all() -> pd.DataFrame:

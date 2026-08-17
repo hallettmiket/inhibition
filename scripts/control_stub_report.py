@@ -140,7 +140,7 @@ def main() -> None:
 
     body = (
         rt.masthead(f"{args.candidate} — 100 ns residence", stand,
-                    "CONTROL · 2.2.0 CHALCOPYRITE", mast_facts)
+                    rt.eyebrow("CONTROL"), mast_facts)
         + f'<p>{rt.pill("Held" if held else "Left")} '
           f'Max ligand RMSD {rmax:.3f} nm against the {BOUND_NM} nm bar '
           f'&middot; {args.note}</p>'

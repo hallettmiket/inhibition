@@ -291,3 +291,40 @@ def section(num_: str, title: str, sub: str = "") -> str:
     s = f'<p class="sub">{sub}</p>' if sub else ""
     return (f'<div class="shead"><div class="snum">{num_}</div>'
             f'<div><h2>{title}</h2>{s}</div></div>')
+
+
+def release() -> tuple[str, str]:
+    """The current version and codename, from the CHANGELOG's first entry.
+
+    ONE DEFINITION, BECAUSE A VERSION LITERAL GOES STALE SILENTLY. `mdprio_report`
+    carried `"MD-PRIORITY · 2.2.0 BORNITE"` as a string, and it was wrong twice
+    over: 2.2.0 is Chalcopyrite, Bornite is 2.1.0 — so the masthead of every
+    100 ns report named a release that never existed, two releases back.
+    @tt8804, reading one: "why does this say bornite??"
+
+    `mdprio_combine` already read the CHANGELOG for exactly this reason. That
+    reader is here now so there is one of it.
+    """
+    import re
+    from pathlib import Path as _P
+    p = _P(__file__).resolve().parent.parent / "CHANGELOG.md"
+    if not p.is_file():
+        return "", ""
+    # A CODENAME IS QUOTED; A STATUS IS NOT. The heading is either
+    # `## 3.0.0 "Galena" — in progress` or `## 3.1.0 — in progress`, and a
+    # looser pattern reads the status as the name: the first version of this
+    # returned ("3.1.0", "in progress") and would have printed
+    # `3.1.0 IN PROGRESS` on every masthead.
+    m = re.search(r'^##\s+([0-9]+\.[0-9]+\.[0-9]+)([^\n]*)$',
+                  p.read_text(errors="replace"), re.M)
+    if not m:
+        return "", ""
+    q = re.search(r'[“"\u201c]([^”"\u201d]+)[”"\u201d]', m.group(2))
+    return m.group(1), (q.group(1).strip() if q else "")
+
+
+def eyebrow(stage: str) -> str:
+    """`STAGE · <version> <codename>` for a report masthead."""
+    v, c = release()
+    tail = " ".join(x for x in (v, c.upper()) if x)
+    return f"{stage} · {tail}" if tail else stage

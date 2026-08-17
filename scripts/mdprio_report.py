@@ -607,7 +607,13 @@ def main() -> None:
             f"{args.candidate} — 100 ns residence",
             f"{verdict}. Residence fraction {res['residence_frac']:.3f} "
             f"(frames with ligand RMSD ≤ {BOUND_NM} nm).",
-            "MD-PRIORITY · 2.2.0 BORNITE", facts),
+            # THE STAGE AND THE RELEASE, BOTH DERIVED. This was the literal
+            # "MD-PRIORITY · 2.2.0 BORNITE" -- wrong twice over, since 2.2.0 is
+            # Chalcopyrite and Bornite is 2.1.0, so every 100 ns report named a
+            # release that never existed, two releases back. "MD-PRIORITY" was
+            # also the 2.2.0 name for a prereg experiment, not the stage this
+            # page now reports.
+            rt.eyebrow(f"PRODUCTION MD · {int(total_ns)} NS"), facts),
         (f'<div class="structrow"><div class="structbox">{struct_svg}</div>'
          f'<div class="structnote"><b>{cls or "unclassified"}</b>'
          + (f' &middot; attack-ready {sweep_ar*100:.1f}% of the 10 ns sweep'

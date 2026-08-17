@@ -238,3 +238,32 @@ def test_every_frames_call_site_uses_a_name_that_resolves():
         for m in re.finditer(r'rp\.frames\(\s*"([^"]+)"\s*\)', src):
             assert m.group(1).upper() in ok, \
                 f"{f} asks for frames({m.group(1)!r}), which resolves to nothing"
+
+
+def test_no_report_hardcodes_a_release():
+    """`mdprio_report` carried the literal "MD-PRIORITY · 2.2.0 BORNITE", wrong
+    twice over: 2.2.0 is Chalcopyrite and Bornite is 2.1.0. Every 100 ns report
+    named a release that never existed, two releases back. @tt8804: "why does
+    this say bornite??"
+
+    A version in code is a pin, and pins in this repo go stale silently."""
+    import re
+    for f in ("scripts/mdprio_report.py", "scripts/mdprio_combine.py",
+              "scripts/control_stub_report.py", "scripts/sweep_report.py"):
+        src = (REPO / f).read_text()
+        code = "\n".join(l for l in src.splitlines()
+                         if not l.strip().startswith("#"))
+        m = re.search(r'"[^"]*\b\d+\.\d+\.\d+\s+[A-Z]{4,}[^"]*"', code)
+        assert not m, f"{f} hardcodes a release: {m.group(0)}"
+
+
+def test_the_release_reader_needs_a_quoted_codename():
+    """The CHANGELOG heading is either `## 3.0.0 "Galena" — in progress` or
+    `## 3.1.0 — in progress`. A looser pattern reads the STATUS as the name: the
+    first version returned ("3.1.0", "in progress") and would have printed
+    `3.1.0 IN PROGRESS` across every masthead."""
+    from shared import report_theme as rt
+    v, c = rt.release()
+    assert re.match(r"^\d+\.\d+\.\d+$", v), f"bad version {v!r}"
+    assert "progress" not in c.lower(), f"status read as codename: {c!r}"
+    assert rt.eyebrow("X").startswith("X · ")
