@@ -51,10 +51,11 @@ sys.path.insert(0, str(REPO / "scripts"))
 from shared import outputs as sout                  # noqa: E402
 from shared import md_movie as mov                  # noqa: E402
 from shared import nac_criterion as nac             # noqa: E402
+from shared import run_paths as rp            # noqa: E402
 
 log = logging.getLogger("attack-sweep")
 MD = Path("/data/lab_vm/modifiable/inhibition/md_residence_3ikd")
-OUT = sout.Topic("blacksmith", "mdprio_reports")
+OUT = sout.Topic("blacksmith", rp.reports_topic())   # scoped to this run (#74)
 
 #: 100 ps resolution over 100 ns. Enough that a 10 ns window still holds 100
 #: points, which is what makes the truncation comparison meaningful at all.

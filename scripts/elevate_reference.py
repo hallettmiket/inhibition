@@ -53,10 +53,11 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from shared import outputs as sout                # noqa: E402
 from shared import receptors as R                 # noqa: E402
+from shared import run_paths as rp            # noqa: E402
 import md_residence_3ikd as mr                    # noqa: E402
 
 log = logging.getLogger("elevate-ref")
-OUT = sout.Topic("blacksmith", "md_residence")
+OUT = sout.Topic("blacksmith", rp.residence_topic())  # scoped to this run (#74)
 REF = REPO / "data/reference/pin1_reference_binders_4.csv"
 POSES = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v2_poses")
 

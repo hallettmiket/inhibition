@@ -25,6 +25,7 @@ pages that differ only in dot positions.
 from __future__ import annotations
 
 from . import run_paths as rp
+from . import target_config as tc
 
 import collections
 import json
@@ -35,15 +36,49 @@ from pathlib import Path
 SEED = 7
 N_POSES = 500
 
-#: A real screened molecule to illustrate with: 491 poses, exactly three modes.
-#: Named here rather than discovered, because the page is a worked example and it
-#: should show the SAME molecule every time it is rebuilt.
-EXAMPLE = "t4_0e251ffccad1"
-ALLPOSES = ("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
-            "nac_v3_allposes")
-RECEPTOR = ("/data/lab_vm/modifiable/inhibition/receptor_3ikd_prep/"
-            "3IKD_noligand.pdb")
+#: The molecule the worked example is drawn from.
+#:
+#: PINNED WITHIN A RUN, CHOSEN PER RUN. It was a literal -- a nac_v3 molecule --
+#: so after a topic bump the page that explains the CURRENT screen had no cloud
+#: to draw and fell back to schematic dots only. `example_molecule()` picks
+#: deterministically from THIS topic's clouds, so the picture is the same on
+#: every rebuild of a given run and still exists after the next one.
+EXAMPLE_PIN: str | None = None
+#: THIS RUN's pose clouds and receptor. Both were literals -- `nac_v3_allposes`
+#: and `3IKD_noligand.pdb` -- so the page that explains the CURRENT screen drew
+#: its worked example from a superseded one and named a receptor the config no
+#: longer has to agree with.
+ALLPOSES = str(rp.allposes_dir())
+RECEPTOR = str(rp.receptor_prep())
 THREEDMOL = "scripts/.cache_3dmol-min.js"
+
+
+def example_molecule() -> str | None:
+    """A molecule from this run to draw the worked example from.
+
+    Wants a cloud that actually shows the point: several hundred poses and at
+    least three modes, so "the mess is several binding modes" has three visible
+    clusters rather than one. Chosen by sorted name among the candidates that
+    qualify -- deterministic, so the page does not change picture on every
+    rebuild, and derived, so it survives a topic bump.
+    """
+    import glob as _g
+    if EXAMPLE_PIN:
+        return EXAMPLE_PIN
+    best = None
+    for f in sorted(_g.glob(str(rp.allposes_dir() / "*.sdf")))[:60]:
+        try:
+            poses = _read_sdf(Path(f))
+        except Exception:                                  # noqa: BLE001
+            continue
+        if len(poses) < 200:
+            continue
+        modes = {q["mode"] for q in poses}
+        if len(modes) >= 3:
+            return Path(f).stem
+        if best is None:
+            best = Path(f).stem
+    return best
 
 
 def _read_sdf(path):
@@ -547,7 +582,11 @@ def _run_counts() -> dict:
         c = "explicit_ligand_rmsd_nm_max"
         m = m[m[c].notna()]
         out["md"] = int(len(m))
-        out["held"] = int((m[c] < 1.2).sum())
+                # THE BAR FROM CONFIG (D0085: 0.35 nm), not the old 1.2 "did not
+        # dissociate" reading, which passes essentially everything and made the
+        # page's final arrow claim a shortlist three times looser than the rule
+        # that actually gates BPMD.
+        out["held"] = int((m[c] < tc.md_survivor_rmsd_nm()).sum())
     except Exception:                                      # noqa: BLE001
         pass
     return out
@@ -935,6 +974,18 @@ def build(title: str = "DWI Derivative Screen", built: str = "") -> str:
     n_cand = _n_candidates()
     rc = _run_counts()
     n_split, n_modes = _split_counts()
+    # THE SPEC, FROM CONFIG. These were prose ("up to five pieces", "the 2 A we
+    # claim as pose accuracy"), so retuning the splitter left the page stating
+    # the old rule with authority.
+    _c = tc.load()
+    _st2 = (_c.get("splitting", {}) or {}).get("stage2", {}) or {}
+    _cut = _st2.get("cut_diameter_a", 2.0)
+    _maxsub = _st2.get("max_sub", 5)
+    _minsz = _st2.get("min_mode_size", 12)
+    _sp1 = str((_c.get("splitting", {}) or {}).get("stage1", "")).replace("_", " ")
+    _sp2 = (f"whole-molecule RMSD, cut {_cut}&nbsp;&Aring;, max {_maxsub} "
+            f"sub-modes, min {_minsz} poses"
+            if _st2.get("enabled") else "disabled")
 
     # Real poses, drawn flat. Static by design (@tt8804): the interactive viewer
     # cost 2.5 MB and a hairball; what the page needs is a picture you can put
@@ -942,7 +993,8 @@ def build(title: str = "DWI Derivative Screen", built: str = "") -> str:
     real, real_all, real_by, real_one, real_mess = {}, "", {}, "", ""
     real_med = {}
     try:
-        _p = _read_sdf(Path(ALLPOSES) / f"{EXAMPLE}.sdf")
+        _ex = example_molecule()
+        _p = _read_sdf(Path(ALLPOSES) / f"{_ex}.sdf") if _ex else []
     except Exception:                                      # noqa: BLE001
         _p = []
     if _p:
@@ -1173,11 +1225,46 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
 .ovl .psvg{{border:0;border-radius:0;background:none;height:100%}}
 .foot{{margin-top:30px;padding-top:14px;border-top:1px solid var(--rule);
  font-size:12.5px;color:var(--muted)}}
+
+/* CLICK-THROUGH, ONE STAGE AT A TIME (@tt8804). The page was a single long
+   scroll, so the cascade read as one wall rather than as five decisions -- and
+   the pose-splitting picture, which is the part people ask about, sat halfway
+   down where nobody stopped. */
+.slide{{display:none;animation:fade .18s ease-out}}
+.slide.on{{display:block}}
+@keyframes fade{{from{{opacity:0;transform:translateY(4px)}}to{{opacity:1}}}}
+#deck{{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;
+ padding:10px 0 14px;background:var(--bg);border-bottom:1px solid var(--rule);
+ margin-bottom:22px;flex-wrap:wrap}}
+#deck button{{font:600 12px var(--sans);padding:.35rem .75rem;border-radius:99px;
+ border:1px solid var(--rule);background:var(--card);color:var(--ink);cursor:pointer}}
+#deck button:hover:not(:disabled){{background:var(--accent);color:#fff;border-color:var(--accent)}}
+#deck button:disabled{{opacity:.35;cursor:default}}
+.dots{{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}}
+.dot{{font:600 11px var(--sans);padding:.3rem .6rem;border-radius:99px;
+ border:1px solid var(--rule);background:var(--card);color:var(--muted);cursor:pointer}}
+.dot.on{{background:var(--ink);color:var(--bg);border-color:var(--ink)}}
+.dot:hover{{border-color:var(--accent);color:var(--accent)}}
+/* The spec beside the picture: what the splitter is configured to do, so the
+   slide cannot describe a rule the run is not using. */
+.kv2{{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:12px;
+ margin:0 0 12px;padding:8px 10px;background:var(--card);
+ border:1px solid var(--rule);border-radius:5px}}
+.kv2 dt{{font-family:var(--mono);color:var(--muted)}}
+.kv2 dd{{margin:0}}
 </style></head><body>
 
 <h1>{title}</h1>
 <p class="sub">Ranking schematic &middot; Timothy Wu{f" &middot; {built}" if built else ""}</p>
 
+
+<div id="deck">
+ <button id="prev" onclick="go(CUR-1)">&larr; back</button>
+ <button id="next" onclick="go(CUR+1)">next &rarr;</button>
+ <span id="where" style="font:600 12px var(--sans);color:var(--muted)"></span>
+ <span class="dots" id="dots"></span>
+</div>
+<section class="slide" data-i="0">
 <div class="step">
  <div>{chem}</div>
  <div><p class="n0">Step 0 &middot; chemical space</p>
@@ -1189,7 +1276,8 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
 </div>
 
 <div class="arrow"><span>{n_cand} candidates &darr;</span></div>
-
+</section>
+<section class="slide" data-i="1">
 <div class="step">
  <div>{_paired(_stage1(pts), real_mess, 'schematic — one dot per pose',
                f"real — all {real.get('n', 0)} poses in the pocket")}</div>
@@ -1203,7 +1291,8 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
   <p>The search works. The right pose is somewhere in this cloud <strong>93.3%</strong>
   of the time. It gets lost later.</p></div>
 </div>
-
+</section>
+<section class="slide" data-i="2">
 <div class="step">
  <div><div class="trio">
    <figure>{_stage2(pts)}<figcaption>pass 1 &mdash; by warhead</figcaption></figure>
@@ -1214,6 +1303,11 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
  <div><p class="n0">Step 2 &middot; pose splitting</p>
   <h2>Pose splitting &mdash; the mess is several binding modes</h2>
   <p class="mnote" style="margin:0 0 10px">Two passes: by warhead, then by shape.</p>
+  <dl class="kv2">
+   <dt>stage 1</dt><dd>{_sp1}</dd>
+   <dt>stage 2</dt><dd>{_sp2}</dd>
+   <dt>this run</dt><dd>{n_split} molecules &rarr; {n_modes} modes</dd>
+  </dl>
   <p>We group the poses into <strong>modes</strong> by where the reactive atom sits
   and which way the warhead points.</p>
   <p>Not by docking energy, which we know carries no signal here.</p>
@@ -1222,7 +1316,7 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
   reactive atom identically and hang the rest of the molecule 5&nbsp;&Aring; apart
   and still be one mode &mdash; and one representative would have to stand for
   both. It splits again wherever a mode is wider than the 2&nbsp;&Aring; we claim
-  as pose accuracy, up to five pieces. Sub-splits are lettered
+  as pose accuracy ({_cut}&nbsp;&Aring;), up to {_maxsub} pieces. Sub-splits are lettered
   &mdash; <strong>1a, 1b</strong> &mdash; and each is a row of its own, ranked and
   simulated on its own merit.</p>
   <p>Measured on 82 Pin1 crystal structures: carrying one representative recovers
@@ -1234,7 +1328,8 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
 </div>
 
 <div class="arrow"><span>{n_split} candidates &rarr; {n_modes} binding modes &darr;</span></div>
-
+</section>
+<section class="slide" data-i="3">
 <div class="step wide">
  <div class="full"><p class="n0">Step 3 &middot; criteria</p>
   <h2>Can this mode actually react?</h2>
@@ -1251,7 +1346,8 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
       <th class="n">d &Aring;</th><th class="n">angle</th><th class="n">ready</th></tr>
   {rank_rows}</table></div>
 </div>
-
+</section>
+<section class="slide" data-i="4">
 <div class="step">
  <div>{_stage_pool()}
   <p class="mnote" style="margin-top:10px">Ranked on attack-readiness, not on
@@ -1271,7 +1367,8 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
   <code>rank_validated = False</code> &mdash; an ordering we produced, not proof
   the top molecules bind.</p></div>
 </div>
-
+</section>
+<section class="slide" data-i="5">
 <div class="step">
  <div>{_stage_survival()}
  <svg viewBox="0 0 700 196" class="tl" role="img"
@@ -1311,7 +1408,8 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
 
 <div class="arrow"><span>{rc['swept']} swept &rarr; {rc['survivors']} survived the sweep
  &rarr; {rc['md']} ran 100&nbsp;ns &rarr; {rc['held']} still on target &darr;</span></div>
-
+</section>
+<section class="slide" data-i="6">
 <div class="step wide">
  <div class="full"><p class="n0">Elevation</p>
   <h2>What comes out</h2>
@@ -1333,4 +1431,39 @@ framework and its decision records. The controls that test whether this criterio
 recognises chemistry known to react are on the
 <a href="controls.html">controls page</a> — read them next; they qualify everything
 above.</p>
+</section>
+<script>
+// The stage names come from each slide's own "Step N - label" line, so the
+// stepper cannot drift from the slide it points at.
+const SLIDES = Array.from(document.querySelectorAll('.slide'));
+const LABELS = SLIDES.map(function(s, i){{
+  const n = s.querySelector('.n0');
+  if (!n) return 'step ' + i;
+  const t = n.textContent.split('\u00b7');
+  return (t.length > 1 ? t[1] : t[0]).trim();
+}});
+let CUR = 0;
+function go(i){{
+  if (i < 0 || i >= SLIDES.length) return;
+  CUR = i;
+  SLIDES.forEach(function(s, k){{ s.classList.toggle('on', k === i); }});
+  document.getElementById('prev').disabled = (i === 0);
+  document.getElementById('next').disabled = (i === SLIDES.length - 1);
+  document.getElementById('where').textContent =
+    'stage ' + (i + 1) + ' of ' + SLIDES.length;
+  document.querySelectorAll('#dots .dot').forEach(function(d, k){{
+    d.classList.toggle('on', k === i); }});
+  window.scrollTo({{top: 0, behavior: 'instant'}});
+  // Deep-linkable: a stage can be sent to someone directly.
+  history.replaceState(null, '', '#' + (i + 1));
+}}
+document.getElementById('dots').innerHTML = LABELS.map(function(l, i){{
+  return '<button class="dot" onclick="go(' + i + ')">' + (i+1) + '. ' + l + '</button>';
+}}).join('');
+document.addEventListener('keydown', function(e){{
+  if (e.key === 'ArrowRight' || e.key === ' ') {{ e.preventDefault(); go(CUR+1); }}
+  else if (e.key === 'ArrowLeft') {{ e.preventDefault(); go(CUR-1); }}
+}});
+go(Math.max(0, Math.min(SLIDES.length - 1, (parseInt(location.hash.slice(1)) || 1) - 1)));
+</script>
 </body></html>"""

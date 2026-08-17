@@ -71,6 +71,17 @@ RUN_READERS = [
     "scripts/pose_modes_report.py",
     "scripts/shortlist_report.py",
     "shared/pipeline_schematic.py",
+    # Round two: every remaining module that touched a shared run directory,
+    # READ or WRITE. An unscoped WRITE is the same defect one stage earlier --
+    # it is what puts two campaigns' rows in one directory for everything
+    # downstream to disambiguate, and four of these wrote there.
+    "scripts/control_stub_report.py",
+    "scripts/replicate_report.py",
+    "scripts/elevation_report.py",
+    "scripts/attack_sweep_check.py",     # wrote mdprio_reports/
+    "scripts/mdprio_verdict.py",         # wrote mdprio_reports/
+    "scripts/elevate_reference.py",      # wrote md_residence/
+    "scripts/weekend_worklist.py",       # wrote attack_sweep/
 ]
 
 #: Directories every run would share if they were not scoped.

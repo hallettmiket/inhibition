@@ -32,6 +32,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from shared import run_paths as rp            # noqa: E402
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
@@ -183,7 +185,7 @@ def lead_md() -> dict:
     rmsd = read_xvg(LEAD_MD / "rmsd.xvg")
     mind = read_xvg(LEAD_MD / "mindist.xvg")
     ncon = read_xvg(LEAD_MD / "numcont.xvg")
-    whsg = read_xvg(OUTPUTS / "md_residence" /
+    whsg = read_xvg(rp.residence_dir() /
                     f"warhead_sg_distance_{LEAD}_100ns_1.xvg")
 
     t_r, y_r = to_ns(rmsd[:, 0]), rmsd[:, 1]

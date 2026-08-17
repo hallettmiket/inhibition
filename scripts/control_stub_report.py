@@ -38,17 +38,18 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import report_theme as rt                   # noqa: E402
+from shared import run_paths as rp            # noqa: E402
 
 log = logging.getLogger("control-stub")
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
-REPORTS = B / "mdprio_reports"
+REPORTS = rp.reports_dir()               # this run only (#74)
 BOUND_NM = 1.2
 
 
 def md_row(ident: str) -> pd.Series | None:
     """The molecule's 100 ns row, preferring one that succeeded."""
     parts = []
-    for f in glob.glob(str(B / "md_residence/*.csv")):
+    for f in glob.glob(str(rp.residence_dir() / "*.csv")):  # this run only (#74)
         try:
             parts.append(pd.read_csv(f))
         except Exception:                                # noqa: BLE001
@@ -67,7 +68,7 @@ def md_row(ident: str) -> pd.Series | None:
 
 def sweep_row(ident: str) -> pd.Series | None:
     parts = []
-    for f in sorted(glob.glob(str(B / "attack_sweep/attack_sweep_*.csv"))):
+    for f in sorted(glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv"))):  # this run only (#74)
         try:
             parts.append(pd.read_csv(f))
         except Exception:                                # noqa: BLE001

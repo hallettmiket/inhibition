@@ -46,10 +46,11 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import outputs as sout                  # noqa: E402
+from shared import run_paths as rp            # noqa: E402
 
 log = logging.getLogger("worklist")
 RANK = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/rank_v2")
-OUT = sout.Topic("blacksmith", "attack_sweep")
+OUT = sout.Topic("blacksmith", rp.sweep_topic())      # scoped to this run (#74)
 
 N_BEST = 5
 

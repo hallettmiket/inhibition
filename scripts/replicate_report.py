@@ -37,6 +37,7 @@ import shortlist_report as sr                              # noqa: E402
 from shared import md_movie as mov                         # noqa: E402
 from shared import outputs as sout                        # noqa: E402
 from shared import report_theme as rt                      # noqa: E402
+from shared import run_paths as rp            # noqa: E402
 
 log = logging.getLogger("replicates")
 
@@ -65,7 +66,7 @@ def engagement_for(rep: Path) -> float | None:
     import pandas as pd
     want = str(rep).rstrip("/")
     best = None
-    for f in sorted(glob.glob(str(sr.B / "md_residence" / "*.csv"))):
+    for f in sorted(glob.glob(str(rp.residence_dir() / "*.csv"))):  # this run only (#74)
         try:
             d = pd.read_csv(f)
         except Exception:                                  # noqa: BLE001
