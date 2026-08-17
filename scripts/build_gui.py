@@ -215,6 +215,38 @@ def home(counts: dict, s: dict, worklist: Path | None) -> str:
             ("stage 2 (sub-split)", f"{st2.get('enabled')}, cut "
                                     f"{st2.get('cut_diameter_a')} Å, "
                                     f"max {st2.get('max_sub')} per mode")]),
+        # THE CASCADE, WITH THE GATE AT EVERY STEP. Each stage is cheaper than
+        # the next and asks a different question, and a reader who cannot see
+        # the gates cannot tell why the counts fall the way they do.
+        "<h2>The cascade</h2>",
+        '<p class="note">Each stage is cheaper than the one after it and asks a '
+        'different question. Docking ranks the <em>best case</em> — how good the '
+        'pose would be if it held. Everything after that tests whether it '
+        'does.</p>',
+        '<table><thead><tr><th>stage</th><th>asks</th><th>gate</th>'
+        '<th>cost each</th></tr></thead><tbody>'
+        + "".join(f"<tr><td>{a}</td><td>{b}</td><td>{c}</td><td>{e}</td></tr>"
+                  for a, b, c, e in [
+            ("docking + NAC rank",
+             "how good is this pose, if it held?",
+             f"{dk.get('n_runs')} runs, split into modes; "
+             f"enrichment &ge; {sr.get('budget_floor')}, "
+             f"&ge; {sr.get('min_mode_poses')} poses/mode",
+             "~25 s"),
+            (f"triage sweep ({md.get('sweep_ps', 0)/1000:.0f} ns)",
+             "is the pose stable at all?",
+             f"max ligand RMSD &lt; {md.get('sweep_survivor_rmsd_nm')} nm",
+             f"~{md.get('sweep_ps', 0)/1000*4.1:.0f} min"),
+            (f"production MD ({md.get('production_ps', 0)/1000:.0f} ns)",
+             "does it stay for a long time?",
+             f"max ligand RMSD &lt; {md.get('sweep_survivor_rmsd_nm')} nm "
+             "over the full run",
+             "~4.5 h"),
+            ("BPMD",
+             "how hard is it to push out?",
+             "promoted automatically; 3 replicates",
+             "~1 h"),
+        ]) + "</tbody></table>",
         "<h2>What earns a simulation</h2>",
         kv([("parameter", sr.get("parameter")),
             ("capture-validated floor",
