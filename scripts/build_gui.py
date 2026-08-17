@@ -168,6 +168,57 @@ def _fmt(v, nd=3, dash="—"):
         return dash
 
 
+PIPE_JS = r'''
+const CTRL = "http://127.0.0.1:8932";
+const MARK = {done:"done", running:"running", waiting:"waiting",
+              stopped:"stopped", unknown:"unknown"};
+async function pipeRender(){
+  let st=null;
+  try{ const r=await fetch("pipeline_state.json?t="+Date.now()); st=await r.json(); }
+  catch(e){ document.getElementById("pipe").innerHTML=
+      "<p class='note'>no pipeline_state.json yet</p>"; return; }
+  let h="<table><tr><th>stage</th><th>state</th><th>progress</th>"
+       +"<th>gpus</th><th></th></tr>";
+  for(const s of st.stages){
+    const n=(s.done===null?"?":s.done), t=(s.total===null?"?":s.total);
+    const pct=(s.total&&s.done!==null)?Math.round(100*s.done/s.total):0;
+    const cls={done:"t-ok",running:"t-pending",unknown:"t-failed",
+               stopped:"t-failed",waiting:"t-notsent"}[s.state];
+    // A stage can only be started when its inputs are done; the button says so
+    // rather than letting the press fail.
+    const canStart=(s.state!=="running")&&s.ready;
+    const btn=s.state==="running"
+      ? `<button class="mbtn" onclick="pipeDo('stop','${s.name}')">stop</button>`
+      : `<button class="mbtn" ${canStart?"":"disabled title='inputs not ready'"} `
+        +`onclick="pipeDo('start','${s.name}')">start</button>`;
+    h+=`<tr><td style="text-align:left"><b>${s.title}</b>`
+      +`<div class="note" style="margin:.1rem 0 0">${s.note||""}</div></td>`
+      +`<td><span class="tag ${cls}">${MARK[s.state]}</span>`
+      +(s.error?`<div class="note">${s.error}</div>`:"")+`</td>`
+      +`<td style="min-width:170px">${n} / ${t}`
+      +`<span class="bar"><i style="width:${pct}%"></i></span></td>`
+      +`<td>${s.gpus||""}</td><td>${btn}</td></tr>`;
+  }
+  document.getElementById("pipe").innerHTML=h+"</table>";
+}
+async function pipeDo(action,stage){
+  const m=document.getElementById("pipe-msg");
+  m.textContent=action+"ing "+stage+"...";
+  try{
+    const r=await fetch(CTRL+"/"+action+"/"+stage,{method:"POST"});
+    const j=await r.json();
+    // A refusal is a normal answer (409), not a failure to report as a crash.
+    m.textContent = j.ok ? `${action} ${stage}: ok` : `refused: ${j.error}`;
+  }catch(e){
+    m.textContent="control endpoint not reachable on :8932 — start it with "
+      +"`python scripts/pipeline.py serve`";
+  }
+  setTimeout(pipeRender,1200);
+}
+pipeRender(); setInterval(pipeRender,10000);
+'''
+
+
 def home(counts: dict, s: dict, worklist: Path | None) -> str:
     from shared import target_config as tc
     c = tc.load()
@@ -187,6 +238,19 @@ def home(counts: dict, s: dict, worklist: Path | None) -> str:
         '<p class="note">Every number on this page is read from '
         '<code>config/target.yaml</code>, so it cannot claim a setting the '
         'pipeline is not using.</p>',
+        # THE DASHBOARD. @tt8804: "we can use the gui as a dashboard to start
+        # each stage, make this into an application". The markup is static; the
+        # state and the buttons are driven by pipeline_state.json and the
+        # control endpoint, so this page never has to be rebuilt to show a
+        # stage changing.
+        "<h2>Pipeline</h2>",
+        '<p class="note">Live from <code>pipeline_state.json</code>, refreshed '
+        'every 10&nbsp;s. Progress is counted from artefacts on disk, not from '
+        'logs. <b>unknown</b> means the state could not be determined &mdash; '
+        'it is not the same as zero, and it is the failure this pipeline exists '
+        'to stop hiding.</p>',
+        '<div id="pipe"><p class="note">loading&hellip;</p></div>',
+        '<p class="note" id="pipe-msg"></p>',
         "<h2>Target</h2>",
         kv([("protein", f"{t.get('name')} — {t.get('domain')} domain"),
             ("receptor", f"{t.get('pdb')} (chemist-prepared, D0059)"),
@@ -267,7 +331,8 @@ def home(counts: dict, s: dict, worklist: Path | None) -> str:
             ("salt", f"{md.get('salt_molar')} M"),
             ("docked species", ch.get("docked_species"))]),
     ]
-    return _page("DWI covalent screen — Home", "index.html", counts, "".join(body))
+    return _page("DWI covalent screen — Home", "index.html", counts,
+                 "".join(body), extra_js=PIPE_JS)
 
 
 def sweep_json(d, s, worklist: Path | None) -> str:
