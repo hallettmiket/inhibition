@@ -286,3 +286,64 @@ def test_every_page_that_renders_the_nav_also_ships_its_css():
         assert css in src, (
             f"{path} renders the step nav ({nav}) but never interpolates its "
             f"CSS ({css}) -- it will render as plain hyperlinks")
+
+
+# --------------------------------------------------------------------------
+# the mode is part of the run's identity (100 ns stage)
+# --------------------------------------------------------------------------
+
+def test_the_runner_can_name_a_run_after_its_mode():
+    """`wd = work_root / ident` and the report filename both follow `ident`, so
+    while `ident` was the MOLECULE two modes of one molecule shared a directory
+    -- and build_workdir rebuilds in place, so the second overwrote the first's
+    finished trajectory while its row survived. t4_c8c3aec07421 (_m1 and _m5)
+    was queued to do exactly that."""
+    src = (REPO / "scripts" / "md_residence_3ikd.py").read_text()
+    assert '"--mode"' in src
+    assert 'ident = f"{args.candidate}_m{int(args.mode)}"' in src
+    # and the output stem must follow the run, not the molecule, or two modes
+    # write the same CSV
+    assert "args.tag or ident" in src
+
+
+def test_omitting_the_mode_keeps_molecule_level_behaviour():
+    """63 legacy rows and every existing invocation are molecule-level. The new
+    identity must be opt-in or they all change meaning at once."""
+    src = (REPO / "scripts" / "md_residence_3ikd.py").read_text()
+    body = src[src.index("if args.candidate:"):]
+    assert "ident = args.candidate" in body[:2000]
+
+
+def test_the_row_carries_the_join_key_not_only_the_label():
+    """shared/mode_key: the key is (parent_ident, mode), never `ident` -- a
+    merge on `ident` silently dropped every mode-0 row once already."""
+    src = (REPO / "scripts" / "md_residence_3ikd.py").read_text()
+    assert "mode_key.split_ident(ident)" in src
+    assert '"parent_ident": _parent' in src and '"mode": _mode' in src
+
+
+@pytest.mark.parametrize("path,needle", [
+    ("scripts/mdprio_report.py", "mode_key.split_ident(args.candidate)"),
+    ("scripts/mdprio_combine.py", "mode_key.split_ident(t)"),
+])
+def test_consumers_resolve_a_mode_ident_to_its_molecule(path, needle):
+    """The trajectory is per RUN; the SMILES, warhead class, sweep row and
+    depiction are facts about the MOLECULE. Looking those up under `<parent>_mN`
+    misses every one and renders a page about a molecule the project appears to
+    know nothing about."""
+    assert needle in (REPO / path).read_text()
+
+
+def test_the_results_page_looks_up_class_and_depiction_under_the_parent():
+    src = (REPO / "scripts" / "mdprio_combine.py").read_text()
+    assert "cls_of.get(par" in src
+    assert "thumbs[par]" in src or "thumbs.get(par" in src
+
+
+def test_split_ident_is_anchored_so_a_molecule_named_with_m_survives():
+    from shared import mode_key as mk
+    assert mk.split_ident("t4_abc_m3") == ("t4_abc", 3)
+    assert mk.split_ident("t4_abc") == ("t4_abc", None)
+    # a bare ident means the mode was NOT STATED -- not mode 0. Reading it as 0
+    # is exactly the assumption that produced #53's invisible collision.
+    assert mk.split_ident("t4_abc")[1] is None

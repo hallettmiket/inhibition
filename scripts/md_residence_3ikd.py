@@ -75,6 +75,7 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
 from shared import gromacs_explicit as gx        # noqa: E402
+from shared import mode_key                      # noqa: E402
 from shared import mmgbsa as mg                  # noqa: E402
 from shared import mmgbsa_noncovalent as mgn     # noqa: E402
 from shared import outputs as sout               # noqa: E402
@@ -461,7 +462,15 @@ def run_one(ident: str, smiles: str, label: str, *, production_ps: float,
             work_root: Path | None = None, replicate: int = 1) -> dict:
     wd = (work_root or WORK) / ident.replace(":", "_")
     wd.mkdir(parents=True, exist_ok=True)
-    row = {"ident": ident, "label": label, "smiles": smiles,
+    # THE ROW CARRIES THE PAIR, NOT JUST THE LABEL. `ident` may now be
+    # `<parent>_m<mode>`, and every table that joins these rows to the sweep or
+    # the ranking joins on (parent_ident, mode) -- see shared/mode_key, which
+    # exists because a merge on `ident` silently dropped every mode-0 row. Being
+    # written here means a consumer never has to re-parse the label to find out
+    # what the run was of.
+    _parent, _mode = mode_key.split_ident(ident)
+    row = {"ident": ident, "parent_ident": _parent, "mode": _mode,
+           "label": label, "smiles": smiles,
            "production_ps": production_ps, "net_charge": net_charge,
            "pose_source": "saved" if pose else "plain redock",
            "pose_path": str(pose) if pose else "",
@@ -591,6 +600,14 @@ def main() -> None:
                                    "instead of re-docking; implies --candidate")
     ap.add_argument("--pose-rank", type=int, default=1,
                     help="which pose_rank to take from a multi-model SDF")
+    # POSE RANK AND MODE ARE NOT THE SAME NUMBER and neither implies the other:
+    # a mode is a cluster of poses, so mode 3 of one molecule may be pose_rank 4
+    # and of another pose_rank 9. Deriving one from the other is a guess; the
+    # caller knows both, so it states both.
+    ap.add_argument("--mode", type=int, default=None,
+                    help="binding mode id; makes the run ident <candidate>_m<N> "
+                         "so two modes of one molecule get separate workdirs, "
+                         "rows and reports. Omit for molecule-level behaviour.")
     ap.add_argument("--net-charge", type=int, default=None,
                     help="ligand formal charge for antechamber; default is the "
                          "frame's charge_ph74 in --candidate mode, else 0")
@@ -613,16 +630,37 @@ def main() -> None:
         nc = args.net_charge if args.net_charge is not None else q74
         if nc != q74:
             log.warning("net charge %+d OVERRIDES the frame's charge_ph74 %+d", nc, q74)
+        # THE RUN IS IDENTIFIED BY THE MODE IT RAN, NOT BY THE MOLECULE.
+        #
+        # `ident` reaches three places that all assumed one run per molecule: the
+        # workdir (<work_root>/<ident>), the row written to md_residence, and the
+        # report filename. So two modes of one molecule shared a directory --
+        # and build_workdir rebuilds in place, so the second overwrote the
+        # first's finished trajectory while its row survived. t4_c8c3aec07421
+        # (_m1 and _m5) was queued to do exactly that.
+        #
+        # `--mode` makes the mode part of the identity instead of a column
+        # beside it, which is what `shared/mode_key` says an ident is for: the
+        # display label of a (parent, mode) pair. The workdir separates itself,
+        # the rows key per mode, and the results rail can be per mode rather
+        # than one row per molecule showing its best. @tt8804: "it doesnt show
+        # sub modes only molecules".
+        #
+        # Omitting it keeps the old molecule-level behaviour, so every existing
+        # invocation and all 63 legacy rows still mean what they meant.
+        ident = args.candidate
+        if args.mode is not None:
+            ident = f"{args.candidate}_m{int(args.mode)}"
         log.info("single candidate %s at %.0f ps, net charge %+d, pose %s",
-                 args.candidate, args.production_ps, nc, pose or "(re-dock)")
-        row = run_one(args.candidate, smiles, "candidate",
+                 ident, args.production_ps, nc, pose or "(re-dock)")
+        row = run_one(ident, smiles, "candidate",
                       production_ps=args.production_ps, nrun=args.nrun,
                       gpu=args.gpu, keep=args.keep, pose=pose,
                       pose_rank=args.pose_rank, net_charge=nc,
                       work_root=Path(args.work_root) if args.work_root else None,
                       replicate=args.replicate)
         df = pd.DataFrame([row])
-        dest = OUT.write(f"md_residence_{args.tag or args.candidate}", ".csv")
+        dest = OUT.write(f"md_residence_{args.tag or ident}", ".csv")
         df.to_csv(dest, index=False)
         print(f"\n  {row['status']} -> {dest}")
         for k, v in row.items():

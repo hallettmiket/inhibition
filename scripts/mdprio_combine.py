@@ -46,6 +46,7 @@ sys.path.insert(0, str(REPO))
 from shared import outputs as sout                     # noqa: E402
 from shared import pipeline_schematic as schematic     # noqa: E402
 from shared import mode_ranking as moderank        # noqa: E402
+from shared import mode_key                        # noqa: E402
 
 log = logging.getLogger("mdprio-combine")
 #: Set from config in main(); see D0085.
@@ -412,29 +413,10 @@ def main() -> None:
             missing.append(c)
             log.warning("%s: no report at %s", c, f.name)
             continue
-        s = swi.loc[c] if c in getattr(swi, "index", []) else None
-        m = mdi.loc[c] if c in getattr(mdi, "index", []) else None
-        # `.loc` on a duplicated index returns a FRAME, not a row, and every
-        # `g()` below would then format a Series into a cell. Now that `_md`
-        # keeps one row per (molecule, mode), a molecule with two 100 ns modes
-        # is exactly that case. One rail entry per molecule can only show one of
-        # them; it shows the best-resolved, and says so rather than picking by
-        # file order. The per-mode rail arrives with the re-run.
-        if isinstance(m, pd.DataFrame):
-            log.info("%s: %d 100 ns modes; showing the lowest max RMSD", c, len(m))
-            k = "explicit_ligand_rmsd_nm_max"
-            m = (m.sort_values(k).iloc[0] if k in m.columns else m.iloc[0])
-        if isinstance(s, pd.DataFrame):
-            s = s.iloc[0]
-
-        def g(src, k, fmt="{:.3f}", dash="—"):
-            if src is None or k not in src or pd.isna(src[k]):
-                return dash
-            try:
-                return fmt.format(src[k])
-            except Exception:                          # noqa: BLE001
-                return str(src[k])
-
+        # This loop selects; the rail below formats. It used to do both, and the
+        # formatting half fed a <table> that stopped being rendered when the rail
+        # replaced it -- so the lookups and the `g()` here were computed every
+        # run for nothing.
         tabs.append(c)
 
     if not tabs:
@@ -453,7 +435,15 @@ def main() -> None:
     # made comparison a scroll.
     rows_html = []
     for k, t in enumerate(tabs):
-        s_ = swi.loc[t] if t in getattr(swi, "index", []) else None
+        # THE IDENT IS A DISPLAY LABEL; THE JOINS ARE ON THE PARENT. Once the
+        # runner keys a run `<parent>_m<mode>`, everything looked up by molecule
+        # -- the sweep row, the warhead class, the depiction -- must be looked up
+        # under the parent or it silently misses and the row renders as a
+        # molecule nobody has any information about. Legacy idents have no
+        # suffix, so `split_ident` returns them unchanged and they behave exactly
+        # as before.
+        par, mode_of_ident = mode_key.split_ident(t)
+        s_ = swi.loc[par] if par in getattr(swi, "index", []) else None
         m_ = mdi.loc[t] if t in getattr(mdi, "index", []) else None
         # `.loc` on a duplicated index returns a FRAME, and every `g()` below
         # would format a Series into a cell. `_md` now keeps one row per
@@ -476,8 +466,13 @@ def main() -> None:
         # that no longer exist. So the others read "mode not recorded", which is
         # the true state; borrowing a label from a same-molecule sweep row would
         # make an unknown look like a measurement.
-        mode = None
-        if m_ is not None and "pose_mode" in m_ and pd.notna(m_["pose_mode"]):
+        # Preferring the IDENT over the column: once the mode is part of the
+        # identity it is the run's own name, whereas `pose_mode` is a value
+        # beside it that a later rewrite could leave stale. They agree by
+        # construction; when only one exists, use whichever does.
+        mode = mode_of_ident
+        if mode is None and m_ is not None and "pose_mode" in m_ \
+                and pd.notna(m_["pose_mode"]):
             mode = int(m_["pose_mode"])
         def g(src, key, fmt="{:.3f}"):
             if src is None or key not in src or pd.isna(src[key]):
@@ -509,7 +504,7 @@ def main() -> None:
         # than what now earns a molecule anything.
         held = rmax is not None and rmax < _HELD_BAR
         has_md = eng is not None
-        wcls = str(cls_of.get(t, "unclassified"))
+        wcls = str(cls_of.get(par, cls_of.get(t, "unclassified")))
         # A molecule with no 100 ns run cannot be placed on the ranked axis at
         # all. It goes in its own band rather than being given a 0, which would
         # read as "measured and engaged nothing".
@@ -546,8 +541,8 @@ def main() -> None:
             f"data-held='{1 if held else 0}' "
             f"id='b_{html.escape(t)}' onclick=\"show('{html.escape(t)}')\">"
             f"<span class='rk'>{k+1}</span>"
-            + (f"<img class='thumb' alt='' src=\"{thumbs[t]}\">"
-               if t in thumbs else "<span class='thumb'></span>")
+            + (f"<img class='thumb' alt='' src=\"{thumbs.get(t) or thumbs[par]}\">"
+               if (t in thumbs or par in thumbs) else "<span class='thumb'></span>")
             + f"<span class='body'>"
             f"<span class='l1'><span class='mid-id'>{html.escape(t)}"
             + (f"<span class='mode'>m{mode}</span>" if mode is not None

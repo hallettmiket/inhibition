@@ -46,6 +46,7 @@ sys.path.insert(0, str(REPO))
 from shared import outputs as sout                  # noqa: E402
 from shared import report_theme as rt               # noqa: E402
 from shared import md_movie as mov                  # noqa: E402
+from shared import mode_key                         # noqa: E402
 
 log = logging.getLogger("mdprio-report")
 MD = Path("/data/lab_vm/modifiable/inhibition/md_residence_3ikd")
@@ -408,6 +409,14 @@ def main() -> None:
 
     er = _er()
     root = Path(args.work_root) if args.work_root else MD
+    # THE TRAJECTORY IS PER RUN; EVERYTHING ELSE IS PER MOLECULE. Once a run is
+    # identified `<parent>_m<mode>`, the workdir and this report's filename follow
+    # the RUN, while the SMILES, the warhead class, the pose sidecar and the sweep
+    # row are all facts about the MOLECULE. Looking those up under the run ident
+    # would miss every one of them and render a report about a molecule the
+    # project appears to know nothing about. Legacy idents have no suffix, so
+    # `split_ident` returns them unchanged.
+    parent, run_mode = mode_key.split_ident(args.candidate)
     rep = root / args.candidate / "md" / args.rep
     if not rep.is_dir():
         raise SystemExit(f"no trajectory directory {rep}")
@@ -418,7 +427,7 @@ def main() -> None:
     res = residence(s)
     if res["status"] != "ok":
         raise SystemExit(f"{args.candidate}: {res['status']}")
-    occ, cls, pose = PREDICTED.get(args.candidate, (None, None, None))
+    occ, cls, pose = PREDICTED.get(parent, (None, None, None))
 
     # PREDICTED only covers the six BPMD-priority molecules. Everything swept
     # since then fell through to "—" for class and pose, so the masthead of every
@@ -433,10 +442,10 @@ def main() -> None:
         if not _fs:
             continue
         _fr = pd.read_parquet(_fs[-1]).drop_duplicates("candidate_id").set_index("candidate_id")
-        if args.candidate in _fr.index:
-            smiles = _fr.loc[args.candidate].get("canonical_smiles")
+        if parent in _fr.index:
+            smiles = _fr.loc[parent].get("canonical_smiles")
             if not cls:
-                cls = _fr.loc[args.candidate].get("warhead_class")
+                cls = _fr.loc[parent].get("warhead_class")
             break
     if not isinstance(smiles, str):
         # Controls are not rows in D3/D4 -- they come from crystal structures -- so
@@ -444,7 +453,7 @@ def main() -> None:
         # written next to the pose itself by whatever produced it, which makes it
         # the right place to ask: it is keyed on the pose, not on a generator.
         _sc = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
-                   f"pose_sidecars/{args.candidate}.json")
+                   f"pose_sidecars/{parent}.json")
         if _sc.is_file():
             try:
                 smiles = json.loads(_sc.read_text()).get("canonical_smiles")
@@ -457,8 +466,8 @@ def main() -> None:
             if not _fs:
                 continue
             _rk = pd.read_csv(_fs[-1]).drop_duplicates("parent_ident").set_index("parent_ident")
-            if args.candidate in _rk.index:
-                cls = _rk.loc[args.candidate, "warhead_class"]; break
+            if parent in _rk.index:
+                cls = _rk.loc[parent, "warhead_class"]; break
     sweep_ar = sweep_v = None
     _fs = sorted(_g.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
                          "attack_sweep/attack_sweep_*.csv"),
@@ -466,7 +475,7 @@ def main() -> None:
     if _fs:
         _sw = pd.concat([pd.read_csv(f) for f in _fs], ignore_index=True)
         _sw = _sw[(_sw.get("sweep_ps", 0) > 1000) & (_sw.status == "ok")
-                  & (_sw.parent_ident == args.candidate)]
+                  & (_sw.parent_ident == parent)]
         if len(_sw):
             _b = _sw.sort_values("frac_attack_ready").iloc[-1]
             sweep_ar, sweep_v = float(_b.frac_attack_ready), int(_b.n_visits)
@@ -581,7 +590,9 @@ def main() -> None:
     # the headline facts next to the engagement number it read as a second,
     # competing score, so it has left the selector rail entirely and appears here
     # in its own table, under a heading that says what it is for.
-    facts = [("molecule", args.candidate), ("warhead class", cls or "unclassified")]
+    facts = [("molecule", parent),
+             ("binding mode",
+              f"m{run_mode}" if run_mode is not None else "not recorded"), ("warhead class", cls or "unclassified")]
     if occ is not None:
         facts.append(("BPMD occupancy", rt.num(occ, "{:.3f}")))
     if pose:
