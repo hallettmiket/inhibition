@@ -81,15 +81,31 @@ discriminates:
 | level | result | record |
 |---|---|---|
 | Docking enrichment | AUC 0.599, CI [0.311, 0.874], **EF1% 0.0** | D0041 |
-| **Docking pose recovery** | **5% in production**, 16% self-dock, vs 60–80% norm | **D0046** |
+| **Docking pose recovery** | **5% in production** (6VAJ, invalidated); on 3IKD **18.3% top-1 / 41.5% best-of-9** | **D0046**, #66 |
 | Ensemble MM-GBSA | below chance | D0036 |
 | Implicit + explicit MD residence | not reproducible | D0038, D0044 |
 
-**D0046 is the newest and the most decisive**, because it explains the others.
-Docking recovers a known Pin1 pose 5% of the time on the receptor T_1 and T_2
-actually use. And the failure is **scoring, not sampling** — best-of-9 is 55%
-while top-1 is 22.5%, so the search *finds* the crystallographic pose and the
-scoring function then ranks it below a wrong one three times in four.
+**D0046's framing has been corrected against the literature (#66), and the
+correction matters.** This table used to compare our recovery against a
+"60–80% norm". **That is the SELF-docking norm** — redocking a ligand into the
+structure it was crystallised in. Our 82-case benchmark docks *non-cognate*
+Pin1 ligands into one prepared 3IKD, which is **cross-docking**, where the
+published baseline is roughly **41–50% top-1 for a single receptor** and 67–69%
+only with best-structure selection. So:
+
+* our **top-1 of 18.3%** is genuinely below the cross-docking norm — by about
+  2×, not the ~3× the old framing implied;
+* our **best-of-9 of 41.5% is *at* the single-structure cross-docking norm**,
+  and the old framing presented it as a failure.
+
+And the failure being **scoring rather than sampling** is not our finding: it is
+documented and quantified for the exact program we run. Across docking programs,
+sampling produces a near-native pose in 85–99% of cases while scoring ranks it
+first in 35–73%, and **AutoDock Vina shows the largest gap of any program
+tested — 93.4% sampling against 35–40% ranking**. Our numbers are that
+phenomenon at lower absolute rates because the setting is harder. Treat it as a
+**positive control** — evidence the measurement apparatus works — not as a
+result. See [`publication_audit.md`](publication_audit.md) §2–3.
 
 So the enrichment null is not a decoy-construction artefact. The same function
 fails a strictly easier question than enrichment.

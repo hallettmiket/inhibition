@@ -254,7 +254,10 @@ queued.
 
 The binding constraint is not generation. It is that **no scorer we have tested
 discriminates on this target** — docking enrichment (D0041), docking *pose
-recovery* (D0046: 5% in production against a 60–80% norm), ensemble MM-GBSA
+recovery* (D0046; the "60–80% norm" it was compared against was the
+SELF-docking norm and the comparison is corrected in #66 — against the
+cross-docking baseline of ~41–50% our top-1 is low and our best-of-9 is
+typical), ensemble MM-GBSA
 (D0036) and MD residence (D0038, D0044) have each been measured and each
 failed. That is the project's central finding so far, and it is why the current
 plan (#4) spends its next phase on **measured inactives** rather than on more
