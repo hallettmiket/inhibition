@@ -16,7 +16,18 @@
 # and three separate scripts each decided that with their own `== "nac_v3"`
 # test -- which is how 3.0.0's ranking silently read 2.1.0's aggregates.
 run:
-  topic: nac_v4              # 3.0.0. Bump with the screen, never on its own.
+  # 3.1.0 full re-run: T_4 across acrylamide + bdhi_c4 + bdhi_c5, at the
+  # decided spec throughout (D0081 T_4 only, D0085 8 ns / 0.35 nm).
+  #
+  # BUMPING THIS IS THE WHOLE CEREMONY NOW. Every stage that takes --topic
+  # defaults to it (tc.topic()), so the screen, the ranking, the worklist and
+  # the representative rebuild move together. Previously six scripts each
+  # carried their own literal and a re-run without explicit flags would have
+  # written the screen to nac_v3 and the worklist to nac_v4.
+  #
+  # nac_v4 (3.0.0 "Galena") stays on disk, unreferenced. Its GUI is archived
+  # browsable at 00_outputs/blacksmith/gui_archive/galena_3.0.0_20260816/.
+  topic: nac_v5              # 3.1.0. Bump with the screen, never on its own.
 
   # WHICH GENERATION TIERS ARE RANKED (@tt8804, 2026-08-12: "we are only doing
   # t_4"). Applied BEFORE ranking, so `class_rank` is a position among the

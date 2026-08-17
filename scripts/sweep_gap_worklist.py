@@ -44,6 +44,7 @@ sys.path.insert(0, str(REPO))
 
 from shared import mode_ranking as mr                     # noqa: E402
 from shared import outputs as sout                        # noqa: E402
+from shared import target_config as tc                    # noqa: E402
 
 log = logging.getLogger("sweep-gaps")
 #: Set from `--topic` in `main()`. NOT a hardcoded topic: reading poses from one
@@ -246,7 +247,10 @@ def main() -> None:
         #
         # Interleaved, so a run stopped early has gone equally deep in each
         # family instead of exhausting the first one.
-        from shared import target_config as tc
+        # Imported at module scope now (see the top). Re-importing it HERE made
+        # `tc` a local of main(), so the `--topic` default -- which runs earlier
+        # in the same function -- raised UnboundLocalError before this line was
+        # ever reached.
         fam_of = tc.family_of()
         depth = args.max_depth if args.max_depth is not None else tc.sweep_max_depth()
         before = len(gap)

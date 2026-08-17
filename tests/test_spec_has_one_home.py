@@ -51,6 +51,24 @@ def test_no_stage_carries_its_own_topic_literal(stage):
         "a default in six places is six defaults")
 
 
+@pytest.mark.parametrize("stage", TOPIC_STAGES + ["attack_sweep",
+                                                 "md_residence_3ikd"])
+def test_the_stage_can_actually_build_its_parser(stage):
+    """TEXT IS NOT BEHAVIOUR. The string check above passed while
+    `nac_screen_v2` and `sweep_gap_worklist` died on launch with
+    `NameError: name 'tc' is not defined` -- both already imported
+    target_config INSIDE a function, so my "is it imported?" guard saw the name
+    and skipped adding it at module scope. The screen exited in under a second
+    and the only evidence was in a log.
+
+    Running `--help` builds every argparse default for real. A stage that
+    cannot construct its own parser cannot run, whatever its source says."""
+    import subprocess
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / f"{stage}.py"),
+                        "--help"], capture_output=True, text=True, timeout=180)
+    assert r.returncode == 0, f"{stage} --help failed:\n{r.stderr[-800:]}"
+
+
 def test_the_screen_and_the_worklist_cannot_disagree():
     """The specific pairing that would split a run in half: the screen writes
     poses under one topic, the worklist reads representatives from another."""
@@ -90,3 +108,45 @@ def test_the_spec_resolves_to_the_decisions_on_record():
     assert tc.md_production_ps() == 100_000.0
     assert list(tc.get("run.tiers")) == ["T4"]
     assert set(tc.sweep_families()) == {"acrylamide", "bdhi_c4", "bdhi_c5"}
+
+
+# --------------------------------------------------------------------------
+# a run's topic reaches every stage, not just the first two
+# --------------------------------------------------------------------------
+
+def test_every_run_directory_moves_with_the_topic():
+    """D0080 was applied to docking and ranking and stopped there, so the sweep,
+    the 100 ns stage and the reports all lived in flat directories shared by
+    every screen ever run. Bumping run.topic emptied one GUI page out of three
+    and the other two went on showing 554 sweep rows and 647 residence rows from
+    superseded runs. @tt8804: "the gui is not updated fresh"."""
+    from shared import run_paths as rp
+    t = rp.topic()
+    for fn in ("sweep_dir", "residence_dir", "reports_dir", "bpmd_dir",
+               "poses_dir", "sweep_work", "residence_work"):
+        p = str(getattr(rp, fn)())
+        assert t in p, f"{fn}() -> {p} does not carry the topic {t}"
+
+
+def test_the_sweep_and_production_workdirs_are_different_roots():
+    """The workdir is <root>/<ident>/md/rep1 regardless of tag, so sharing a
+    root means a production run finds the triage run's finished prod.xtc and
+    skips itself."""
+    from shared import run_paths as rp
+    assert rp.sweep_work() != rp.residence_work()
+
+
+def test_no_gui_builder_reads_a_flat_run_directory():
+    """The readers are what the user actually sees. A builder still globbing
+    `attack_sweep/` or `md_residence/` shows the previous screen's results under
+    the current screen's title, which is worse than showing nothing."""
+    import re
+    bad = re.compile(r'["\'](?:attack_sweep|md_residence|mdprio_reports|bpmd)(?:/|["\'])')
+    for f in ("scripts/mdprio_combine.py", "scripts/sweep_report.py",
+              "scripts/sweep_combine.py", "scripts/build_gui.py",
+              "scripts/sweep_assets.py", "scripts/promote_to_bpmd.py",
+              "shared/sweep_state.py"):
+        src = (REPO / f).read_text()
+        hits = [l.strip() for l in src.splitlines()
+                if bad.search(l) and not l.lstrip().startswith("#")]
+        assert not hits, f"{f} still reads a flat run directory: {hits[:2]}"

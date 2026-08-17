@@ -41,10 +41,11 @@ import numpy as np
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+from shared import run_paths as rp                  # noqa: E402
+
 log = logging.getLogger("sweep-assets")
-OUT = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
-           "mdprio_reports/sweep_assets")
-SWEEP_ROOT = Path("/data/lab_vm/modifiable/inhibition/attack_sweep_10ns")
+OUT = rp.reports_dir() / "sweep_assets"
+SWEEP_ROOT = rp.sweep_work()
 
 
 def rep_dir(parent: str, pose_rank: int | None = None) -> Path | None:

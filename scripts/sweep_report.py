@@ -36,10 +36,11 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from shared import md_movie as mov                        # noqa: E402
 from shared import report_theme as rt                     # noqa: E402
+from shared import run_paths as rp                  # noqa: E402
 
 log = logging.getLogger("sweep-report")
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
-REPORTS = B / "mdprio_reports"
+REPORTS = rp.reports_dir()
 ASSETS = REPORTS / "sweep_assets"
 PAGES = REPORTS / "sweep_pages"
 
@@ -48,7 +49,7 @@ def sweep_row(ident: str):
     """This mode's sweep result, newest attempt wins."""
     import pandas as pd
     best, best_t = None, -1.0
-    for f in glob.glob(str(B / "attack_sweep/attack_sweep_*.csv")):
+    for f in glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")):
         try:
             d = pd.read_csv(f)
         except Exception:                                  # noqa: BLE001

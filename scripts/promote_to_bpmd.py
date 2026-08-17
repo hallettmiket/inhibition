@@ -51,6 +51,8 @@ import pandas as pd
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+from shared import run_paths as rp                  # noqa: E402
+
 log = logging.getLogger("promote-bpmd")
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
 PY = Path.home() / ".micromamba/envs/dwi_reactive/bin/python"
@@ -68,7 +70,7 @@ def holders(bar: float, min_ps: float = 90_000.0) -> pd.DataFrame:
     100 ns one and would clear the bar too easily.
     """
     rows = []
-    for f in glob.glob(str(B / "md_residence/*.csv")):
+    for f in glob.glob(str(rp.residence_dir() / "*.csv")):
         try:
             d = pd.read_csv(f)
         except Exception:                                  # noqa: BLE001
@@ -87,7 +89,7 @@ def holders(bar: float, min_ps: float = 90_000.0) -> pd.DataFrame:
 
 def already_run() -> set:
     out = set()
-    for f in glob.glob(str(B / "bpmd/*.csv")):
+    for f in glob.glob(str(rp.bpmd_dir() / "*.csv")):
         try:
             d = pd.read_csv(f, usecols=["ident"])
         except Exception:                                  # noqa: BLE001

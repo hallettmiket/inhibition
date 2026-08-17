@@ -47,10 +47,11 @@ from shared import outputs as sout                  # noqa: E402
 from shared import report_theme as rt               # noqa: E402
 from shared import md_movie as mov                  # noqa: E402
 from shared import mode_key                         # noqa: E402
+from shared import run_paths as rp        # noqa: E402
 
 log = logging.getLogger("mdprio-report")
-MD = Path("/data/lab_vm/modifiable/inhibition/md_residence_3ikd")
-OUT = sout.Topic("blacksmith", "mdprio_reports")
+MD = rp.residence_work()
+OUT = sout.Topic("blacksmith", rp.reports_topic())
 BOUND_NM = 1.0            # the residence criterion: ligand RMSD <= 1.0 nm
 
 #: BPMD occupancy each molecule was selected on (docs/prereg_md_priority.md).

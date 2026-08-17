@@ -62,6 +62,7 @@ from shared import md_movie as mov                  # noqa: E402
 from shared import nac_criterion as nac             # noqa: E402
 from shared import outputs as sout                  # noqa: E402
 from shared import target_config as tc              # noqa: E402
+from shared import run_paths as rp        # noqa: E402
 
 log = logging.getLogger("attack-sweep")
 MD = Path("/data/lab_vm/modifiable/inhibition/md_residence_3ikd")
@@ -69,9 +70,9 @@ MD = Path("/data/lab_vm/modifiable/inhibition/md_residence_3ikd")
 #: regardless of tag, so a 10 ns sweep and a later 100 ns run of the same
 #: molecule would otherwise collide -- and the 100 ns run would find a finished
 #: 10 ns prod.xtc sitting there and skip itself.
-SWEEP_ROOT = Path("/data/lab_vm/modifiable/inhibition/attack_sweep_10ns")
+SWEEP_ROOT = rp.sweep_work()
 POSES = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
-OUT = sout.Topic("blacksmith", "attack_sweep")
+OUT = sout.Topic("blacksmith", rp.sweep_topic())
 PY = Path.home() / ".micromamba/envs/dwi_reactive/bin/python"
 
 #: Triage-sweep length, from config. D0085 set it to 8 ns -- the plateau, with

@@ -51,10 +51,11 @@ sys.path.insert(0, str(REPO))
 from shared import gui_shell as gs                        # noqa: E402
 from shared import results_shell as rs                    # noqa: E402
 from shared import sweep_state as ss                      # noqa: E402
+from shared import run_paths as rp                  # noqa: E402
 
 log = logging.getLogger("sweep-combine")
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
-REPORTS = B / "mdprio_reports"
+REPORTS = rp.reports_dir()
 PAGES = REPORTS / "sweep_pages"
 
 

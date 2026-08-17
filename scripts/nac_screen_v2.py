@@ -79,6 +79,7 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
 from shared import nac_criterion as nac           # noqa: E402
+from shared import target_config as tc            # noqa: E402
 from shared import outputs as sout                # noqa: E402
 from shared import covalent_protocol as cp        # noqa: E402
 from shared import receptors as R                 # noqa: E402

@@ -80,13 +80,14 @@ from shared import target_config as tc           # noqa: E402
 from shared import mmgbsa as mg                  # noqa: E402
 from shared import mmgbsa_noncovalent as mgn     # noqa: E402
 from shared import outputs as sout               # noqa: E402
+from shared import run_paths as rp        # noqa: E402
 import nac_screen as ns                          # noqa: E402
 import nac_robustness as rb                      # noqa: E402
 
 log = logging.getLogger("md-residence")
 
-OUT = sout.Topic("blacksmith", "md_residence")
-WORK = Path("/data/lab_vm/modifiable/inhibition/md_residence_3ikd")
+OUT = sout.Topic("blacksmith", rp.residence_topic())
+WORK = rp.residence_work()
 PLAIN_REC = Path("/data/lab_vm/modifiable/inhibition/receptor_3ikd_plain")
 
 # The receptor as the chemist prepared it — the SAME file every 3IKD measurement

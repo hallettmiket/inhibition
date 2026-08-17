@@ -40,9 +40,10 @@ sys.path.insert(0, str(REPO))
 
 from shared import gui_shell as gs                        # noqa: E402
 from shared import sweep_state as ss                      # noqa: E402
+from shared import run_paths as rp                  # noqa: E402
 
 log = logging.getLogger("build-gui")
-OUT = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/mdprio_reports")
+OUT = rp.reports_dir()
 
 #: The palette is the ranking view's, verbatim, because "uniform" is the whole
 #: point of #63 -- a second palette that merely looks similar is what makes two

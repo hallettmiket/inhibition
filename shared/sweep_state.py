@@ -33,12 +33,19 @@ from pathlib import Path
 
 import pandas as pd
 
+from . import run_paths as rp
+
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
 
 
 def results() -> pd.DataFrame:
-    """Every sweep row ever written, newest wins per mode."""
-    fs = sorted(glob.glob(str(B / "attack_sweep/attack_sweep_*.csv")),
+    """Every sweep row THIS RUN has written, newest wins per mode.
+
+    "Ever written" is what it used to mean, and that was the defect: the sweep
+    tables were a flat directory shared by every screen, so a freshly bumped
+    topic still listed 554 rows from three superseded runs.
+    """
+    fs = sorted(glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")),
                 key=os.path.getmtime)
     if not fs:
         return pd.DataFrame()

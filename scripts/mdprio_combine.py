@@ -47,16 +47,17 @@ from shared import outputs as sout                     # noqa: E402
 from shared import pipeline_schematic as schematic     # noqa: E402
 from shared import mode_ranking as moderank        # noqa: E402
 from shared import mode_key                        # noqa: E402
+from shared import run_paths as rp                  # noqa: E402
 
 log = logging.getLogger("mdprio-combine")
 #: Set from config in main(); see D0085.
 _HELD_BAR = 0.35
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
-REPORTS = B / "mdprio_reports"
+REPORTS = rp.reports_dir()
 
 
 def _sweep() -> pd.DataFrame:
-    fs = sorted(glob.glob(str(B / "attack_sweep/attack_sweep_*.csv")),
+    fs = sorted(glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")),
                 key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
     if not fs:
         return pd.DataFrame()
@@ -209,7 +210,7 @@ def _md() -> pd.DataFrame:
 
     Rows are ordered by whether they carry a result, and only then deduped.
     """
-    fs = glob.glob(str(B / "md_residence/*.csv"))
+    fs = glob.glob(str(rp.residence_dir() / "*.csv"))
     if not fs:
         return pd.DataFrame()
     d = pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)
@@ -257,7 +258,7 @@ def _sweep_all() -> pd.DataFrame:
     the interesting part. Keeps the ok row per molecule when there is one, so a
     control that succeeded on a re-run is not represented by its earlier failure.
     """
-    fs = sorted(glob.glob(str(B / "attack_sweep/attack_sweep_*.csv")),
+    fs = sorted(glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")),
                 key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
     if not fs:
         return pd.DataFrame()
@@ -943,7 +944,7 @@ relayout();
 show({json.dumps(tabs[0])});
 </script></body></html>"""
 
-    dest = sout.Topic("blacksmith", "mdprio_reports").write("combined", ".html")
+    dest = sout.Topic("blacksmith", rp.reports_topic()).write("combined", ".html")
     dest.write_text(page)
     # Also drop a stable name beside the reports so the iframes resolve relatively.
     side = REPORTS / "combined.html"
