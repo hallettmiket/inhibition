@@ -500,3 +500,39 @@ def test_a_placeholder_is_refreshed_but_a_built_page_is_never_clobbered():
     assert "awaiting stage" in src          # the pre-marker fallback
     body = src[src.index("n_placeholder = 0"):]
     assert "_PLACEHOLDER not in head" in body
+
+
+def test_the_rail_row_stylesheet_is_shared_not_copied():
+    """@tt8804: "the different selectors look different on diff pages".
+
+    All three rails already emitted the SAME class names -- .row/.rk/.thumb/
+    .body/.l1/.mid-id/.eng/.l2/.wc/.meta/.tag/.bar -- so the markup was never the
+    problem. The ranking page kept its own COPY of the rules, because it is
+    virtualised and needs its own <style>, and the copy had drifted: `.l2` had
+    lost `flex-wrap:nowrap`. Two stylesheets that start identical and drift is
+    exactly what results_shell exists to prevent, and it had happened inside the
+    module's own subject matter."""
+    from shared import results_shell as rs
+    assert hasattr(rs, "ROW_CSS")
+    for sel in (".row{", ".rk{", ".thumb{", ".body{", ".l1{", ".mid-id{",
+                ".eng{", ".l2{", ".wc{", ".meta{", ".tag{", ".bar{"):
+        assert sel in rs.ROW_CSS, f"{sel} missing from the shared row CSS"
+    # the page shell still ships it, so the two rail pages are unchanged
+    assert ".row{" in rs.CSS
+    # and the ranking page interpolates it rather than restating it
+    mr = (REPO / "shared" / "mode_ranking.py").read_text()
+    assert "__ROWCSS__" in mr and "_rs().ROW_CSS" in mr
+
+
+def test_the_ranking_page_keeps_only_its_virtualisation_override():
+    """Every item must be exactly ROW_H tall: the window offset is computed as
+    i * ROW_H rather than measured, so a row free to size itself puts every row
+    below it at the wrong offset. That override is legitimate; a second copy of
+    the whole row is not."""
+    mr = (REPO / "shared" / "mode_ranking.py").read_text()
+    tpl = mr[mr.index("__ROWCSS__"):]
+    tpl = tpl[:tpl.index("</style>")]
+    assert "height:64px" in tpl
+    # nothing else about the row may be redefined here
+    for sel in (".mid-id{", ".eng{", ".meta{", ".tag{", ".bar{"):
+        assert sel not in tpl, f"{sel} redefined after the shared block"

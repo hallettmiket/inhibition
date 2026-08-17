@@ -16,6 +16,64 @@ page built with those reversed was the reason this module exists.
 
 from __future__ import annotations
 
+#: The rail ROW, on its own, because three pages draw the same row and only two
+#: of them could share a stylesheet. The ranking page keeps its own <style> (it
+#: is virtualised and needs a fixed row height), so it used to hold a COPY of
+#: these rules -- and the copy had already drifted: `.l2` lost `flex-wrap`, and
+#: whitespace differences aside, nothing kept them equal. @tt8804: "the different
+#: selectors look different on diff pages".
+#:
+#: Both now interpolate this. The ranking page adds only what virtualisation
+#: requires, so a divergence has to be written deliberately rather than by
+#: forgetting to copy an edit.
+ROW_CSS = """\
+.row{display:grid;grid-template-columns:22px 46px 1fr;gap:8px;align-items:start;
+ width:100%;text-align:left;font:inherit;color:inherit;background:none;cursor:pointer;
+ padding:9px 14px 8px;border:0;border-bottom:1px solid var(--rule)}
+.row:hover{background:var(--blue-pale)}
+.row.on{background:var(--blue-pale);box-shadow:inset 3px 0 0 var(--blue)}
+.row:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+.rk{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--muted);
+ padding-top:3px}
+.thumb{width:46px;height:32px;object-fit:contain;background:#fff;
+ border:1px solid var(--rule);border-radius:3px;display:block}
+.body{min-width:0;display:flex;flex-direction:column;gap:3px}
+.l1{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.mid-id{font-family:var(--mono);font-size:12.5px;overflow:hidden;
+ text-overflow:ellipsis;white-space:nowrap}
+/* Which pose the run started from. `unk` is deliberately muted: an unrecorded
+   mode is an absence, and styling it like a value would let the eye read it as
+   one. */
+.mode{font-family:var(--mono);font-size:10px;margin-left:5px;padding:0 4px;
+ border-radius:3px;background:rgba(0,114,206,.12);color:var(--blue)}
+.mode.unk{background:transparent;color:var(--muted,#8a94a6);font-style:italic}
+.eng{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--navy);
+ flex:none}
+.l2{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;min-width:0}
+.wc{font-size:10.5px;color:var(--blue);white-space:nowrap;overflow:hidden;
+ text-overflow:ellipsis;max-width:11ch}
+.meta{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;
+ text-overflow:ellipsis;flex:1}
+.tag{font-size:9px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;
+ padding:1px 6px;border-radius:99px;flex:none}
+.t-held{background:#e6f4ee;color:var(--good)}
+.t-left{background:#fbeae8;color:var(--bad)}
+/* Controls read as a different KIND of row, not a better or worse one: an amber
+   accent and a monospace badge instead of a structure thumbnail, because the
+   thing to notice is where they land in the ranking, not what they look like. */
+.t-ctl{background:#fdf0dc;color:#8a5a00}
+.row.ctl{background:#fffaf2;box-shadow:inset 3px 0 0 #d99a2b}
+.row.ctl:hover{background:#fdf3e4}
+.thumb.tctl{display:flex;align-items:center;justify-content:center;
+ font-family:var(--mono);font-size:10px;font-weight:700;color:#8a5a00;
+ background:#fdf0dc;border-color:#e8cfa5}
+:root[data-theme="dark"] .t-ctl{background:#3a2c14;color:#e0b070}
+:root[data-theme="dark"] .row.ctl{background:#1b1710}
+:root[data-theme="dark"] .row.ctl:hover{background:#241d13}
+.bar{height:3px;background:var(--rule);border-radius:2px;overflow:hidden;margin-top:2px}
+.bar i{display:block;height:100%;background:var(--blue)}
+"""
+
 CSS = """\
 /* The per-molecule reports are light-only and use this exact palette
    (shared/report_theme.py). The shell inherits it so the frame and its
@@ -85,52 +143,8 @@ main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
 .chd{font-family:var(--mono);font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;
  color:var(--blue);font-weight:600;padding:10px 14px 6px;background:var(--raise);
  border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:1}
-.row{display:grid;grid-template-columns:22px 46px 1fr;gap:8px;align-items:start;
- width:100%;text-align:left;font:inherit;color:inherit;background:none;cursor:pointer;
- padding:9px 14px 8px;border:0;border-bottom:1px solid var(--rule)}
-.row:hover{background:var(--blue-pale)}
-.row.on{background:var(--blue-pale);box-shadow:inset 3px 0 0 var(--blue)}
-.row:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
-.rk{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--muted);
- padding-top:3px}
-.thumb{width:46px;height:32px;object-fit:contain;background:#fff;
- border:1px solid var(--rule);border-radius:3px;display:block}
-.body{min-width:0;display:flex;flex-direction:column;gap:3px}
-.l1{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
-.mid-id{font-family:var(--mono);font-size:12.5px;overflow:hidden;
- text-overflow:ellipsis;white-space:nowrap}
-/* Which pose the run started from. `unk` is deliberately muted: an unrecorded
-   mode is an absence, and styling it like a value would let the eye read it as
-   one. */
-.mode{font-family:var(--mono);font-size:10px;margin-left:5px;padding:0 4px;
- border-radius:3px;background:rgba(0,114,206,.12);color:var(--blue)}
-.mode.unk{background:transparent;color:var(--muted,#8a94a6);font-style:italic}
-.eng{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--navy);
- flex:none}
-.l2{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;min-width:0}
-.wc{font-size:10.5px;color:var(--blue);white-space:nowrap;overflow:hidden;
- text-overflow:ellipsis;max-width:11ch}
-.meta{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;
- text-overflow:ellipsis;flex:1}
-.tag{font-size:9px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;
- padding:1px 6px;border-radius:99px;flex:none}
-.t-held{background:#e6f4ee;color:var(--good)}
-.t-left{background:#fbeae8;color:var(--bad)}
-/* Controls read as a different KIND of row, not a better or worse one: an amber
-   accent and a monospace badge instead of a structure thumbnail, because the
-   thing to notice is where they land in the ranking, not what they look like. */
-.t-ctl{background:#fdf0dc;color:#8a5a00}
-.row.ctl{background:#fffaf2;box-shadow:inset 3px 0 0 #d99a2b}
-.row.ctl:hover{background:#fdf3e4}
-.thumb.tctl{display:flex;align-items:center;justify-content:center;
- font-family:var(--mono);font-size:10px;font-weight:700;color:#8a5a00;
- background:#fdf0dc;border-color:#e8cfa5}
-:root[data-theme="dark"] .t-ctl{background:#3a2c14;color:#e0b070}
-:root[data-theme="dark"] .row.ctl{background:#1b1710}
-:root[data-theme="dark"] .row.ctl:hover{background:#241d13}
+""" + ROW_CSS + """
 :root[data-theme="dark"] .thumb.tctl{background:#3a2c14;color:#e0b070;border-color:#4a3a1e}
-.bar{height:3px;background:var(--rule);border-radius:2px;overflow:hidden;margin-top:2px}
-.bar i{display:block;height:100%;background:var(--blue)}
 #viewer{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--paper)}
 #vhead{padding:9px 18px;border-bottom:1px solid var(--rule);background:var(--raise);
  display:flex;justify-content:space-between;align-items:center;gap:12px}

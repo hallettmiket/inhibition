@@ -295,43 +295,12 @@ main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
 .chd{font-family:var(--mono);font-size:.6rem;letter-spacing:.14em;
  text-transform:uppercase;color:var(--blue);font-weight:600;padding:10px 14px 6px;
  background:var(--raise);border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:1}
-.row{display:grid;grid-template-columns:30px 46px 1fr;gap:8px;align-items:start;
- width:100%;text-align:left;font:inherit;color:inherit;background:none;cursor:pointer;
- padding:9px 14px 8px;border:0;border-bottom:1px solid var(--rule)}
-.row:hover{background:var(--blue-pale)}
-.row.on{background:var(--blue-pale);box-shadow:inset 3px 0 0 var(--blue)}
-.rk{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--muted);padding-top:3px}
-.thumb{width:46px;height:32px;object-fit:contain;background:#fff;
- border:1px solid var(--rule);border-radius:3px;display:block}
-.body{min-width:0;display:flex;flex-direction:column;gap:3px}
-.l1{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
-/* The mode's own label, carrying its mode colour, so a rail row says which
-   binding mode it is without the reader decoding a renumbered ident. */
-.mtag{display:inline-block;padding:0 .3rem;margin-left:.3rem;border-radius:3px;
-  color:#fff;font:600 10px var(--mono);vertical-align:1px}
-.mid-id{font-family:var(--mono);font-size:12.5px;overflow:hidden;
- text-overflow:ellipsis;white-space:nowrap}
-.eng{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--navy);flex:none}
-.l2{display:flex;align-items:center;gap:6px;min-width:0}
-.wc{font-size:10.5px;color:var(--blue);white-space:nowrap;overflow:hidden;
- text-overflow:ellipsis;max-width:12ch}
-.meta{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;
- text-overflow:ellipsis;flex:1}
-.tag{font-size:9px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;
- padding:1px 6px;border-radius:99px;flex:none}
-.t-md{background:#e6f4ee;color:var(--good)}
-.t-swept{background:#e8f1fb;color:var(--navy)}
-.t-failed{background:#faf3e0;color:var(--warn)}
-.t-none{background:var(--raise);color:var(--muted)}
-/* A control reads as a different KIND of row, not a better or worse one: an
-   amber accent, because what matters is where it LANDS among the candidates. */
-.t-ctl{background:#fdf0dc;color:#8a5a00}
-.row.ctl{background:#fffaf2;box-shadow:inset 3px 0 0 #d99a2b}
-.row.ctl:hover{background:#fdf3e4}
-:root[data-theme="dark"] .t-ctl{background:#3a2c14;color:#e0b070}
-:root[data-theme="dark"] .row.ctl{background:#1b1710}
-.bar{height:3px;background:var(--rule);border-radius:2px;overflow:hidden;margin-top:2px}
-.bar i{display:block;height:100%;background:var(--blue)}
+__ROWCSS__
+/* Only what VIRTUALISATION requires, on top of the shared row. Every item is
+   exactly ROW_H tall, because the window offset is computed as i * ROW_H
+   rather than measured -- a row free to size itself would put every row below
+   it at the wrong offset. */
+.row{height:64px;box-sizing:border-box;overflow:hidden}
 #viewer{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--paper)}
 #vhead{padding:9px 18px;border-bottom:1px solid var(--rule);background:var(--raise);
  display:flex;justify-content:space-between;align-items:center;gap:12px}
@@ -996,6 +965,7 @@ def build(title: str, date_str: str, three: str = "",
             .replace("__THREE__", three)
             .replace("__CYS__", str(CYS_RESI))
             .replace("__POCKET__", json.dumps(pocket_residues()))
+            .replace("__ROWCSS__", _rs().ROW_CSS)
             .replace("__STEPCSS__", _gs().CSS)
             .replace("__STEPNAV__", _gs().nav("modes.html", _step_counts(r)))
             .replace("__TITLE__", html.escape(title)))
@@ -1004,6 +974,13 @@ def build(title: str, date_str: str, three: str = "",
 def _gs():
     from shared import gui_shell
     return gui_shell
+
+
+def _rs():
+    """The shared rail-row stylesheet. Imported lazily for the same reason
+    `_gs` is: this module is imported by the builders that own it."""
+    from shared import results_shell
+    return results_shell
 
 
 def _step_counts(r) -> dict:
