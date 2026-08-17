@@ -267,26 +267,40 @@ ranking:
 # Simulation
 # ---------------------------------------------------------------------------
 md:
-  # MEASURED, at 0.1 ns resolution over the 168 finished sweeps -- see
-  # docs/sweep_length.md and scripts/exp_sweep_length.py. 9.0 ns maximises
-  # genuine survivors per GPU-hour (137.7 per 1000 h); bootstrap 95% CI
-  # 7.1-9.7 ns, and 8.2-9.8 ns is within 2% of the peak, so this sits in a
-  # plateau rather than on a spike. Everything below 7 ns is excluded.
+  # MEASURED at 0.1 ns resolution over the 168 finished sweeps -- see
+  # docs/sweep_length.md and scripts/exp_sweep_length.py. At the 0.35 nm bar the
+  # optimum is 8.3 ns; 8.0 is inside the plateau and is the round number.
   #
-  # The exchange rate is what decides it: one 100 ns run costs as much as 66 ns
-  # of sweeping one mode, so buying coverage by shortening the gate is a bad
-  # trade. At 5 ns, 38% of modes pass while only 23% are genuine.
-  sweep_ps: 9000             # triage: decides what earns a 100 ns run
+  # THE OPTIMUM IS A PLATEAU, NOT A POINT, and the earlier "9.0 ns" overstated
+  # it. Pass rate is a STEP function -- it moves only when one of 168 traces
+  # crosses the bar, 0.60% per step -- so the argmax lands wherever a molecule
+  # happens to cross. Between 9.0 and 9.6 nothing crosses at all and the decline
+  # there is pure sweep-cost arithmetic. Total variation across 8-10 ns is 3.7%.
+  # Bootstrap 95% CI at this bar: 4.3-9.5 ns.
+  #
+  # What the data DOES establish: below ~7 ns falls away steeply (5 ns is 18%
+  # down at the 0.5 bar), and past 10 ns the curve declines on sweep cost alone.
+  # The exchange rate is why the gate should be generous rather than short: one
+  # 100 ns run costs as much as 66 ns of sweeping one mode.
+  sweep_ps: 8000             # triage: decides what earns a 100 ns run
   production_ps: 100000
   salt_molar: 0.15           # #57. Every 2.2.0 system was built with
                              # `addions ... 0` -- neutralise and stop -- so none
                              # had salt, at ~0 M against a cell's 0.15
-  # THE SURVIVOR BAR for the triage sweep. 0.5 nm, not the 1.2 nm used for the
-  # 100 ns "held" verdict: at 0.5 the median warhead sits 4.22 A from Cys113 Sg,
-  # inside the 2.8-4.2 A attack window, while at 1.2 it has drifted to 5.6 A --
-  # the loose bar keeps poses that stayed in the SITE but lost the PRESENTATION,
-  # which is the thing being screened for. See docs/sweep_length.md.
-  sweep_survivor_rmsd_nm: 0.5
+  # THE SURVIVOR BAR for the triage sweep (@tt8804). 0.35 nm -- a strict reading
+  # of "minimally moving", not the 1.2 nm used for the 100 ns "held" verdict.
+  #
+  # It is severe: 12 of 168 modes pass (7.1%), against 39 at 0.5 nm. The screen
+  # is deliberately trading recall for cost -- only the poses that barely move
+  # earn a 100 ns run.
+  #
+  # ONE PIECE OF EVIDENCE POINTS THE OTHER WAY and is recorded here rather than
+  # lost: of the first three 100 ns runs, the only one that HELD (0.83 nm over
+  # 100 ns) had a 10 ns sweep RMSD of 0.483 -- this bar rejects it -- while the
+  # two that flew out at ~6 nm sat at 0.465 and 0.473, also rejected. n = 3, so
+  # it decides nothing, but if the pattern holds the bar is cutting into real
+  # candidates and should be revisited once more 100 ns rows exist.
+  sweep_survivor_rmsd_nm: 0.35
   bound_rmsd_nm: 1.2
   replicates: 1              # >1 only where a claim rests on one trajectory
 

@@ -2,8 +2,10 @@
 
 **Experiment:** `scripts/exp_sweep_length.py`
 **Data:** 168 finished 10 ns sweeps (campaign `sweep_gaps_6`, 3.0.0 Galena)
-**Result:** **9.0 ns**, 95% CI 7.1 – 9.7 ns. Anything from **8.2 to 9.8 ns** is
-within 2% of optimal.
+**Result:** a **plateau at 8–10 ns**, not a point. Adopted: **8 ns** with a
+**0.35 nm** survivor bar (D0085). At the 0.35 bar the argmax is 8.3 ns with a
+bootstrap 95% CI of 4.3–9.5; at the 0.5 bar it is 9.0 with a CI of 7.1–9.7.
+The decimal is not meaningful — see "Is the peak real?" below.
 
 ## The design being optimised
 
@@ -49,13 +51,30 @@ At 5 ns, **38% of modes pass but only 23% are genuine** — you would run 100 ns
 15% of everything you sweep for nothing, and each of those costs more than
 sweeping another mode to completion. 5 ns is 18% less efficient than 9 ns.
 
-## Is the peak real?
+## Is the peak real? No — it is a step artefact
 
-Bootstrap over 2,000 resamples of the 168 modes: **95% CI 7.1 – 9.7 ns**, median
-resampled optimum 8.8 ns. 13 of 100 grid points sit within 2% of the peak
-(8.2 – 9.8 ns), so the curve is flat at the top — 9 ns is a defensible choice
-inside a broad plateau, not a sharp optimum. What the data *does* exclude
-confidently is the short end: everything below 7 ns is outside the interval.
+Bootstrap over 2,000 resamples: **95% CI 7.1 – 9.7 ns** at the 0.5 bar
+(4.3 – 9.5 at 0.35), median resampled optimum 8.8 ns.
+
+More decisive than the CI is the fine structure. **Pass rate is a step
+function** — it moves only when one of 168 traces crosses the bar, 0.60% per
+step — so the argmax lands wherever a molecule happens to cross:
+
+| x | pass | yield | % of peak |
+|---|---|---|---|
+| 8.8 | 24.4% | 136.6 | 99.2% |
+| **9.0** | 23.8% | **137.7** | **100%** |
+| 9.2 | 23.8% | 136.5 | 99.2% |
+| 9.6 | 23.8% | 134.4 | 97.6% |
+| 9.7 | 23.2% | 136.0 | 98.8% |
+
+Between 9.0 and 9.6 **no trace crosses** — the decline there is pure sweep-cost
+arithmetic, not a property of the molecules. Total variation across 8–10 ns is
+**3.7%**.
+
+So reporting "9.0 ns" as the optimum was spurious precision. The defensible
+statement is **8–10 ns, choice free inside it**. What the data *does* exclude is
+the short end: below 7 ns falls away steeply and is outside the interval.
 
 ## Sensitivity
 
@@ -94,4 +113,15 @@ throughput far more than any choice of `x`.
 
 ## Decision
 
-**9 ns, 0.5 nm.** Recorded in `config/target.yaml` as `md.sweep_ps: 9000`.
+**8 ns, 0.35 nm** — D0085. Recorded in `config/target.yaml` as
+`md.sweep_ps: 8000` and `md.sweep_survivor_rmsd_nm: 0.35`.
+
+8 ns is the short end of the plateau. 0.35 nm is a strict reading of "minimally
+moving" and passes 12 of 168 modes (7.1%) against 39 at 0.5 nm — an explicit
+trade of recall for cost.
+
+**The evidence against the tight bar, recorded rather than lost:** of the first
+three 100 ns runs, the only one that held (0.83 nm) had a sweep RMSD of 0.483,
+which this bar rejects; the two that flew out to ~6 nm sat at 0.465 and 0.473.
+n = 3 decides nothing, but if it holds up the bar is cutting into real
+candidates.
