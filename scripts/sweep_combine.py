@@ -20,9 +20,10 @@ they stayed in a min RMSD range", and the case that settles it: a mode 75.8%
 attack-ready that flies out of the pocket. Attack geometry measured on a molecule
 that has left is geometry against a site it is no longer in.
 
-So the rail ranks on MAX ligand RMSD over the 10 ns, lowest first -- the same
+So the rail ranks on MAX ligand RMSD over the sweep, lowest first -- the same
 headline the 100 ns results page ranks on -- and marks held/left at
-`md.bound_rmsd_nm`. Attack-ready sits beside it as the triage reading it is.
+`md.sweep_survivor_rmsd_nm`, the bar that actually gates the next stage.
+Attack-ready sits beside it as the triage reading it is.
 
 This supersedes ranking on `n_visits` (prereg T4). T4's argument -- one good
 approach beats sustained occupancy -- is about WHICH attack observable to prefer,
@@ -83,12 +84,14 @@ def main() -> None:
     # headline the 100 ns results page ranks on. A molecule that wandered out of
     # the pocket has answered the question whatever its attack geometry did.
     #
-    # The threshold for held/left is `md.bound_rmsd_nm` from config, not a
-    # constant here: it was one of the keys nothing read, and a second definition
-    # of "bound" is how two pages come to disagree about the same trajectory.
+    # THE BAR IS THE SWEEP'S OWN GATE, not the 100 ns one. This read
+    # `md.bound_rmsd_nm` (1.2 nm) -- the old "did not dissociate" reading -- so
+    # the page marked 134 of 168 modes "held" while the rule that actually
+    # decides what earns a 100 ns run passes 12. A page whose badge disagrees
+    # with the gate is worse than a page with no badge.
     import sweep_assets as sa
     from shared import target_config as tc
-    bound = float(tc.get("md.bound_rmsd_nm", default=1.2))
+    bound = float(tc.get("md.sweep_survivor_rmsd_nm", default=0.35))
     # POSE RANK IS PART OF THE KEY. Without it every mode of a molecule resolves
     # to the same trajectory: three modes of t4_59100a17abd6 all reported max
     # RMSD 0.347 nm when they are 0.416, 0.663 and 6.62 -- the last of which
@@ -215,8 +218,8 @@ show(CUR);
 </script>
 </body></html>"""
     (REPORTS / "sweep.html").write_text(page)
-    print(f"\n  {len(tabs)} sweep reports, ranked by 100 ns priority "
-          f"({n_pri} with >=1 visit) -> {REPORTS / 'sweep.html'}")
+    print(f"\n  {len(tabs)} sweep reports, ranked by max ligand RMSD "
+          f"({n_pri} held under {bound:.2f} nm) -> {REPORTS / 'sweep.html'}")
 
 
 if __name__ == "__main__":

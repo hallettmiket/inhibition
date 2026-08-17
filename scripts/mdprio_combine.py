@@ -48,6 +48,8 @@ from shared import pipeline_schematic as schematic     # noqa: E402
 from shared import mode_ranking as moderank        # noqa: E402
 
 log = logging.getLogger("mdprio-combine")
+#: Set from config in main(); see D0085.
+_HELD_BAR = 0.35
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
 REPORTS = B / "mdprio_reports"
 
@@ -322,6 +324,16 @@ def main() -> None:
     ap.add_argument("--title", default="DWI Derivative Screen")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    # Read BEFORE anything uses them. These were set further down next to the
+    # page template, which put the `global` statement after the first read of
+    # _HELD_BAR in the rail loop -- a SyntaxError, so the page silently did not
+    # rebuild while the sweep page beside it did.
+    from shared import target_config as _tc
+    global _HELD_BAR
+    _HELD_BAR = float(_tc.get("md.sweep_survivor_rmsd_nm", default=0.35))
+    _SWEEP_NS = float(_tc.get("md.sweep_ps", default=8000)) / 1000.0
+    log.info("qualifying bar for a 100 ns hold: %.2f nm; triage %.0f ns (config)",
+             _HELD_BAR, _SWEEP_NS)
 
     sw, md, cls_of = _sweep(), _md(), _classes()
     # Controls are resolved BEFORE the depictions so their structures are drawn
@@ -454,7 +466,12 @@ def main() -> None:
         rmax = None
         if m_ is not None and "explicit_ligand_rmsd_nm_max" in m_ and not pd.isna(m_["explicit_ligand_rmsd_nm_max"]):
             rmax = float(m_["explicit_ligand_rmsd_nm_max"])
-        held = rmax is not None and rmax < 1.2
+        # THE QUALIFYING BAR, FROM CONFIG (D0085). 0.35 nm -- the same number
+        # the 8 ns sweep uses and the same one BPMD promotion reads, because it
+        # is the same question at a longer timescale. It was hardcoded 1.2 here,
+        # which is the old "did not dissociate" reading and three times looser
+        # than what now earns a molecule anything.
+        held = rmax is not None and rmax < _HELD_BAR
         has_md = eng is not None
         wcls = str(cls_of.get(t, "unclassified"))
         # A molecule with no 100 ns run cannot be placed on the ranked axis at
@@ -749,9 +766,11 @@ chemistries is the cheapest way to turn two points into a distribution.</p>
 <main>
  <div id="rail"><div class="legend">ranked by <b>max ligand RMSD</b> over the
   100&nbsp;ns run, lowest first &mdash; how far the molecule ever got from where it
-  started. Engagement and held/left are shown beside it. The 10&nbsp;ns sweep is
-  triage for choosing what earns a 100&nbsp;ns run, not the result, and is in each
-  molecule&rsquo;s own page.</div>
+  started. <b>held</b> means it never exceeded {_HELD_BAR:.2f}&nbsp;nm, the bar
+  that earns a molecule BPMD (D0085) and the same one the {int(_SWEEP_NS)}&nbsp;ns
+  triage applies. Engagement is shown beside it. The triage sweep chooses what
+  earns a 100&nbsp;ns run and is not the result; it is on each molecule&rsquo;s
+  own page.</div>
  {''.join(rows_html)}{''.join(ctl_rows_html)}</div>
  <div id="viewer">
   <div id="vhead"><span id="vname">&mdash;</span>

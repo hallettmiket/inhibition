@@ -4,7 +4,8 @@ Purpose: the Home and Sweep pages, and the JSON the Sweep page polls (#63).
 Author: Timothy Wu (with Claude Code)
 Date: 2026-08-12
 Input: --worklist <sweep_gaps_N.csv> (the campaign the sweep is executing)
-Output: mdprio_reports/{index.html, sweep.html, sweep_state.json}
+Output: mdprio_reports/{index.html, sweep_state.json}
+        (sweep.html belongs to scripts/sweep_combine.py -- one file, one owner)
 
 @tt8804 (#63): "integrate the ranking and results pages into one uniform gui with
 arrows showing each page as a distinct step ... Home page showing input target
@@ -281,240 +282,6 @@ def sweep_json(d, s, worklist: Path | None) -> str:
                        "rows": rows}, separators=(",", ":"))
 
 
-def sweep_page(counts: dict) -> str:
-    """The table, plus one pose in the pocket -- same assets as the ranking view.
-
-    The 3Dmol library and the receptor are vendored INTO the page and placed
-    BEFORE the script that uses them. Both orderings have already produced a
-    silently blank viewer in this project: a library loaded at the end of the
-    body is undefined when the viewer looks for it, and a data element parsed
-    after the code that reads it yields an empty string with no error.
-    """
-    body = """
-<div id="head"></div>
-<p class="note">10 ns triage. <b>Pending</b> means the mode is on the active
-worklist with no result yet — queued or mid-trajectory; this page cannot see the
-process table and does not pretend to. The table re-reads
-<code>sweep_state.json</code> every 30 s, so it fills in as runs land.
-<b>Click a row</b> to see the structure and the pose that was simulated.</p>
-<div id="two">
-  <div id="tbl"></div>
-  <aside id="side">
-    <div id="sname" class="note" style="margin:0 0 8px">select a mode</div>
-    <div id="sgrid">
-      <div>
-        <img id="sstruct" class="pvstruct" alt="" style="display:none">
-        <div class="pvbox" style="height:250px"><div id="pv"></div></div>
-        <div class="pvctl">
-          <label><input type="checkbox" id="pv-surf" checked onchange="redraw()">
-            pocket surface</label>
-        </div>
-        <div id="sfacts"></div>
-      </div>
-      <div id="sright">
-        <!-- The trajectory, at a size worth looking at. This is the panel the
-             narrow-rail layout exists to make room for. -->
-        <img id="splot" style="display:none;width:100%;border:1px solid var(--rule);
-             border-radius:4px;background:#fff"
-             alt="10 ns RMSD and warhead-sulfur distance">
-        <div id="splotmiss" class="note" style="display:none"></div>
-      </div>
-    </div>
-    <!-- The same three things the MD page shows, for the 10 ns run: the pose,
-         the movie, and the trajectory plots. Details, so a 9 MB movie is
-         fetched only when asked for. -->
-    <details id="smovwrap" style="display:none"><summary>10 ns movie
-      <span class="hint">ligand in yellow, CA-fitted — 126 frames</span></summary>
-      <div class="pvbox" style="height:420px"><div id="smov"></div></div>
-      <div class="pvctl"><button class="mbtn" onclick="playPause()"
-        id="playbtn">play</button></div>
-    </details>
-  </aside>
-</div>"""
-    js = """
-let ROWS=[], SUM={}, PRED={}, SORT='frac_attack_ready';
-// THE SWEEP'S OWN HEADLINE. Does the docked ranking predict what the trajectory
-// did? The answer belongs on this page, updating as runs land, rather than in
-// somebody's message -- and it must carry its own caveat, because every mode
-// here cleared the enrichment floor and a correlation measured inside a
-// selected range says nothing about the selection itself.
-function verdict(){
-  const P=PRED||{};
-  if(!P.n || P.rho===undefined)
-    return '<p class="note">Not enough finished runs yet to ask whether the '
-      +'ranking predicts the outcome ('+(P.n||0)+' so far; needs 8).</p>';
-  const sig = P.p < 0.05;
-  const col = sig ? 'var(--good)' : 'var(--warn)';
-  return '<div class="warnbox" style="border-left-color:'+col+'">'
-    + '<b>Does the ranking predict the sweep?</b> Spearman(enrichment, '
-    + 'attack-ready) = <b>'+P.rho.toFixed(3)+'</b>, p = '+P.p.toFixed(3)
-    + ' over '+P.n+' finished modes. '
-    + (sig ? 'A relationship is detectable.'
-           : 'No relationship is detectable — ordering by enrichment above the '
-             +'floor is not selecting the modes that reach attack geometry.')
-    + '<br>Median enrichment: <b>'+(P.enr_prod!==null?P.enr_prod.toFixed(2):'—')
-    + '</b> among the '+P.productive+' productive, <b>'
-    + (P.enr_not!==null?P.enr_not.toFixed(2):'—')+'</b> among the rest.'
-    + '<br><em>Range-restricted, and that limits the claim.</em> Every mode here '
-    + 'cleared the floor (lowest swept: '+ (P.floor!==undefined?P.floor.toFixed(2):'—')
-    + '). This measures whether enrichment discriminates ABOVE the floor, not '
-    + 'whether the floor works — that needs modes sampled from below it, which '
-    + 'is what the stratified pilot is for and it has not been run.</div>';
-}
-const ORDER={ok:0, pending:1, failed:2, 'not sent':3};
-function f(v,n){return (v===null||v===undefined)?'—':Number(v).toFixed(n);}
-function draw(){
-  const s=SUM, tot=(s.ok||0)+(s.pending||0)+(s.failed||0);
-  const pc=x=>tot?(100*x/tot).toFixed(1)+'%':'0%';
-  document.getElementById('head').innerHTML =
-    '<div class="cards">'
-    + [['swept ok',s.ok||0],['reach attack geometry',s.productive||0],
-       ['pending',s.pending||0],['failed',s.failed||0]]
-      .map(k=>'<div class="card"><b>'+k[1]+'</b><span>'+k[0]+'</span></div>').join('')
-    + '</div>'
-    + '<div class="prog" title="ok / pending / failed">'
-    + '<i style="background:var(--good);width:'+pc(s.ok||0)+'"></i>'
-    + '<i style="background:var(--warn);width:'+pc(s.pending||0)+'"></i>'
-    + '<i style="background:var(--bad);width:'+pc(s.failed||0)+'"></i></div>'
-    + '<p class="note">'+tot+' modes in this campaign · worklist <code>'
-    + (SUM._wl||'—')+'</code> · updated '+(SUM._t||'')+'</p>'
-    + verdict();
-  // Finished first and best-first within that, because the question this page
-  // answers is "what came back and was any of it good".
-  const r=ROWS.slice().sort((a,b)=>{
-    const d=(ORDER[a.sweep_state]??9)-(ORDER[b.sweep_state]??9); if(d) return d;
-    return (b.frac_attack_ready??-1)-(a.frac_attack_ready??-1);});
-  document.getElementById('tbl').innerHTML =
-    '<table><thead><tr><th>mode</th><th>state</th>'
-    + '<th>ready</th><th>visits</th><th class="dim">in window</th>'
-    + '<th class="dim">median d (Å)</th><th class="dim">enrichment</th>'
-    + '<th class="dim">class rank</th></tr></thead><tbody>'
-    + r.map(x=>{
-      const cls='t-'+(x.sweep_state||'').replace(' ','');
-      const bad=x.sweep_state==='failed'&&x.status?' title="'+String(x.status).replace(/"/g,'')+'"':'';
-      return '<tr onclick="pick(\\''+x.ident+'\\')" class="pick'
-        +(SEL===x.ident?' cur':'')+'"><td>'+x.ident.replace(/^t4_/,'')+'</td>'
-        +'<td'+bad+'><span class="tag '+cls+'">'+(x.sweep_state||'')+'</span></td>'
-        +'<td>'+f(x.frac_attack_ready,3)+'</td><td>'+f(x.n_visits,0)+'</td>'
-        +'<td class="dim">'+f(x.frac_in_window,3)+'</td>'
-        +'<td class="dim">'+f(x.median_dist_a,2)+'</td>'
-        +'<td class="dim">'+f(x.enrichment,2)+'</td>'
-        +'<td class="dim">'+f(x.class_rank,0)+'</td></tr>';}).join('')
-    + '</tbody></table>';
-}
-// --- structure and pose, the same assets the ranking view draws -------------
-let SEL=null, PDBC={};
-function pick(id){
-  SEL=id; draw();
-  const x=ROWS.find(r=>r.ident===id); if(!x) return;
-  const par=id.replace(/_m\\d+$/,''), mode=parseInt((id.match(/_m(\\d+)$/)||[0,'-1'])[1],10);
-  document.getElementById('sname').innerHTML='<b>'+id+'</b>'
-    +(x.mode_label&&x.mode_label!==String(mode)?' &middot; mode '+x.mode_label:'');
-  const im=document.getElementById('sstruct');
-  im.src='mode_thumbs/'+par+'.svg'; im.style.display='';
-  document.getElementById('sfacts').innerHTML=
-    '<table><tbody>'
-    +[['state',x.sweep_state],['attack-ready',f(x.frac_attack_ready,3)],
-      ['visits',f(x.n_visits,0)],['in window',f(x.frac_in_window,3)],
-      ['median distance',f(x.median_dist_a,2)+' Å'],
-      ['enrichment',f(x.enrichment,2)],['class rank',f(x.class_rank,0)]]
-     .map(k=>'<tr><td>'+k[0]+'</td><td>'+k[1]+'</td></tr>').join('')
-    +'</tbody></table>';
-  load3d(par, mode);
-  // The plot is an <img> and costs one request; the movie is ~9 MB and is
-  // fetched only if the reader opens it. Both are named by MODE, not by
-  // molecule -- two modes of one molecule are different trajectories.
-  const pl=document.getElementById('splot'), ms=document.getElementById('splotmiss');
-  // An absent figure SAYS it is absent. Hiding it silently is why "I don't see
-  // the rmsd plots at all" was ambiguous between "not built yet" and "broken".
-  pl.onerror=function(){ pl.style.display='none'; ms.style.display='';
-    ms.innerHTML='<b>No trajectory figure for this mode yet.</b><br>'
-      +'Assets are built per mode by <code>scripts/sweep_assets.py</code>; '
-      +'this one has not been generated, or its 10 ns run did not finish.'; };
-  pl.onload =function(){ pl.style.display=''; ms.style.display='none'; };
-  pl.src='sweep_assets/'+id+'.png';
-  const mw=document.getElementById('smovwrap');
-  mw.style.display=''; mw.open=false; MOVID=id; MOVLOADED=false;
-}
-// --- the 10 ns movie, loaded on demand -------------------------------------
-let MOVID=null, MOVLOADED=false, MV=null, PLAYING=false, MTIMER=null;
-async function loadMovie(){
-  if(MOVLOADED||!MOVID) return; MOVLOADED=true;
-  const box=document.getElementById('smov');
-  box.innerHTML='<div class="pvempty">loading 10 ns movie…</div>';
-  try{
-    const r=await fetch('sweep_assets/'+MOVID+'.pdb');
-    if(!r.ok) throw new Error('no movie for this mode ('+r.status+')');
-    const txt=await r.text(); const M=pvLib();
-    box.innerHTML='';
-    MV=M.createViewer(box,{backgroundColor:'#eef1f6'});
-    MV.addModelsAsFrames(txt,'pdb');       // frames ARE animation here
-    MV.setStyle({},{cartoon:{color:'#c3ccd8',opacity:0.45}});
-    MV.setStyle({resn:'MOL'},{stick:{radius:0.20,colorscheme:'yellowCarbon'}});
-    MV.setStyle({resi:[PV_CYS]},{stick:{radius:0.26,colorscheme:'default'}});
-    MV.zoomTo({resn:'MOL'}); MV.zoom(0.55);
-    requestAnimationFrame(function(){requestAnimationFrame(function(){
-      MV.resize(); MV.render(); });});
-    MV.render();
-  }catch(e){
-    box.innerHTML='<div class="pvempty"><b>No movie.</b><br>'
-      +String(e.message||e)+'</div>';
-  }
-}
-function playPause(){
-  if(!MV) return;
-  PLAYING=!PLAYING;
-  document.getElementById('playbtn').textContent=PLAYING?'pause':'play';
-  if(PLAYING){ MV.animate({loop:'forward',reps:0}); }
-  else{ MV.stopAnimate(); }
-}
-async function load3d(par, mode){
-  try{
-    if(!PDBC[par]){
-      const r=await fetch('mode_poses/'+par+'.pdb');
-      if(!r.ok) throw new Error('no pose asset ('+r.status+')');
-      PDBC[par]=await r.text();
-    }
-    mountPose('pv', PDBC[par], mode, document.getElementById('recpdb').textContent);
-  }catch(e){
-    // The reason, not a guess at it -- an empty box reads as a broken page.
-    document.getElementById('pv').innerHTML=
-      '<div class="pvempty"><b>No pose drawn.</b><br>'+String(e.message||e)+'</div>';
-  }
-}
-document.addEventListener('toggle', function(e){
-  if(e.target && e.target.id==='smovwrap' && e.target.open) loadMovie();
-}, true);
-function redraw(){ if(SEL){ const p=SEL.replace(/_m\\d+$/,'');
-  const m=parseInt((SEL.match(/_m(\\d+)$/)||[0,'-1'])[1],10); load3d(p,m); } }
-
-async function load(){
-  try{
-    const r=await fetch('sweep_state.json?t='+Date.now());
-    if(!r.ok) return;
-    const j=await r.json();
-    ROWS=j.rows||[]; SUM=j.summary||{}; PRED=j.predicts||{};
-    SUM._t=j.generated; SUM._wl=j.worklist;
-    draw();
-  }catch(e){}
-}
-load(); setInterval(load, 30000);"""
-    # ORDER IS THE WHOLE POINT. The 3Dmol library goes in <head>, before any
-    # code that names it; the receptor goes in the body BEFORE the script that
-    # reads it. Both inversions have produced a silently blank viewer here.
-    from shared import mode_ranking as mr
-    from shared import pose_viewer as pv
-    lib = (REPO / "scripts" / ".cache_3dmol-min.js")
-    three = f"<script>{lib.read_text()}</script>" if lib.is_file() else ""
-    rec = ("\n".join(l for l in mr.RECEPTOR.read_text().splitlines()
-                     if l.startswith(("ATOM", "HETATM")))
-           if mr.RECEPTOR.is_file() else "")
-    tail = f'<pre id="recpdb" style="display:none">{html.escape(rec)}</pre>'
-    vjs = pv.mount_js(mr.CYS_RESI, json.dumps(mr.pocket_residues()))
-    return _page("DWI covalent screen — Sweep", "sweep.html", counts, body,
-                 vjs + js, extra_css=pv.CSS, head_js=three, tail_data=tail)
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--worklist", default=None,
@@ -543,9 +310,13 @@ def main() -> None:
         "sweep.html": f"{s['ok']} ok · {s['pending']} pending",
     }
     (OUT / "index.html").write_text(home(counts, s, wl))
-    (OUT / "sweep.html").write_text(sweep_page(nav_counts))
-    log.info("sweep page: viewer assets from %s", mr.B.name)
-    print(f"  index.html + sweep.html + sweep_state.json -> {OUT}")
+    # SWEEP.HTML IS NOT WRITTEN HERE ANY MORE. `scripts/sweep_combine.py` owns
+    # it and builds it on the MD results shell, which is what @tt8804 asked for.
+    # Both scripts used to write the file, so whichever ran last won -- running
+    # build_gui after sweep_combine silently replaced the MD-shell page with the
+    # earlier table layout, and the page "looked wrong again" for no reason
+    # visible in either script. One file, one owner.
+    print(f"  index.html + sweep_state.json -> {OUT}")
     print(f"  {s}")
 
 
