@@ -773,7 +773,7 @@ async function pick(id){
     ['conditional_eb', fmt(x.eb, 3)],
     ['spread', fmt(x.sp, 2) + ' Å'],
     ['direction coherence', fmt(x.dc, 3)],
-    ['10 ns sweep', x.fa === null ? (x.s === 'none' ? 'never sent' : 'no score')
+    ['__SWEEPLABEL__ sweep', x.fa === null ? (x.s === 'none' ? 'never sent' : 'no score')
                                   : (x.fa*100).toFixed(1) + '% ready'],
   ].map(kv => '<div class="fact"><b>' + kv[1] + '</b><span>' + kv[0] + '</span></div>').join('');
 
@@ -1017,6 +1017,7 @@ def build(title: str, date_str: str, three: str = "",
             .replace("__RAILSEARCH__",
                      _rs().search_html("setQuery(this.value)",
                                        "filter — id, class, mode"))
+            .replace("__SWEEPLABEL__", _gs().sweep_label())
             .replace("__STEPCSS__", _gs().CSS)
             .replace("__STEPNAV__", _gs().nav("modes.html", _step_counts(r)))
             .replace("__TITLE__", html.escape(title)))

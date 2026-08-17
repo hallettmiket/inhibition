@@ -36,6 +36,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
+from shared import gui_shell as gs                      # noqa: E402
 from shared import md_movie as mov                      # noqa: E402
 from shared import outputs as sout                      # noqa: E402
 from shared import report_theme as rt                   # noqa: E402
@@ -769,7 +770,8 @@ def block(ident: str, er, three: str, cls: dict,
     if res.get("left_at_ns") is not None:
         rows.append(("left the pocket at", f"{res['left_at_ns']:.1f} ns"))
     if sw is not None:
-        rows.append(("attack-ready, 10 ns sweep", f"{float(sw.frac_attack_ready):.4f}"))
+        rows.append((f"attack-ready, {gs.sweep_label()} sweep",
+                     f"{float(sw.frac_attack_ready):.4f}"))
         rows.append(("median C&ndash;S&gamma; distance",
                      f"{float(sw.median_dist_a):.2f} &Aring;"))
         rows.append(("median attack angle", f"{float(sw.median_angle_deg):.1f}&deg;"))

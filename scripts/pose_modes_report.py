@@ -40,6 +40,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
+from shared import gui_shell as gs                       # noqa: E402
 from shared import mode_assets as massets                # noqa: E402
 from shared import outputs as sout                       # noqa: E402
 from shared import report_theme as rt                    # noqa: E402
@@ -74,7 +75,7 @@ def mode_rows(ident: str) -> pd.DataFrame:
 
 
 def sweep_rows(ident: str) -> pd.DataFrame:
-    """The 10 ns sweep, per mode. Scored PER MODE, so it is joined per mode."""
+    """The triage sweep, per mode. Scored PER MODE, so it is joined per mode."""
     fs = sorted(glob.glob(str(B / "attack_sweep/attack_sweep_*.csv")))
     if not fs:
         return pd.DataFrame()
@@ -247,7 +248,7 @@ def table(mr: pd.DataFrame, sw: pd.DataFrame, poses) -> str:
     head = ("<tr><th>mode</th><th>poses</th><th>consensus</th><th>in NAC range</th>"
             "<th>viable</th><th>viable fraction</th><th>enrichment</th>"
             "<th>spread</th><th>coherence</th><th>mean energy</th>"
-            "<th>gnina affinity</th><th>10 ns sweep</th></tr>")
+            f"<th>gnina affinity</th><th>{gs.sweep_label()} sweep</th></tr>")
     body = []
     for i, (_m, mode, _pr, _er) in enumerate(poses):
         row = mr[mr["mode"].astype("Int64").astype(str) == str(mode)]
@@ -382,7 +383,7 @@ different cloud and putting it beside these numbers would show structures the
 scores were not computed from.</div>
 
 <div class="caveat"><strong>Only mode {ran if ran else '?'} was ever
-simulated.</strong> The 10 ns sweep ran on it, and the 100 ns MD and its
+simulated.</strong> The {gs.sweep_label()} sweep ran on it, and the {gs.production_label()} MD and its
 replicates all started from that same pose. The other modes have no dynamics of
 any kind behind them &mdash; their columns above are docking-derived only.</div>
 

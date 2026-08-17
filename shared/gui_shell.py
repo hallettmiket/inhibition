@@ -21,17 +21,64 @@ cannot say why has found something worth asking about.
 
 from __future__ import annotations
 
-#: (file, label, one-line description). Order IS the pipeline order.
-STEPS = [
-    ("index.html", "Home", "target, receptor and the rules this run was given"),
-    ("modes.html", "Ranking", "every molecule and every binding mode, scored"),
-    ("sweep.html", "Sweep", "10 ns triage: which modes reach attack geometry"),
-    # "MD results", not "MD": the other three steps name an OUTPUT (a ranking, a
-    # sweep), and a step called "MD" names a method instead, which reads as a
-    # setting rather than somewhere to go. @tt8804.
-    ("combined.html", "MD results",
-     "100 ns runs, interactions, and the shortlist"),
-]
+def _ns(ps: float) -> str:
+    """`8000.0` -> `"8 ns"`. Trailing zeros dropped; sub-ns keeps its decimals."""
+    ns = ps / 1000.0
+    return f"{ns:g} ns"
+
+
+def sweep_label() -> str:
+    """`"8 ns"` — the triage length, for any prose that names it.
+
+    Exported so report generators stop writing the number by hand. Every page
+    that says "the 10 ns sweep" is a claim about the run that only a comparison
+    against `md.sweep_ps` can keep true, and there is no such comparison in a
+    string literal.
+    """
+    from shared import target_config as tc
+    return _ns(tc.md_sweep_ps())
+
+
+def production_label() -> str:
+    """`"100 ns"` — the production length, same reasoning as `sweep_label`."""
+    from shared import target_config as tc
+    return _ns(tc.md_production_ps())
+
+
+def _steps() -> list[tuple[str, str, str]]:
+    """(file, label, one-line description). Order IS the pipeline order.
+
+    THE STAGE LENGTHS COME FROM CONFIG, NOT FROM THE PROSE. This read
+    "10 ns triage" and "100 ns runs" as literals, written when the triage was
+    10 ns. D0085 moved it to 8 ns and `md.sweep_ps` says 8000 -- so every page
+    in the GUI carried a nav labelled with a stage length the run had not used
+    for a day, while the numbers beside it were correct. That is the catalogue's
+    disguise #3 in the one place a reader looks first to learn what the pipeline
+    does.
+    """
+    from shared import target_config as tc
+    sweep = _ns(tc.md_sweep_ps())
+    prod = _ns(tc.md_production_ps())
+    return [
+        ("index.html", "Home",
+         "target, receptor and the rules this run was given"),
+        ("modes.html", "Ranking",
+         "every molecule and every binding mode, scored"),
+        ("sweep.html", "Sweep",
+         f"{sweep} triage: which modes reach attack geometry"),
+        # "MD results", not "MD": the other three steps name an OUTPUT (a
+        # ranking, a sweep), and a step called "MD" names a method instead,
+        # which reads as a setting rather than somewhere to go. @tt8804.
+        ("combined.html", "MD results",
+         f"{prod} runs, interactions, and the shortlist"),
+    ]
+
+
+#: Kept as a module attribute because three templates and a test read it by
+#: name. It is built at import from the config, so it cannot disagree with the
+#: run -- but anything that needs it after a config change should call
+#: `_steps()` rather than trusting this snapshot.
+STEPS = _steps()
 
 CSS = """
 /* --- step navigation (#63), identical on every page ------------------- */

@@ -616,3 +616,75 @@ def test_build_gui_finds_the_campaign_worklist_itself():
     without one the page cannot tell a selected mode from an invented one."""
     src = (REPO / "scripts" / "build_gui.py").read_text()
     assert "_pl.worklist_path()" in src
+
+
+# --------------------------------------------------------------------------
+# stage lengths in prose (#63 follow-up)
+#
+# The nav said "10 ns triage" and "100 ns runs" as literals. D0085 moved the
+# triage to 8 ns and `md.sweep_ps` says 8000, so every page in the GUI carried a
+# stage length the run had not used for a day, beside numbers that were correct.
+# A literal cannot notice that config moved -- only a comparison can.
+# --------------------------------------------------------------------------
+
+def test_the_stepper_names_the_configured_stage_lengths():
+    from shared import target_config as tc
+    steps = dict((f, d) for f, _l, d in gs._steps())
+    assert gs._ns(tc.md_sweep_ps()) in steps["sweep.html"]
+    assert gs._ns(tc.md_production_ps()) in steps["combined.html"]
+
+
+def test_the_label_helpers_track_config_rather_than_a_literal():
+    """Move the config and the label must move with it."""
+    cfg = {"md": {"sweep_ps": 25_000, "production_ps": 500_000}}
+    from shared import target_config as tc
+    assert gs._ns(tc.md_sweep_ps(cfg)) == "25 ns"
+    assert gs._ns(tc.md_production_ps(cfg)) == "500 ns"
+    # and sub-nanosecond stays readable rather than rounding to "0 ns"
+    assert gs._ns(300.0) == "0.3 ns"
+
+
+def test_no_user_facing_page_hardcodes_a_sweep_length():
+    """The guard that would have caught this, over the report generators.
+
+    Scoped to the files that PRODUCE the pages a reader sees. Docstrings and
+    comments are excluded -- fixing prose about history is not the point, and
+    narrowing the check to executable strings is what made the version-pin test
+    honest (`how_this_project_breaks.md`).
+    """
+    import ast
+    from shared import target_config as tc
+
+    stale = gs._ns(10_000.0)                      # "10 ns", the old triage
+    current = gs._ns(tc.md_sweep_ps())
+    if stale == current:                          # config moved back; nothing to catch
+        pytest.skip("the configured sweep length IS 10 ns")
+
+    offenders = []
+    for rel in ("scripts/build_gui.py", "scripts/sweep_combine.py",
+                "scripts/pose_modes_report.py", "scripts/shortlist_report.py",
+                "shared/gui_shell.py", "shared/mode_ranking.py"):
+        p = REPO / rel
+        if not p.is_file():
+            continue
+        tree = ast.parse(p.read_text(), filename=str(p))
+        # Docstrings are prose ABOUT the code, often historical -- "this said 10
+        # ns" is a true sentence. Collect them by identity and skip them, the
+        # same narrowing that made the version-pin test honest.
+        docs = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                 ast.AsyncFunctionDef)):
+                body = getattr(node, "body", None)
+                if (body and isinstance(body[0], ast.Expr)
+                        and isinstance(body[0].value, ast.Constant)
+                        and isinstance(body[0].value.value, str)):
+                    docs.add(id(body[0].value))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and id(node) not in docs):
+                if f"{stale} sweep" in node.value or f"{stale} triage" in node.value:
+                    offenders.append(f"{rel}:{node.lineno}")
+    assert not offenders, (
+        f"these name a {stale} sweep while md.sweep_ps says {current}; "
+        f"use gui_shell.sweep_label(): {offenders}")
