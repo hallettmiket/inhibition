@@ -112,10 +112,14 @@ This replicates 3.0.0's ρ = +0.016 with four times the power and against a
 *different endpoint* — that was attack-readiness, this is stability. Two
 independent outcomes, neither predicted.
 
-**The cascade's first full result.** The best mode either run has produced —
-`t4_071099f4034c_m1`, 0.323 nm and 84.8% attack-ready over 8 ns — came back from
-100 ns at **1.140 nm**. It moved 3.5× further and missed the bar. One data
-point, but it is the best candidate in hand.
+**The cascade's first full results.** Two modes have completed 100 ns and
+neither held: `t4_071099f4034c_m1` (0.323 nm at 8 ns) came back at 1.140 nm, and
+`t4_0991a5964aba_m3` (0.331 nm) dissociated at 27 ns with residence 0.135.
+
+**This is 0 of 2 and carries no rate.** The upper 95% bound on the true pass
+rate at 0/2 is ~78%, so it excludes essentially nothing. It is worth recording
+only as a calibration of how much a mode can move between 8 ns and 100 ns — not
+as evidence about how permissive the triage window is. Six more are queued.
 
 ---
 
@@ -136,8 +140,9 @@ point, but it is the best candidate in hand.
 3IKD against a different active set, with 22 actives. Reading it as confirming
 or refuting D0046 would be over-reading.
 
-**The 100 ns result is n = 1.** Five more survivors are queued; the conclusion
-above is a calibration, not a rate.
+**The 100 ns results are n = 2, both failures.** That bounds the pass rate at
+~78% and below — which is to say it bounds almost nothing. Any statement about
+the triage window's permissiveness needs the queue to drain first.
 
 **The old-vs-new ranking comparison is confounded.** `t4_716800c125a7`, 3.0.0's
 headline molecule, ranks 89th of 774 in its class now — but the clustering was

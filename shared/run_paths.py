@@ -159,17 +159,36 @@ def bpmd_work(t: str | None = None) -> Path:
 def frames(tier: str) -> list[Path]:
     """Every version of one tier's candidate library, oldest first.
 
-    THE LIBRARY IS NAMED IN CONFIG, NOT IN SIX SCRIPTS. `04_t4_combinatorial/D4`
-    was written out as a literal glob in pipeline.py, mdprio_combine,
-    mdprio_report and sweep_report -- so screening a different dataset meant
-    editing code in four places and hoping.
+    ACCEPTS THE TIER OR THE FRAME STEM, and RAISES on anything else. The config
+    keys these by tier (`T4`), but three call sites had always spoken in frame
+    stems (`D4`) because that is what the filenames say. After the roots moved
+    into config, `frames("D4")` matched no key and returned an empty list --
+    so the SMILES lookup behind every structure depiction and every rail
+    thumbnail silently found nothing, and the panels vanished from the reports
+    with no error anywhere. @tt8804: "how many times do I need to ask for the
+    viewer to show the structure".
+
+    An unknown key is now a failure, not an empty result: returning [] for a
+    plausible-looking name is how a query that cannot be answered gets mistaken
+    for a question whose answer is nothing.
 
     Sorted by the integer version suffix, never lexicographically: `_10` sorts
     before `_9` as a string, and callers take the last element.
     """
-    stem = tc.get(f"paths.frames.{tier.upper()}", default=None)
-    if not stem:
-        return []
+    cfg = tc.get("paths.frames", default={}) or {}
+    key = str(tier).upper()
+    stem = cfg.get(key)
+    if stem is None:
+        # by frame stem: `D4` -> the entry whose path ends in `/D4`
+        for k, v in cfg.items():
+            if str(v).rsplit("/", 1)[-1].upper() == key:
+                stem, key = v, k
+                break
+    if stem is None:
+        raise KeyError(
+            f"no frame library named {tier!r}; config/target.yaml paths.frames "
+            f"has {sorted(cfg)} with stems "
+            f"{sorted(str(v).rsplit('/', 1)[-1] for v in cfg.values())}")
     fs = list(DATA.glob(f"{stem}_*.parquet"))
 
     def _v(p: Path) -> int:

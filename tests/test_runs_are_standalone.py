@@ -199,3 +199,42 @@ def test_both_servers_are_threaded():
                          if not l.strip().startswith("#"))
         assert re.search(r"(?<!Threading)HTTPServer\(", code) is None, \
             f"{f} instantiates a serial HTTPServer"
+
+
+def test_the_frame_library_lookup_fails_loudly_on_an_unknown_name():
+    """The config keys these by TIER (`T4`); three call sites had always spoken
+    in frame STEMS (`D4`) because that is what the filenames say. After the
+    roots moved into config, `frames("D4")` matched no key and returned [] --
+    so the SMILES lookup behind every structure depiction and every rail
+    thumbnail found nothing, and those panels vanished from the reports with no
+    error. @tt8804: "how many times do I need to ask for the viewer to show the
+    structure".
+
+    Both spellings resolve now, and anything else raises: returning [] for a
+    plausible name is how an unanswerable query passes for a question whose
+    answer is nothing."""
+    from shared import run_paths as rp
+    import pytest as _pt
+    for spelling in ("T4", "D4", "t4", "T3", "D3"):
+        assert rp.frames(spelling), f"{spelling} resolves to no frames"
+    assert rp.frames("T4") == rp.frames("D4")
+    with _pt.raises(KeyError):
+        rp.frames("not_a_library")
+
+
+def test_every_frames_call_site_uses_a_name_that_resolves():
+    """Checked against the config rather than against a hardcoded list, so a
+    renamed library fails here instead of blanking a panel."""
+    import re
+    from shared import run_paths as rp
+    from shared import target_config as tc
+    cfg = tc.get("paths.frames", default={}) or {}
+    ok = {k.upper() for k in cfg} | {
+        str(v).rsplit("/", 1)[-1].upper() for v in cfg.values()}
+    for f in ("scripts/mdprio_report.py", "scripts/mdprio_combine.py",
+              "scripts/sweep_report.py", "shared/pipeline.py",
+              "shared/pipeline_schematic.py"):
+        src = (REPO / f).read_text()
+        for m in re.finditer(r'rp\.frames\(\s*"([^"]+)"\s*\)', src):
+            assert m.group(1).upper() in ok, \
+                f"{f} asks for frames({m.group(1)!r}), which resolves to nothing"
