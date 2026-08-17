@@ -61,6 +61,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 from shared import md_movie as mov                  # noqa: E402
 from shared import nac_criterion as nac             # noqa: E402
 from shared import outputs as sout                  # noqa: E402
+from shared import target_config as tc              # noqa: E402
 
 log = logging.getLogger("attack-sweep")
 MD = Path("/data/lab_vm/modifiable/inhibition/md_residence_3ikd")
@@ -73,7 +74,11 @@ POSES = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
 OUT = sout.Topic("blacksmith", "attack_sweep")
 PY = Path.home() / ".micromamba/envs/dwi_reactive/bin/python"
 
-SWEEP_PS = 10_000.0        # 10 ns
+#: Triage-sweep length, from config. D0085 set it to 8 ns -- the plateau, with
+#: 7 ns the hard floor and nothing bought past 10 -- but this stayed a 10 ns
+#: literal, so the constant and the spec disagreed by 2 ns on every sweep: 25%
+#: more GPU time per mode than the experiment concluded was needed.
+SWEEP_PS = tc.md_sweep_ps()
 FRAMES = 500               # 20 ps resolution over the sweep
 
 #: A visit has to LAST to count as a visit (#34, adversary audit).

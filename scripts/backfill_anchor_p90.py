@@ -49,6 +49,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import nac_criterion as nac              # noqa: E402
+from shared import target_config as tc        # noqa: E402
 from shared import outputs as sout                   # noqa: E402
 
 log = logging.getLogger("anchor-p90")
@@ -57,7 +58,7 @@ DATA = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("--topic", default="nac_v3")
+    ap.add_argument("--topic", default=tc.topic())
     ap.add_argument("--quantile", type=float, default=90.0)
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

@@ -76,6 +76,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from shared import gromacs_explicit as gx        # noqa: E402
 from shared import mode_key                      # noqa: E402
+from shared import target_config as tc           # noqa: E402
 from shared import mmgbsa as mg                  # noqa: E402
 from shared import mmgbsa_noncovalent as mgn     # noqa: E402
 from shared import outputs as sout               # noqa: E402
@@ -574,9 +575,18 @@ def build_set(n_neg_per_class: int) -> list[ns.Candidate]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("--production-ps", type=float, default=100.0,
-                    help="SHORT by default so the chain can be proven cheaply; "
-                         f"use {PRODUCTION_PS_FULL:.0f} for the chemists' 100 ns")
+    # THE SPEC LIVES IN config/target.yaml, NOT IN THIS DEFAULT. It read 100.0
+    # ps -- a thousandth of `md.production_ps` -- while the only reader of that
+    # key was `pipeline_schematic`, the DIAGRAM. So the GUI stated 100 ns, this
+    # stated 0.1 ns, and the number that actually ran came from a flag typed
+    # into a scratch shell script. The flag still wins when passed; what changes
+    # is that omitting it now means the spec rather than a placeholder.
+    ap.add_argument("--production-ps", type=float, default=tc.md_production_ps(),
+                    help="production length in ps; defaults to md.production_ps "
+                         "in config/target.yaml. Pass a small value explicitly "
+                         "to prove the chain cheaply -- the point is that a "
+                         "short run is now something you ASK for rather than "
+                         "something you get by forgetting a flag.")
     ap.add_argument("--limit", type=int, default=1,
                     help="how many molecules; 1 verifies the plumbing")
     ap.add_argument("--n-neg", type=int, default=5, help="negatives per class")
@@ -616,7 +626,7 @@ def main() -> None:
     # hardcoded replicate=1, so re-running into a different --work-root would have
     # reproduced the SAME trajectory bit for bit and called it a replicate. A
     # sibling that cannot differ is not a replicate, it is a copy.
-    ap.add_argument("--replicate", type=int, default=1,
+    ap.add_argument("--replicate", type=int, default=tc.md_replicates(),
                     help="replicate index; selects the velocity seed (D0038)")
     ap.add_argument("--tag", default=None, help="output stem suffix")
     args = ap.parse_args()

@@ -199,3 +199,51 @@ def summary(cfg: dict | None = None) -> str:
         f"salt {m.get('salt_molar')} M",
         f"chemistry   docked species {c.get('chemistry', {}).get('docked_species')}",
     ])
+
+
+def topic(cfg: dict | None = None) -> str:
+    """The topic every output of a run is keyed on -- ONE source of truth.
+
+    THE DEFAULT WAS THE BUG. Five scripts each carried their own literal --
+    `nac_screen_v2` and `score_selection` said "nac_v3", `rank_v2` said
+    "nac_v2", `sweep_gap_worklist` said "nac_v4" -- while `config/target.yaml`
+    said something else again, with a comment reading "bump with the screen,
+    never on its own". So a re-run launched without an explicit --topic wrote
+    the SCREEN to nac_v3 and the WORKLIST to nac_v4, and nothing announced the
+    split; D0080 exists because that already happened once.
+
+    A default that lives in five places is five defaults. This is the one, and
+    bumping `run.topic` is now the whole ceremony for starting a fresh screen.
+    """
+    return str(get("run.topic", cfg, default="nac_v4"))
+
+
+def md_production_ps(cfg: dict | None = None) -> float:
+    """Production length of a full MD run, in ps.
+
+    Read by `pipeline_schematic` -- the DIAGRAM -- and by nothing that runs. The
+    runner's own default was 100.0 ps against a config saying 100_000, so the
+    page stated 100 ns while the code would have produced 0.1 ns, and the real
+    value came from a flag typed into a scratch shell script. A spec the runner
+    does not read is documentation.
+    """
+    return float(get("md.production_ps", cfg, default=100_000.0))
+
+
+def md_sweep_ps(cfg: dict | None = None) -> float:
+    """Triage-sweep length, in ps (D0085: 8 ns)."""
+    return float(get("md.sweep_ps", cfg, default=8_000.0))
+
+
+def md_replicates(cfg: dict | None = None) -> int:
+    """Replicates per production run. Had no reader at all."""
+    return int(get("md.replicates", cfg, default=1))
+
+
+def md_survivor_rmsd_nm(cfg: dict | None = None) -> float:
+    """Max ligand RMSD that earns the next stage (D0085: 0.35 nm).
+
+    The same number gates the sweep, the 100 ns run and BPMD promotion, because
+    it is the same question at three timescales.
+    """
+    return float(get("md.sweep_survivor_rmsd_nm", cfg, default=0.35))

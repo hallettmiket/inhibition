@@ -484,7 +484,7 @@ def main() -> None:
     # `consensus` and every score computed from it (#61). Hard-coding the two
     # production topics made "rank this variant on its own" impossible, which is
     # the one thing that keeps two scorings from being mixed.
-    ap.add_argument("--topic", default="nac_v2",
+    ap.add_argument("--topic", default=tc.topic(),
                     help="nac_v3 = 2.2.0 per-mode rows at nrun=500")
     ap.add_argument("--top", type=int, default=10)
     args = ap.parse_args()

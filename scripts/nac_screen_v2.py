@@ -553,7 +553,7 @@ def main() -> None:
     # agg_s*_*.csv in a topic, so re-screening molecules into nac_v3 would put
     # two rows on disk for the same mode and the ranking would silently count
     # some molecules twice.
-    ap.add_argument("--topic", default="nac_v3",
+    ap.add_argument("--topic", default=tc.topic(),
                     help="output topic; use a fresh one for targeted re-runs")
     args = ap.parse_args()
     # ALL THREE MOVE TOGETHER, UNCONDITIONALLY. Rebinding `OUT` alone -- and only

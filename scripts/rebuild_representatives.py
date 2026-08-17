@@ -64,6 +64,8 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
+from shared import target_config as tc        # noqa: E402
+
 log = logging.getLogger("rebuild-reps")
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
 #: Worst allowed residual, Angstrom, when a candidate reactive atom's recorded
@@ -273,7 +275,7 @@ def resolve_match(mol, smarts: str, dist: np.ndarray):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("--topic", default="nac_v4")
+    ap.add_argument("--topic", default=tc.topic())
     ap.add_argument("--cloud-dir", default=None,
                     help="where the persisted clouds are; defaults to "
                          "<topic>_allposes, but the 3.0.0 run misfiled its "

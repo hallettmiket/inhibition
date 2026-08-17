@@ -45,6 +45,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import outputs as sout                  # noqa: E402
+from shared import target_config as tc        # noqa: E402
 
 log = logging.getLogger("score-sel")
 DATA = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
@@ -113,7 +114,7 @@ def auc(pos: np.ndarray, neg: np.ndarray) -> float:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("--topic", default="nac_v3")
+    ap.add_argument("--topic", default=tc.topic())
     ap.add_argument("--converge-dir", default=None,
                     help="a replicate at a different sampling depth, for T1")
     ap.add_argument("--rerun-dir", default=None,

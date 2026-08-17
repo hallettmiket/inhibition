@@ -96,7 +96,7 @@ def main() -> None:
     ap.add_argument("--max-depth", type=int, default=None,
                     help="override the per-family cap; defaults to "
                          "sweep_rule.max_depth in config/target.yaml")
-    ap.add_argument("--topic", default="nac_v4",
+    ap.add_argument("--topic", default=tc.topic(),
                     help="which run's representative poses to resolve against; "
                          "must be the run whose tables were ranked")
     args = ap.parse_args()
