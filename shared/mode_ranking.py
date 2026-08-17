@@ -356,9 +356,25 @@ __RAILQCSS__
  gap:10px 18px;margin-bottom:14px}
 .fact b{display:block;font-family:var(--mono);font-size:1.05rem}
 .fact span{font-size:11px;color:var(--muted)}
+/* THE DEPICTION IS CONTAINED, NOT TRUSTED (#62). @tt8804 reported the structure
+   overlapping the facts row above it. The thumbs themselves are clean -- checked
+   over all 561, none draws outside its own viewBox -- so the collision is a
+   layout property, and the fix is to make the box unable to be overrun rather
+   than to chase one molecule's geometry:
+     - `overflow:hidden` so nothing paints outside the frame, whatever the SVG;
+     - `display:block` on the img, because an inline image sits on a text
+       baseline and contributes descender space that shifts what follows;
+     - `max-height` so a depiction with an extreme aspect ratio cannot grow the
+       panel without bound;
+     - `min-height` so a missing or slow SVG does not collapse the box to zero
+       and let the 3D viewer jump up into the facts grid, which is the one
+       mechanism that produces exactly the reported overlap. */
 #vstructwrap{border:1px solid var(--rule);border-radius:4px;background:#fff;
- padding:6px;margin-bottom:10px;display:flex;justify-content:center}
-#vstruct{width:100%;max-width:420px;height:auto}
+ padding:6px;margin-bottom:10px;display:flex;justify-content:center;
+ overflow:hidden;min-height:96px;align-items:center}
+#vstruct{display:block;width:100%;max-width:420px;height:auto;max-height:300px;
+ object-fit:contain}
+.facts{align-items:start}
 #glbox{position:relative;width:100%;height:440px;background:#eef1f6;
  border:1px solid var(--rule);border-radius:4px;overflow:hidden}
 #glbox>div{position:absolute;inset:0}
