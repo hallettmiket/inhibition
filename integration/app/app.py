@@ -1948,8 +1948,8 @@ def _ref_md():
     """100 ns outcomes for references that have been through elevation."""
     import glob as _g
     rows = []
-    for f in _g.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
-                     "md_residence/md_residence_ref_*.csv"):
+    from shared import run_paths as _rp
+    for f in _g.glob(str(_rp.residence_dir() / "md_residence_ref_*.csv")):
         try:
             d = pd.read_csv(f)
         except Exception:                              # noqa: BLE001
@@ -2678,9 +2678,15 @@ def _lookup_sources() -> dict:
         except Exception:                              # noqa: BLE001
             return None
 
-    out["sweep"] = _cat(f"{B}/attack_sweep/attack_sweep_*.csv",
+    # THIS RUN'S DIRECTORIES, NOT EVERY RUN'S (#74). `attack_sweep/` and
+    # `md_residence/` unscoped are every screen that has ever run, so this panel
+    # answered "what happened to these molecules" with a previous campaign's
+    # results and said nothing about which. Docking and ranking were scoped when
+    # the topic became a directory; these two readers were not.
+    from shared import run_paths as _rp
+    out["sweep"] = _cat(f"{_rp.sweep_dir()}/attack_sweep_*.csv",
                         key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
-    out["md"] = _cat(f"{B}/md_residence/*.csv")
+    out["md"] = _cat(f"{_rp.residence_dir()}/*.csv")
     return out
 
 

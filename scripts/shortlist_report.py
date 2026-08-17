@@ -37,6 +37,7 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
 from shared import gui_shell as gs                      # noqa: E402
+from shared import run_paths as rp                      # noqa: E402
 from shared import md_movie as mov                      # noqa: E402
 from shared import outputs as sout                      # noqa: E402
 from shared import report_theme as rt                   # noqa: E402
@@ -647,7 +648,7 @@ projected along that direction, not its real 3D position.</text>
 
 def md_row(ident: str):
     parts = []
-    for f in glob.glob(str(B / "md_residence/*.csv")):
+    for f in glob.glob(str(rp.residence_dir() / "*.csv")):   # this run only (#74)
         try:
             parts.append(pd.read_csv(f))
         except Exception:                                # noqa: BLE001
@@ -666,7 +667,7 @@ def md_row(ident: str):
 
 def sweep_row(ident: str):
     parts = []
-    for f in sorted(glob.glob(str(B / "attack_sweep/attack_sweep_*.csv"))):
+    for f in sorted(glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv"))):  # (#74)
         try:
             parts.append(pd.read_csv(f))
         except Exception:                                # noqa: BLE001

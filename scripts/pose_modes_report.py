@@ -41,6 +41,7 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
 from shared import gui_shell as gs                       # noqa: E402
+from shared import run_paths as rp                       # noqa: E402
 from shared import mode_assets as massets                # noqa: E402
 from shared import outputs as sout                       # noqa: E402
 from shared import report_theme as rt                    # noqa: E402
@@ -76,7 +77,9 @@ def mode_rows(ident: str) -> pd.DataFrame:
 
 def sweep_rows(ident: str) -> pd.DataFrame:
     """The triage sweep, per mode. Scored PER MODE, so it is joined per mode."""
-    fs = sorted(glob.glob(str(B / "attack_sweep/attack_sweep_*.csv")))
+    # THIS RUN'S SWEEP (#74). Unscoped, `attack_sweep/` is every screen ever
+    # run, so a mode would carry a previous campaign's trajectory numbers.
+    fs = sorted(glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")))
     if not fs:
         return pd.DataFrame()
     d = pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)

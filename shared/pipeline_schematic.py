@@ -24,6 +24,8 @@ pages that differ only in dot positions.
 
 from __future__ import annotations
 
+from . import run_paths as rp
+
 import collections
 import json
 import math
@@ -528,7 +530,7 @@ def _run_counts() -> dict:
     try:
         import pandas as _pd
         sw = _pd.concat([_pd.read_csv(f) for f in
-                         sorted(_g.glob(B + "/attack_sweep/attack_sweep_*.csv"))],
+                         sorted(_g.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")))],
                         ignore_index=True)
         sw = sw[(sw.get("sweep_ps", 0) > 1000) & (sw.status == "ok")]
         out["swept"] = int(sw.parent_ident.nunique())
@@ -540,7 +542,7 @@ def _run_counts() -> dict:
             out["survivors"] = int(sw.drop_duplicates("parent_ident")
                                      .n_visits.gt(0).sum())
         md = _pd.concat([_pd.read_csv(f) for f in
-                         _g.glob(B + "/md_residence/*.csv")], ignore_index=True)
+                         _g.glob(str(rp.residence_dir() / "*.csv"))], ignore_index=True)
         m = md[md.production_ps >= 50000].drop_duplicates("ident", keep="last")
         c = "explicit_ligand_rmsd_nm_max"
         m = m[m[c].notna()]

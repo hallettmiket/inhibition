@@ -54,6 +54,25 @@ PIPELINE_PATH = [
     "shared/sweep_state.py", "shared/mode_assets.py",
 ]
 
+#: READERS, not producers (#74). These do not create a run; they display one.
+#: They are held to the CROSS-RUN CONTAMINATION rule only -- no bare
+#: `attack_sweep/` or `md_residence/` -- because that is the half that produces a
+#: wrong answer rather than an inconvenient one: unscoped, those directories are
+#: every screen that has ever run, so the page renders and describes the wrong
+#: campaign with nothing saying so.
+#:
+#: They are NOT yet held to the topic and dataset-root rules, and that is a
+#: statement about work outstanding rather than about what is acceptable. Each
+#: still carries stale topic literals -- `integration/app/app.py` reads
+#: `nac_v2_poses` and `nac_v3_poses` while the run is nac_v5, two topics behind.
+#: Promote a file into PIPELINE_PATH when those are fixed too; #74 is the list.
+RUN_READERS = [
+    "integration/app/app.py",          # the Streamlit GUI members are told to open
+    "scripts/pose_modes_report.py",
+    "scripts/shortlist_report.py",
+    "shared/pipeline_schematic.py",
+]
+
 #: Directories every run would share if they were not scoped.
 SHARED_DIRS = ("attack_sweep", "md_residence", "mdprio_reports", "bpmd",
                "sweep_gaps")
@@ -79,7 +98,7 @@ def _code(path: str) -> list[tuple[int, str]]:
     return out
 
 
-@pytest.mark.parametrize("path", PIPELINE_PATH)
+@pytest.mark.parametrize("path", PIPELINE_PATH + RUN_READERS)
 def test_no_module_names_a_shared_run_directory(path):
     """A bare `attack_sweep/` is every screen's; `attack_sweep_<topic>/` is one.
 
