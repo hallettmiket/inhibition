@@ -165,6 +165,16 @@ def main() -> None:
             f"</span></button>")
 
     first = tabs[0] if tabs else ""
+    # AN EMPTY RAIL MUST NOT PRODUCE AN IFRAME. With no finished sweep the src
+    # interpolated to `sweep_pages/.html` -- a request for the empty ident --
+    # and the viewer pane rendered the server's 404 page inside the layout,
+    # which reads as a broken GUI rather than as a run with no results yet.
+    # @tt8804: "showing a 404".
+    _viewer = (f'<iframe id="frame" src="sweep_pages/{html.escape(first)}.html"'
+               f' title="sweep report"></iframe>' if first else
+               '<div class="legend" style="margin:22px">No sweep has finished '
+               'yet, so there is no report to show. Modes appear in the rail as '
+               'they come back, and this panel loads the one you select.</div>')
     n_pri = int((ok.rmsd_max < bound).sum())
     rho = pred.get("rho")
     note = (f"Spearman(enrichment, attack-ready) = {rho:+.3f}, p = {pred['p']:.3f} "
@@ -200,15 +210,17 @@ def main() -> None:
   {'<div class="legend">' + str(len(pending)) + ' modes pending or failed — not shown, they have no readings yet.</div>' if len(pending) else ''}
  </div>
  <div id="viewer">
-  <iframe id="frame" src="sweep_pages/{html.escape(first)}.html"
-          title="sweep report"></iframe>
+  {_viewer}
  </div>
 </main>
 <script>
 let CUR = "{html.escape(first)}";
 function show(id){{
+  if(!id) return;
   CUR = id;
-  document.getElementById('frame').src = 'sweep_pages/' + id + '.html';
+  const f = document.getElementById('frame');
+  if(!f) {{ location.reload(); return; }}
+  f.src = 'sweep_pages/' + id + '.html';
   document.querySelectorAll('#rail .row').forEach(function(b){{
     b.classList.toggle('on', b.id === 'b_' + id); }});
 }}

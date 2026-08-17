@@ -347,3 +347,46 @@ def test_split_ident_is_anchored_so_a_molecule_named_with_m_survives():
     # a bare ident means the mode was NOT STATED -- not mode 0. Reading it as 0
     # is exactly the assumption that produced #53's invisible collision.
     assert mk.split_ident("t4_abc")[1] is None
+
+
+# --------------------------------------------------------------------------
+# a stage with no results still has a page
+# --------------------------------------------------------------------------
+
+def test_an_empty_rail_does_not_emit_an_iframe():
+    """THE 404. With no finished sweep, `first` is "" and the viewer's src
+    interpolated to `sweep_pages/.html` -- a request for the empty ident -- so
+    the server's 404 page rendered INSIDE the layout. A run with no results yet
+    and a broken deployment looked identical. @tt8804: "showing a 404"."""
+    src = (REPO / "scripts" / "sweep_combine.py").read_text()
+    assert "_viewer" in src, "the viewer pane is not conditional"
+    body = src[src.index("_viewer = "):]
+    assert "if first else" in body[:400], "no empty-rail branch"
+    # and the click handler must tolerate the frame being absent
+    assert "if(!f)" in src or "if(!id)" in src
+
+
+def test_every_page_a_topbar_links_to_is_built_without_results():
+    """`pipeline.html` (the schematic) and `controls.html` were written only by
+    `mdprio_combine`, which exits before reaching them when there are no 100 ns
+    reports -- so on a fresh topic the "how this works" link 404s from all four
+    pages. Same coupling that kept `modes.html` empty while 2,019 modes sat on
+    disk: stage-2 content gated behind stage 5."""
+    src = (REPO / "scripts" / "build_gui.py").read_text()
+    assert 'schematic.build(' in src, "build_gui does not write pipeline.html"
+    assert '"controls.html"' in src, "build_gui does not write controls.html"
+
+
+def test_the_ranking_page_builds_from_the_ranking_alone():
+    """It is stage 2's output; requiring stage 5 to render it means the first
+    results a reader wants are the last to appear."""
+    p = REPO / "scripts" / "ranking_page.py"
+    assert p.is_file()
+    src = p.read_text()
+    assert "moderank.build(" in src and "massets.write_assets(" in src
+    # It must not DEPEND on the report combiner. Checked against CODE, not
+    # prose: the docstring names mdprio_combine in order to explain why the
+    # call site moved, and matching the bare word would make this unfailable --
+    # the same mistake the addModelsAsFrames test above had to correct for.
+    assert "import mdprio_combine" not in src
+    assert "mdprio_combine.py" not in src

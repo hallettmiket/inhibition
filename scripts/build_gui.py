@@ -41,6 +41,7 @@ sys.path.insert(0, str(REPO))
 from shared import gui_shell as gs                        # noqa: E402
 from shared import sweep_state as ss                      # noqa: E402
 from shared import run_paths as rp                  # noqa: E402
+from shared import pipeline_schematic as schematic   # noqa: E402
 
 log = logging.getLogger("build-gui")
 OUT = rp.reports_dir()
@@ -328,6 +329,18 @@ def main() -> None:
     # moment those have anything to show: `sweep_combine` owns sweep.html and
     # `mdprio_combine` owns modes.html and combined.html. Written only when
     # absent, so a rebuild during a live run never clobbers real results.
+    # THE SCHEMATIC IS NOT A RESULT, so it must not wait for results. Every page
+    # links to it as "how this works ↗", and it was written only by
+    # `mdprio_combine` -- which exits before reaching it when there are no 100 ns
+    # reports. On a fresh topic that link 404s from all four pages, which is
+    # what @tt8804 hit. It reads config and nothing else, so it belongs here.
+    from datetime import date as _date
+    try:
+        (OUT / "pipeline.html").write_text(
+            schematic.build("DWI covalent screen", _date.today().isoformat()))
+    except Exception as exc:                                   # noqa: BLE001
+        log.warning("pipeline.html not built: %s", exc)
+
     n_placeholder = 0
     for href, label, why in (
         ("modes.html", "Ranking",
@@ -339,6 +352,12 @@ def main() -> None:
         ("combined.html", "MD results",
          "No 100&nbsp;ns runs yet. Only modes that hold under "
          "0.35&nbsp;nm through the triage sweep earn one."),
+        # `pipeline.html` links here, so its absence 404s from a page that is
+        # itself only a schematic. Controls arrive with the reference runs.
+        ("controls.html", "Controls",
+         "No control runs yet. Reference covalent Cys113 binders are put "
+         "through the identical criterion, so they appear once the run has "
+         "measurements to compare them against."),
     ):
         p = OUT / href
         if p.is_file():
