@@ -9,55 +9,20 @@ each with their own **approach**. The pipeline code lives here; the generic
 machinery for *describing* choreographies belongs in the murmurent repo.
 
 <!-- release-block:start -->
-## Release 2.2.0 “Chalcopyrite” — closed 2026-08-10
+## Release 3.1.0 — in progress
 
-> **Branch** `release/2.2.0-chalcopyrite` · **status** closed; successor not yet named ([#46](https://github.com/hallettmiket/inhibition/issues/46))
+> **Branch** `release/3.0.0` · **topic** `nac_v5` · **status** running
 >
 > | | |
 > |---|---|
-> | **Retrospective** | **[`docs/retrospective_2.2.0.md`](docs/retrospective_2.2.0.md)** — every defect this version found was in the reading, not the chemistry |
-> | **Outline** | [`docs/outline_2.2.0.md`](docs/outline_2.2.0.md) — what was promised, and what would have made it a failure |
-> | **Framework as built** | [`docs/framework_2.2.0.md`](docs/framework_2.2.0.md) |
-> | **Retrospective of 2.1.0** | [`docs/retrospective_2.1.0.md`](docs/retrospective_2.1.0.md) — read before adding code. Nine defects, all one mistake |
-> | **Shortlist report** | [`docs/report_template.md`](docs/report_template.md) — the outward-facing format, and how to build one |
-> | **GUI** | [`docs/gui_spec.md`](docs/gui_spec.md) |
-> | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) |
-
-**How 2.2.0 ended.** The positive control ran on the last night and produced a
-three-record chain, each qualifying the one before: the 10 ns sweep rejects every
-known active (**D0075**); it does so because a 100 ps dwell filter discards exactly
-the brief approaches the observable was chosen to count, and on raw visits within
-mechanism Liu-2022-ZL-Pin13 beats 20 of 20 SN2 candidates (**D0076**); and the
-crystal-reactant controls model a covalent adduct as a Michaelis complex, so they
-could not have answered the question anyway (**D0077**). The screen had put a known
-covalent inhibitor into a valid near-attack geometry — 3.36 Å, 156.8° — the whole
-time.
-
-**The thesis.** 2.1.0 asked *"how good is this molecule's pose?"* of a molecule
-that does not have **a** pose. It has a distribution of them, often several
-distinct binding modes, and every score so far flattened that into one number —
-either by averaging over an arbitrary window or by measuring how much the poses
-agree, which penalises exactly the molecules that have a real second mode.
-
-**Pose splitting** gives each molecule a ranked set of binding-mode hypotheses
-instead of one scalar. Clustering keys on the reactive atom and approach vector,
-never on whole-molecule RMSD (D0062) and **never on docking energy**
-([#23](https://github.com/hallettmiket/inhibition/issues/23)); mode count is
-measured rather than parameterised.
-
-**Alongside it:** the primary score moves to conditional enrichment, which uses
-no ordering and so cannot inherit a bad one; PoseBusters becomes a validity gate;
-`mmgbsa.RECEPTOR_PDB` stops defaulting to 6VAJ; and a chain stage that produces
-no output stops the run instead of logging a non-zero exit and continuing.
-
-**Steps 1–3 need no new simulation** — they run on the poses 2.1.0 persisted.
-That is the dividend that made the previous release worth running even though its
-score did not survive.
-
-> **Before any score ranks anything: test it against Sulfopin.** Any candidate
-> score that gives the parent compound a zero is wrong. That check costs an
-> afternoon, and not doing it in 2.1.0 is the most avoidable thing in the
-> retrospective.
+> | **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) — no 3.0.0 number survives this release |
+> | **Since the handoff** | [`docs/since_handoff.md`](docs/since_handoff.md) — what changed after @mhallet left, and why |
+> | **Orientation** | [`docs/state_of_the_project.md`](docs/state_of_the_project.md) |
+> | **How the project breaks** | [`docs/how_this_project_breaks.md`](docs/how_this_project_breaks.md) — read before writing code |
+> | **Receptor change** | [`docs/branch_3ikd_receptor.md`](docs/branch_3ikd_receptor.md) — 6VAJ → 3IKD, and what it invalidated |
+> | **Sweep length** | [`docs/sweep_length.md`](docs/sweep_length.md) — how 8 ns and 0.35 nm were chosen |
+> | **GUI** | `python scripts/serve_reports.py` then `localhost:8931` |
+> | **Pipeline** | `python scripts/pipeline.py status \| start <stage> \| stop <stage>` |
 <!-- release-block:end -->
 
 > ### New here? Read these two first
@@ -245,24 +210,65 @@ restarts.
 
 ## Status
 
-**All four arms have generated and been scored.** **13,863** candidates across
-T_1–T_4 (T_1 4,803 · T_2 1,882 · T_3 5,396 · T_4 1,782), plus **42,588** from
-the four new T_2 seeds and **15,653** from a degree-2 ATRA sample — about
-**72,000 molecules generated**. Docking has completed on ~32,000 of them; the
-Liu-2024-C3 and Potter-Astex pools and the degree-2 sample are still running or
-queued.
+*Current as of 2026-08-17. Numbers here are from the live run; the fuller
+comparison against the handover document is in
+[`docs/handover_delta.md`](docs/handover_delta.md).*
 
-The binding constraint is not generation. It is that **no scorer we have tested
-discriminates on this target** — docking enrichment (D0041), docking *pose
-recovery* (D0046; the "60–80% norm" it was compared against was the
-SELF-docking norm and the comparison is corrected in #66 — against the
-cross-docking baseline of ~41–50% our top-1 is low and our best-of-9 is
-typical), ensemble MM-GBSA
-(D0036) and MD residence (D0038, D0044) have each been measured and each
-failed. That is the project's central finding so far, and it is why the current
-plan (#4) spends its next phase on **measured inactives** rather than on more
-generators.
+**The central finding has survived two changes of method.** @mhallet's handover
+put it as: *we have candidates and no validated way to rank any of them*, over
+four failed levels of theory. Since then the receptor changed, the ranking was
+rebuilt around geometry instead of affinity, and **the new ranking measures as
+unpredictive too** — so the finding now stands against six methods, on two
+independent endpoints.
 
-For anything more specific than this paragraph, read
-[`docs/state_of_the_project.md`](docs/state_of_the_project.md) — it is kept
-current and this section deliberately is not.
+| method | result | record |
+|---|---|---|
+| Docking enrichment | AUC 0.599, EF1% 0.0 | D0041 |
+| Docking pose recovery | 5% in production | D0046 |
+| Ensemble MM-GBSA | below chance | D0036 |
+| MD residence | not reproducible | D0038, D0044 |
+| Contact-profile fit score | worse than chance; built and killed | D0057 |
+| **Near-attack geometry ranking** | **ρ = +0.119, *p* = 0.33** vs sweep outcome | this run |
+
+That last row is measured on 68 swept modes of the current run. `enrichment`
+gives ρ = +0.033; `class_rank` gives ρ = −0.256 at *p* = 0.035 — the only one
+that clears significance, and it points the **wrong way**. Median enrichment
+among survivors is 6.03, among those that left 6.12.
+
+**The caveat that must travel with it:** every one of those 68 cleared the
+enrichment floor, so this measures discrimination *above* the floor, not whether
+the floor excludes anything. The stratified pilot that would test the floor
+([#71](https://github.com/hallettmiket/inhibition/issues/71)) has never run.
+
+### Then and now
+
+| | 2026-08-02 handover | 2026-08-17 |
+|---|---|---|
+| receptor | 6VAJ | **3IKD**, chemist-prepared (D0059) |
+| arms in play | four (T_1–T_4) | **T_4 only** (D0081) |
+| molecules | ~72,000 docked and ranked | **561** in scope, all screened |
+| ranking basis | affinity, size-decorrelated | **near-attack geometry**, EB-shrunk |
+| unit of selection | the molecule | **the binding mode** |
+| pose handling | one representative | two-stage splitting, ≤5 sub-modes |
+| MD | ad hoc, not reproducible | 3-stage cascade with measured gates |
+| running compute | nothing | pipeline live on 3 GPUs |
+
+### The current run
+
+561 molecules screened → 4,432 binding modes → 2,019 ranked → **147 selected for
+MD**. The 8 ns triage is in progress; 6 modes have held under 0.35 nm so far.
+The first 100 ns run finished at **1.140 nm** — the best mode either run has
+produced (0.323 nm and 84.8% attack-ready over 8 ns) moved 3.5× further over the
+longer trajectory and missed the bar.
+
+### What is open
+
+- **Is the enrichment floor real?** It discards 3,700 of 4,432 modes on a
+  parameter with no demonstrated relationship to outcome
+  ([#71](https://github.com/hallettmiket/inhibition/issues/71)).
+- **BPMD has no GPU** ([#72](https://github.com/hallettmiket/inhibition/issues/72)),
+  and consumed 1.3 TB in 3.0.0 — 87% of the project's footprint — for no usable
+  result.
+- **103 files outside the pipeline path still hardcode the dataset root**
+  ([#74](https://github.com/hallettmiket/inhibition/issues/74)).
+

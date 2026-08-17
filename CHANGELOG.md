@@ -16,7 +16,41 @@ Every entry below states whether prior numbers survive it.
 
 ---
 
-## 3.0.0 “Galena” — in progress
+## 3.1.0 — in progress
+
+**MAJOR: no 3.0.0 number survives this release, and 3.0.0 never closed.** The
+re-run is on a new topic (`nac_v5`) with a different molecule set, so nothing
+from Galena is quotable beside it:
+
+- **The protonation fix changes which molecules exist.** `protonate()` could
+  only ever build a ±1 species — it protonated one site and tested the total —
+  so every dication in the library was stamped un-dockable and dropped. All 60
+  of D4's failures were BDHI (30 bdhi_c4, 30 bdhi_c5, zero acrylamide), so both
+  BDHI arms had entered 3.0.0 **15% short against a full acrylamide arm**. The
+  families now enter at 187/187/187 after the bis-electrophile gate. Any 3.0.0
+  cross-family comparison ran on unequal denominators.
+- **The screen is scoped at docking, not only at ranking.** 3.0.0 docked 1,783
+  molecules to rank 594; this docks the 561 in scope.
+- **Every stage writes to run-scoped directories** (`attack_sweep_<topic>`,
+  `md_residence_<topic>`, `sweep_gaps_<topic>`, `mdprio_reports_<topic>`).
+  Eleven instances were found where a page or a query read a previous screen's
+  directory — five of them surfaced by the user rather than by a test. Guarded
+  by `tests/test_runs_are_standalone.py`.
+- **The spec is read from `config/target.yaml` by the code that runs.**
+  `md.production_ps` had been read only by the pipeline *diagram* while the
+  runner defaulted to 100 ps, and `SWEEP_PS` stayed a 10 ns literal after D0085
+  moved the decision to 8 ns.
+
+**What is unchanged from 3.0.0:** the receptor (3IKD), the near-attack
+criterion, the two-stage pose splitting, and the cascade's gates
+(8 ns / 0.35 nm / 100 ns, D0085).
+
+**Version coined 2026-08-17** while writing the handover comparison; the work it
+labels began with the topic bump to `nac_v5` on the same day.
+
+---
+
+## 3.0.0 “Galena” — superseded before closing
 
 **MAJOR: no 2.2.0 number survives this release.** Four changes each alter what is
 measured, and no combination of them leaves a prior value comparable:
