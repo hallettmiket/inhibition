@@ -203,3 +203,44 @@ def analyse(wd: Path) -> dict:
         "solvent": "explicit TIP3P",
         "not_a_ranking": "describes one complex under real water; feeds no gate",
     }
+
+
+PROT_RMSD_XVG = "rmsd_protein.xvg"
+
+
+def protein_rmsd(wd: Path) -> Path | None:
+    """CA RMSD over the SAME corrected trajectory the ligand RMSD is measured on.
+
+    THE LIGAND NUMBER ALONE CANNOT DISTINGUISH TWO OPPOSITE EVENTS. Ligand RMSD
+    is measured after superposing on protein CA, so it answers "where is the
+    ligand relative to the fitted protein" -- and it rises both when the ligand
+    slides out of a rigid pocket (a real failure) and when the protein itself
+    relaxes, carrying a still-bound ligand with it (not a failure). @tt8804:
+    "if they change tgt then they are fine".
+
+    Fitting and measuring on the same CA group gives the protein's own
+    displacement, so the two traces on one axis separate the cases: parallel
+    rise means the complex drifted together, ligand-only rise means it left.
+
+    Cheap and re-derivable: `whole.xtc` and `analysis.ndx` are persisted by
+    `analyse()`, so this is one `gmx rms` over an existing trajectory -- no
+    re-simulation. Idempotent, so it can be backfilled across a finished
+    campaign. Returns None when the inputs are absent (an older run, or one that
+    died before the PBC step) rather than raising, because a missing second
+    trace should degrade the plot, not fail the report.
+    """
+    out = wd / PROT_RMSD_XVG
+    if out.is_file() and out.stat().st_size > 0:
+        return out
+    tpr, whole, ndx = wd / "prod.tpr", wd / "whole.xtc", wd / "analysis.ndx"
+    if not all(p.is_file() and p.stat().st_size for p in (tpr, whole, ndx)):
+        return None
+    try:
+        # Group 1 BOTH times: fit on CA, measure CA. Group 2 here would just
+        # re-measure the ligand under a different filename.
+        _gmx("rms", "-s", str(tpr), "-f", str(whole), "-n", str(ndx),
+             "-o", PROT_RMSD_XVG, "-tu", "ns", cwd=wd,
+             log_name="rms_protein.log", stdin="1\n1\n")
+    except (AnalysisError, subprocess.SubprocessError):
+        return None
+    return out if out.is_file() and out.stat().st_size else None

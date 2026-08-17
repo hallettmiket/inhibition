@@ -184,6 +184,72 @@ def test_sweep_assets_are_named_per_mode_not_per_molecule():
     assert 'OUT / f"{parent}' not in src
 
 
+def test_the_asset_cache_is_keyed_on_which_trajectory_drew_it():
+    """THE REGRESSION. Fixing `rep_dir` to take `pose_rank` corrected the number
+    the rail is sorted on, but the PNGs and movies on disk had been drawn from a
+    sibling pose and the cache had no way to know: it skipped on "the file
+    exists". t4_2f88a2f534fd_m1 was ranked on its own 0.255 nm trace beside a
+    plot showing rank13's 0.857 nm. @tt8804: "why is the selector showing 0.255
+    nm max but the rmsd plots show max 0.857 nm".
+
+    So the source path is recorded and compared, which makes the cache
+    self-invalidating -- and the resolution must happen BEFORE the skip, or the
+    comparison has nothing to compare against."""
+    src = (REPO / "scripts" / "sweep_assets.py").read_text()
+    assert 'f"{ident}.src"' in src, "no provenance sidecar"
+    assert "stale = " in src and "src.read_text()" in src
+    body = src[src.index("def main("):]
+    assert body.index("rep = rep_dir(") < body.index("stale = "), \
+        "the cache is consulted before the trajectory is resolved"
+    # Every guard that decides whether to rebuild must consider staleness --
+    # checked on the guard's own line, since `stale` sits before the marker.
+    for branch in ("want_mov and (", "not png.is_file():"):
+        line = next(ln for ln in body.splitlines()
+                    if branch in ln and ln.lstrip().startswith("if "))
+        assert "stale" in line, f"a stale asset is not rebuilt at: {line.strip()}"
+
+
+def test_the_rmsd_panel_shows_the_protein_alongside_the_ligand():
+    """Ligand RMSD is measured after superposing on protein CA, so it rises both
+    when the ligand leaves a rigid pocket and when the protein relaxes around a
+    ligand that is still bound. One trace cannot tell those apart. @tt8804: "we
+    should show ligand rmsd and protein rmsd, if they change tgt then they are
+    fine"."""
+    src = (REPO / "scripts" / "sweep_assets.py").read_text()
+    assert "protein_rmsd" in src and "protein CA" in src
+    from shared import gromacs_analysis as ga
+    assert hasattr(ga, "protein_rmsd")
+
+
+def test_the_protein_trace_cannot_be_clipped_off_the_axis():
+    """The y-limit was set from the ligand maximum alone. A protein that moved
+    further than the ligand would be drawn past the top of the axis and read as
+    a protein that stayed still -- the opposite conclusion."""
+    src = (REPO / "scripts" / "sweep_assets.py").read_text()
+    seg = src[src.index("set_ylim(0"):]
+    pre = src[:src.index("set_ylim(0")]
+    assert "top" in seg[:40] and "nanmax(p_rmsd)" in pre, \
+        "set_ylim does not account for the protein trace"
+
+
+def test_protein_rmsd_fits_and_measures_the_same_group():
+    """Group 1 both times: fit on CA, measure CA. Group 2 in either slot
+    re-measures the ligand under a different filename -- two traces that are the
+    same quantity, which is worse than one, because it looks like agreement."""
+    src = (REPO / "shared" / "gromacs_analysis.py").read_text()
+    body = src[src.index("def protein_rmsd("):]
+    assert 'stdin="1\\n1\\n"' in body
+    assert 'stdin="1\\n2\\n"' not in body, "measures the ligand, not the protein"
+
+
+def test_a_missing_protein_trace_degrades_the_plot_rather_than_failing_it():
+    """Older runs predate the persisted corrected trajectory. A report that
+    raises instead of drawing one trace loses the reading it does have."""
+    src = (REPO / "shared" / "gromacs_analysis.py").read_text()
+    body = src[src.index("def protein_rmsd("):]
+    assert body.count("return None") >= 2, "missing inputs must yield None"
+
+
 def test_the_distance_panel_reads_the_window_from_the_criterion():
     """A hand-typed 2.8-4.2 here could drift from the number that scores."""
     src = (REPO / "scripts" / "sweep_assets.py").read_text()

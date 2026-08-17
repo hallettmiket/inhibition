@@ -117,22 +117,46 @@ def plots(rep: Path, ident: str) -> str:
 
     t_r, rmsd = _xvg(rep / "rmsd.xvg")
     t_d, dist = _xvg(rep / "mindist.xvg")
+    # THE PROTEIN'S OWN DISPLACEMENT, on the same axis as the ligand's. Ligand
+    # RMSD is measured after superposing on protein CA, so it rises both when
+    # the ligand leaves a rigid pocket and when the protein relaxes around a
+    # still-bound ligand. @tt8804: "if they change tgt then they are fine".
+    # Computed on demand from the persisted corrected trajectory; a mode without
+    # one simply plots the single trace it has.
+    t_p = p_rmsd = None
+    try:
+        from shared import gromacs_analysis as ga
+        xvg = ga.protein_rmsd(rep)
+        if xvg is not None:
+            t_p, p_rmsd = _xvg(xvg)
+    except Exception as exc:                                   # noqa: BLE001
+        log.debug("%s: no protein RMSD (%s)", ident, exc)
     if t_r is None and t_d is None:
         return ""
     fig, ax = plt.subplots(2, 1, figsize=(7.2, 3.9), dpi=150, sharex=True)
+    if t_p is not None and len(t_p):
+        ax[0].plot(t_p, p_rmsd, lw=0.9, color="#8a94a6", alpha=0.85,
+                   label="protein CA", zorder=1)
     if t_r is not None:
-        ax[0].plot(t_r, rmsd, lw=1.0, color="#0072ce")
-        ax[0].set_ylabel("ligand RMSD (nm)")
+        ax[0].plot(t_r, rmsd, lw=1.0, color="#0072ce", label="ligand", zorder=2)
+        ax[0].set_ylabel("RMSD (nm)")
         # MAX RMSD MARKED, because it is the number the 100 ns page RANKS on --
         # how far the molecule ever got from where it started. A trace without it
         # makes the reader eyeball the peak, and the eye reads a noisy maximum
         # low. Drawn as a line plus its value so the plot states it outright.
         mx = float(np.nanmax(rmsd))
         ax[0].axhline(mx, color="#8a6d1f", ls="--", lw=1.0)
-        ax[0].text(0.995, mx, f" max {mx:.3f} nm ", ha="right", va="bottom",
-                   fontsize=7.5, color="#8a6d1f",
+        ax[0].text(0.995, mx, f" ligand max {mx:.3f} nm ", ha="right",
+                   va="bottom", fontsize=7.5, color="#8a6d1f",
                    transform=ax[0].get_yaxis_transform())
-        ax[0].set_ylim(0, max(mx * 1.18, 0.05))
+        # The top of the axis must cover BOTH traces, or a protein that moved
+        # further than the ligand is silently clipped -- which reads as a
+        # protein that stayed still, the opposite of what happened.
+        top = mx if t_p is None or not len(t_p) else max(mx, float(np.nanmax(p_rmsd)))
+        ax[0].set_ylim(0, max(top * 1.18, 0.05))
+        if t_p is not None and len(t_p):
+            ax[0].legend(loc="upper left", fontsize=7, frameon=False,
+                         ncol=2, handlelength=1.4, borderaxespad=0.2)
     if t_d is not None:
         # THE WINDOW THE SCORE USES, drawn from the criterion itself.
         ax[1].axhspan(nac.NAC_DIST_MIN, nac.NAC_DIST_MAX, color="#0f7a54",
@@ -177,25 +201,41 @@ def main() -> None:
     for i, ident in enumerate(idents, 1):
         parent = ident.rsplit("_m", 1)[0]
         pdb, png = OUT / f"{ident}.pdb", OUT / f"{ident}.png"
+        src = OUT / f"{ident}.src"
         want_mov = not args.plots_only
-        # `--plots-only` REGENERATES the figures. Skipping when the PNG exists
-        # made the flag a no-op in exactly the case it is for -- rebuilding the
-        # plots after changing how they are drawn -- and the run printed
-        # "0 plots" while looking like it had succeeded.
-        if not (args.force or args.plots_only) and png.is_file() and pdb.is_file():
-            continue
+        # RESOLVED BEFORE THE CACHE IS CONSULTED, because the cache is keyed on
+        # WHICH trajectory drew the asset, not merely on the asset existing.
         rep = rep_dir(parent, prank.get(ident))
         if rep is None:
             miss[parent] = "no finished 10 ns run"
             continue
+        # THE STALENESS BUG. Assets built before `rep_dir` took `pose_rank`
+        # came from whichever run sorted first, so a multi-mode molecule's
+        # plots and movie belonged to a sibling pose. Fixing the resolver did
+        # not fix the files: t4_2f88a2f534fd_m1 was ranked on its own 0.255 nm
+        # trace while its plot showed rank13's 0.857 nm, and nothing on the page
+        # could have revealed the disagreement. @tt8804: "why is the selector
+        # showing 0.255 nm max but the rmsd plots show max 0.857 nm".
+        #
+        # Recording the source path makes the cache self-invalidating: change
+        # how a mode resolves and its assets rebuild without anyone having to
+        # remember `--force`. A missing sidecar means the asset predates this,
+        # i.e. exactly the suspect population, so it rebuilds.
+        stale = (not src.is_file()) or src.read_text().strip() != str(rep)
+        if not (args.force or args.plots_only or stale) \
+                and png.is_file() and pdb.is_file():
+            continue
         try:
-            if want_mov and (args.force or not pdb.is_file()):
+            if want_mov and (args.force or stale or not pdb.is_file()):
                 mov.build_movie_pdb(rep, pdb, total_ps=10_000.0)
                 n_mov += 1
-            if args.force or args.plots_only or not png.is_file():
+            if args.force or args.plots_only or stale or not png.is_file():
                 b64 = plots(rep, ident)
                 if b64:
                     png.write_bytes(base64.b64decode(b64)); n_png += 1
+            # Written LAST, so an asset that failed half-way keeps its old
+            # (or absent) sidecar and is retried rather than recorded as current.
+            src.write_text(str(rep))
         except Exception as exc:                           # noqa: BLE001
             # Recorded, never dropped: a molecule with no movie must read as a
             # failure to build one, not as a run that did not happen.

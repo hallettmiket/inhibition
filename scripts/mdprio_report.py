@@ -123,7 +123,17 @@ def prod_ns(rep: Path, default: float = 100.0) -> float:
 def series(rep: Path, er, total_ns: float = 100.0) -> dict:
     """Every gmx series this run produced, each on its own true time axis."""
     out = {}
-    for key, fname in (("rmsd", "rmsd.xvg"), ("mindist", "mindist.xvg"),
+    # `prot_rmsd` IS COMPUTED ON DEMAND, not read passively: it did not exist
+    # when these runs were analysed, and it is one `gmx rms` over the corrected
+    # trajectory that is already on disk. Failure is silent by design -- an old
+    # run without `whole.xtc` keeps the single trace it has.
+    try:
+        from shared import gromacs_analysis as ga
+        ga.protein_rmsd(rep)
+    except Exception as exc:                                   # noqa: BLE001
+        log.debug("%s: no protein RMSD (%s)", rep.name, exc)
+    for key, fname in (("rmsd", "rmsd.xvg"), ("prot_rmsd", "rmsd_protein.xvg"),
+                       ("mindist", "mindist.xvg"),
                        ("contacts", "numcont.xvg"), ("dist", "dist.xvg")):
         p = rep / fname
         if not p.is_file():
@@ -240,6 +250,16 @@ def nac_series(cand: str, rep: Path, movie: Path,
             "kind": nac.MECHANISMS.get(mech, ""), "mechanism": mech}
 
 
+def _promote_bar() -> float | None:
+    """The max-ligand-RMSD gate, from config -- one definition, not a constant
+    retyped here that would drift the moment the bar is retuned."""
+    try:
+        from shared import target_config as tc
+        return float(tc.get("md.sweep_survivor_rmsd_nm", default=0.35))
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
 def figure(ident: str, s: dict, res: dict, er, nacs: dict | None = None) -> str:
     import matplotlib
     matplotlib.use("Agg")
@@ -252,7 +272,8 @@ def figure(ident: str, s: dict, res: dict, er, nacs: dict | None = None) -> str:
     fig, axes = plt.subplots(len(panels), 1, figsize=(9, 2.2 * len(panels)),
                              sharex=True)
     axes = np.atleast_1d(axes)
-    titles = {"rmsd": "Ligand RMSD after superposing on the protein (nm)",
+    titles = {"rmsd": "RMSD after superposing on protein CA (nm) — "
+                      "ligand vs. the protein itself",
               "nac_dist": "Warhead → Cys113 SG distance (Å)",
               "nac_angle": "Near-attack angle (°)",
               "mindist": "Minimum ligand–protein distance (nm)",
@@ -268,10 +289,60 @@ def figure(ident: str, s: dict, res: dict, er, nacs: dict | None = None) -> str:
         ax.set_title(titles[k], loc="left", fontsize=9)
         ax.margins(x=0)
         if k == "rmsd":
-            ax.axhline(BOUND_NM, ls="--", lw=1, color=rt.SERIES["alert"])
-            ax.text(0.995, BOUND_NM, f" bound ≤ {BOUND_NM} nm", va="bottom",
-                    ha="right", transform=ax.get_yaxis_transform(),
-                    fontsize=8, color=rt.SERIES["alert"])
+            # THE PROTEIN'S OWN DISPLACEMENT, on the same axis. This panel is
+            # measured AFTER superposing on protein CA, so it rises both when
+            # the ligand slides out of a rigid pocket and when the protein
+            # relaxes around a ligand that never let go. @tt8804: "if they
+            # change tgt then they are fine". Drawn behind the ligand and in a
+            # neutral grey: it is the reference, not the reading.
+            if "prot_rmsd" in s:
+                tp, yp = s["prot_rmsd"]
+                # The ligand trace is the one already drawn above; relabelled
+                # rather than redrawn, so there is exactly one line per series.
+                ax.lines[-1].set_label("ligand")
+                ax.lines[-1].set_zorder(2)
+                ax.plot(tp, yp, lw=0.7, color="#8a94a6", alpha=0.85, zorder=1,
+                        label="protein CA")
+                ax.legend(loc="lower left", fontsize=7.5, frameon=False,
+                          ncol=2, handlelength=1.4, borderaxespad=0.2)
+            # THE LINE THAT ACTUALLY DECIDES, drawn alongside the prereg one.
+            # `BOUND_NM` (1.0) is the residence criterion -- did it dissociate
+            # -- and essentially everything passes it. Promotion to 100 ns, and
+            # onward to BPMD, is gated at `md.sweep_survivor_rmsd_nm` (0.35), so
+            # a panel showing only the 1.0 line shows only the test nothing
+            # fails. @tt8804: "md results should be updated to our new specs".
+            _bar = _promote_bar()
+            if _bar:
+                ax.axhline(_bar, ls="--", lw=1, color="#8a6d1f")
+                ax.text(0.995, _bar, f" promotes ≤ {_bar:.2f} nm ", va="bottom",
+                        ha="right", transform=ax.get_yaxis_transform(),
+                        fontsize=8, color="#8a6d1f")
+            # AND THE AXIS IS SCALED TO THE DECISION, not to the prereg line.
+            # Forcing the top to 1.0 nm squashed a held complex into the bottom
+            # quarter of the panel, where a ligand at 0.15 and one at 0.30 --
+            # promote and do-not-promote -- are the same two pixels. A run that
+            # really does leave auto-scales past 1.0 and shows that line anyway.
+            _top = max(float(np.nanmax(y)),
+                       *( [float(np.nanmax(s["prot_rmsd"][1]))]
+                          if "prot_rmsd" in s else [] ),
+                       (_bar or 0.0) * 1.15)
+            _fits = _top >= BOUND_NM
+            if not _fits:
+                ax.set_ylim(0, _top * 1.15)
+            # The dissociation line is drawn only when it is ON the axis. Drawn
+            # at y=1.0 under a 0.4 nm axis, `get_yaxis_transform` places its
+            # LABEL outside the axes -- text floating in the figure margin
+            # pointing at an invisible line. When it is off-scale the fact that
+            # matters is that it was never approached, so the title says so.
+            if _fits:
+                ax.axhline(BOUND_NM, ls="--", lw=1, color=rt.SERIES["alert"])
+                ax.text(0.995, BOUND_NM, f" bound ≤ {BOUND_NM} nm", va="bottom",
+                        ha="right", transform=ax.get_yaxis_transform(),
+                        fontsize=8, color=rt.SERIES["alert"])
+            else:
+                ax.set_title(f"{titles[k]} — never approached the "
+                             f"{BOUND_NM} nm dissociation line",
+                             loc="left", fontsize=9)
             if res.get("left_at_ns"):
                 ax.axvline(res["left_at_ns"], lw=1, color=rt.SERIES["alert"])
         if k == "nac_dist":
