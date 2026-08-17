@@ -17,9 +17,11 @@ import glob
 import logging
 from pathlib import Path
 
+from . import run_paths as rp
+
 log = logging.getLogger("mode-assets")
 
-B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
+B = rp.BLACKSMITH
 
 
 def poses_dir() -> Path:

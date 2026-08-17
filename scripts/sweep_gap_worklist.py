@@ -45,12 +45,13 @@ sys.path.insert(0, str(REPO))
 from shared import mode_ranking as mr                     # noqa: E402
 from shared import outputs as sout                        # noqa: E402
 from shared import target_config as tc                    # noqa: E402
+from shared import run_paths as rp                        # noqa: E402
 
 log = logging.getLogger("sweep-gaps")
 #: Set from `--topic` in `main()`. NOT a hardcoded topic: reading poses from one
 #: run while ranking the tables of another is the defect that cost 2.2.0 and
 #: nearly cost 3.0.0 (see nac_screen_v2.topic_paths).
-POSES = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/nac_v4_poses")
+POSES = rp.poses_dir()
 
 
 def resolvable(parent: str, mode: int) -> int | None:
@@ -102,8 +103,7 @@ def main() -> None:
                          "must be the run whose tables were ranked")
     args = ap.parse_args()
     global POSES
-    POSES = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith"
-                 ) / f"{args.topic}_poses"
+    POSES = rp.poses_dir(args.topic)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     d = mr.gather()
@@ -329,7 +329,7 @@ def main() -> None:
         })
 
     out = pd.DataFrame(rows)
-    dest = sout.Topic("blacksmith", "sweep_gaps").write("sweep_gaps", ".csv")
+    dest = sout.Topic("blacksmith", rp.worklist_topic()).write("sweep_gaps", ".csv")
     out.to_csv(dest, index=False)
     print(f"\n  {len(out)} runnable of {checked} inspected -> {dest}")
     if len(out):

@@ -33,6 +33,7 @@ import argparse
 import importlib.util
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -438,8 +439,7 @@ def main() -> None:
     import glob as _g
     smiles = None
     for _sub, _stem in (("04_t4_combinatorial", "D4"), ("03_t3_reinvent", "D3")):
-        _fs = sorted(_g.glob(f"/data/lab_vm/append_only/inhibition/{_sub}/{_stem}_*.parquet"),
-                     key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+        _fs = [str(x) for x in rp.frames(_stem)]
         if not _fs:
             continue
         _fr = pd.read_parquet(_fs[-1]).drop_duplicates("candidate_id").set_index("candidate_id")
@@ -453,8 +453,7 @@ def main() -> None:
         # the generated-candidate frames cannot describe them. The pose sidecar is
         # written next to the pose itself by whatever produced it, which makes it
         # the right place to ask: it is keyed on the pose, not on a generator.
-        _sc = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
-                   f"pose_sidecars/{parent}.json")
+        _sc = rp.sidecars() / f"{parent}.json"
         if _sc.is_file():
             try:
                 smiles = json.loads(_sc.read_text()).get("canonical_smiles")
@@ -462,17 +461,21 @@ def main() -> None:
                 log.warning("sidecar unreadable for %s: %s", args.candidate, exc)
     if not cls:
         for _t, _sc in (("T4", "conditional_eb"), ("T3", "enrichment_conditional")):
-            _fs = sorted(_g.glob("/data/lab_vm/append_only/inhibition/00_outputs/"
-                                 f"blacksmith/rank_v2/rank_v2_{_t}_{_sc}_*.csv"))
+            # THIS RUN'S RANKING. This glob carried no topic at all, so it
+            # matched every screen's tables and `[-1]` picked by string order --
+            # a warhead class read off whichever run sorted last.
+            _fs = sorted(_g.glob(str(rp.BLACKSMITH / "rank_v2" /
+                                     f"rank_v2_{_t}_{rp.topic()}_{_sc}_*.csv")))
             if not _fs:
                 continue
             _rk = pd.read_csv(_fs[-1]).drop_duplicates("parent_ident").set_index("parent_ident")
             if parent in _rk.index:
                 cls = _rk.loc[parent, "warhead_class"]; break
     sweep_ar = sweep_v = None
-    _fs = sorted(_g.glob("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
-                         "attack_sweep/attack_sweep_*.csv"),
-                 key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+    # THIS RUN'S SWEEP. The unscoped `attack_sweep/` here put a previous
+    # screen's triage readings on this run's report page.
+    _fs = sorted(_g.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")),
+                 key=os.path.getmtime)
     if _fs:
         _sw = pd.concat([pd.read_csv(f) for f in _fs], ignore_index=True)
         _sw = _sw[(_sw.get("sweep_ps", 0) > 1000) & (_sw.status == "ok")

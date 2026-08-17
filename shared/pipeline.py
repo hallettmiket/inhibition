@@ -93,8 +93,7 @@ def scope_idents() -> list[str]:
     Derived from the frame every time rather than from a file written once, so
     it cannot describe a scope the config no longer names.
     """
-    fs = sorted(glob.glob("/data/lab_vm/append_only/inhibition/04_t4_combinatorial/D4_*.parquet"),
-                key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
+    fs = sorted([str(x) for x in rp.frames("T4")])
     if not fs:
         raise StageError("no D4 frame on disk")
     d = pd.read_parquet(fs[-1]).drop_duplicates("candidate_id")
@@ -226,7 +225,7 @@ def worklist_path() -> Path | None:
     if not ranks:
         return None
     newest_rank = max(os.path.getmtime(f) for f in ranks)
-    cands = [f for f in glob.glob(str(rp.BLACKSMITH / "sweep_gaps" / "sweep_gaps_*.csv"))
+    cands = [f for f in glob.glob(str(rp.worklist_dir() / "sweep_gaps_*.csv"))
              if os.path.getmtime(f) >= newest_rank]
     if not cands:
         return None

@@ -65,13 +65,13 @@ from shared import target_config as tc              # noqa: E402
 from shared import run_paths as rp        # noqa: E402
 
 log = logging.getLogger("attack-sweep")
-MD = Path("/data/lab_vm/modifiable/inhibition/md_residence_3ikd")
+MD = rp.residence_work()
 #: The sweep writes to its OWN root. The workdir is <root>/<candidate>/md/rep1
 #: regardless of tag, so a 10 ns sweep and a later 100 ns run of the same
 #: molecule would otherwise collide -- and the 100 ns run would find a finished
 #: 10 ns prod.xtc sitting there and skip itself.
 SWEEP_ROOT = rp.sweep_work()
-POSES = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
+POSES = rp.BLACKSMITH
 OUT = sout.Topic("blacksmith", rp.sweep_topic())
 PY = Path.home() / ".micromamba/envs/dwi_reactive/bin/python"
 

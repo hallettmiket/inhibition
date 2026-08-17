@@ -8,6 +8,25 @@
 # selection, physiological salt and the pH 7.4 docked species each change what is
 # measured, and together they invalidate every 2.2.0 value (CHANGELOG rule).
 
+# WHERE THIS DATASET LIVES. Named here so the tool can screen a different one:
+# every module resolves paths through `shared/run_paths`, which reads these, and
+# a literal `/data/lab_vm/.../inhibition` in code is a tool that only ever works
+# on this dataset on this filesystem. @tt8804: "we are building a tool that can
+# be reused for searching different datasets, nothing should be hardcoded".
+paths:
+  governed: /data/lab_vm/append_only/inhibition    # append-only, hook-protected
+  scratch:  /data/lab_vm/modifiable/inhibition     # trajectories, workdirs
+  agent:    blacksmith                             # outputs/<agent>/<topic>/
+  # THE CANDIDATE LIBRARIES, per generation tier. A screen of another dataset
+  # names its own frames here instead of editing six scripts.
+  frames:
+    T3: 03_t3_reinvent/D3
+    T4: 04_t4_combinatorial/D4
+  # Prepared receptors live under scratch, named after the PDB in `target`, so
+  # changing the target moves them without a code change.
+  receptor_prep: receptor_{pdb}_prep/{PDB}_noligand.pdb
+  receptor_plain: receptor_{pdb}_plain
+
 # THE RUN EVERY DOWNSTREAM STAGE MEANS BY "THE SCREEN".
 #
 # One name, read by the ranking, the GUIs and the sweep worklist, so they cannot

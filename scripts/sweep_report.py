@@ -39,7 +39,7 @@ from shared import report_theme as rt                     # noqa: E402
 from shared import run_paths as rp                  # noqa: E402
 
 log = logging.getLogger("sweep-report")
-B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
+B = rp.BLACKSMITH
 REPORTS = rp.reports_dir()
 ASSETS = REPORTS / "sweep_assets"
 PAGES = REPORTS / "sweep_pages"
@@ -65,7 +65,11 @@ def sweep_row(ident: str):
 def rank_row(ident: str):
     """What the docking ranking said about this mode, for the comparison table."""
     import pandas as pd
-    fs = glob.glob(str(B / "rank_v2/rank_v2_T4_*_conditional_eb_*.csv"))
+    # THE `*` WHERE THE TOPIC GOES MATCHED EVERY SCREEN. `rank_v2_T4_*_conditional_eb_*`
+    # is satisfied by nac_v3, nac_v4 and nac_v5 alike, so this read whichever
+    # sorted last -- a previous run's ranking on this run's report page.
+    fs = glob.glob(str(rp.BLACKSMITH / "rank_v2" /
+                       f"rank_v2_T4_{rp.topic()}_conditional_eb_*.csv"))
     if not fs:
         return None
     f = max(fs, key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
@@ -169,8 +173,7 @@ def main() -> None:
         RDLogger.DisableLog("rdApp.*")
         smi = None
         for sub, stem in (("04_t4_combinatorial", "D4"), ("03_t3_reinvent", "D3")):
-            fs = sorted(glob.glob(f"/data/lab_vm/append_only/inhibition/{sub}/{stem}_*.parquet"),
-                        key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+            fs = [str(x) for x in rp.frames(stem)]
             if not fs:
                 continue
             fr = pd.read_parquet(fs[-1])

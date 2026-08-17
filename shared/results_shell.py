@@ -26,6 +26,22 @@ from __future__ import annotations
 #: Both now interpolate this. The ranking page adds only what virtualisation
 #: requires, so a divergence has to be written deliberately rather than by
 #: forgetting to copy an edit.
+SEARCH_CSS = """\
+/* Rail search. Sticky, because a filter you have to scroll back up to change is
+   one you stop using on a 147-row list. */
+.railq{position:sticky;top:0;z-index:3;display:flex;gap:6px;align-items:center;
+ padding:6px 8px;background:var(--raise);border-bottom:1px solid var(--rule)}
+.railq input{flex:1;min-width:0;font:12px var(--mono);padding:.3rem .45rem;
+ border:1px solid var(--rule);border-radius:3px;background:var(--paper);
+ color:var(--ink)}
+.railq input:focus{outline:none;border-color:var(--blue)}
+.railq .n{font:600 10px var(--sans);color:var(--muted);white-space:nowrap}
+.railq button{font:600 11px var(--sans);border:1px solid var(--rule);
+ border-radius:3px;background:var(--paper);color:var(--muted);cursor:pointer;
+ padding:.25rem .4rem}
+.railq button:hover{background:var(--blue-pale);color:var(--ink)}
+"""
+
 ROW_CSS = """\
 .row{display:grid;grid-template-columns:22px 46px 1fr;gap:8px;align-items:start;
  width:100%;text-align:left;font:inherit;color:inherit;background:none;cursor:pointer;
@@ -127,19 +143,7 @@ a.mbtn.lnk:hover{background:var(--blue-pale)}
 main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
 @media(max-width:880px){main{grid-template-columns:1fr;grid-template-rows:250px 1fr}}
 #rail{overflow-y:auto;border-right:1px solid var(--rule);background:var(--rail)}
-/* Rail search. Sticky, because a filter you have to scroll back up to change is
-   one you stop using on a 147-row list. */
-.railq{position:sticky;top:0;z-index:3;display:flex;gap:6px;align-items:center;
- padding:6px 8px;background:var(--raise);border-bottom:1px solid var(--rule)}
-.railq input{flex:1;min-width:0;font:12px var(--mono);padding:.3rem .45rem;
- border:1px solid var(--rule);border-radius:3px;background:var(--paper);
- color:var(--ink)}
-.railq input:focus{outline:none;border-color:var(--blue)}
-.railq .n{font:600 10px var(--sans);color:var(--muted);white-space:nowrap}
-.railq button{font:600 11px var(--sans);border:1px solid var(--rule);
- border-radius:3px;background:var(--paper);color:var(--muted);cursor:pointer;
- padding:.25rem .4rem}
-.railq button:hover{background:var(--blue-pale);color:var(--ink)}
+""" + SEARCH_CSS + """
 .chd{font-family:var(--mono);font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;
  color:var(--blue);font-weight:600;padding:10px 14px 6px;background:var(--raise);
  border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:1}
@@ -172,13 +176,31 @@ iframe{flex:1;width:100%;border:0;background:var(--paper)}
 #: Matches the row's whole text -- ident, mode, warhead class, the readings --
 #: so `bdhi_c5`, `held`, `0.3`, and a molecule id all work without the user
 #: having to know which field they are searching.
-SEARCH_HTML = """\
-<div class="railq">
- <input id="railq" type="search" placeholder="filter — id, class, held/left, a number"
-        oninput="railFilter()" autocomplete="off" spellcheck="false">
- <span class="n" id="railn"></span>
- <button type="button" onclick="railClear()" title="clear">&times;</button>
-</div>"""
+
+
+def search_html(oninput: str = "railFilter()",
+                placeholder: str = "filter — id, class, held/left, a number") -> str:
+    """The rail's search box. Takes its handler because the ranking page cannot
+    use the DOM filter -- its rail is virtualised, so it filters the DATA and
+    rebuilds -- but it must still be the SAME box in the SAME place.
+
+    IT LIVES IN THE RAIL, NOT THE TOPBAR. The first version put the ranking
+    page's input in its topbar, which is a flex row with `overflow-x:auto`
+    carrying a long title, the class select, a hint and two buttons -- so the
+    box was served, well-formed, and scrolled out of the visible strip.
+    @tt8804, three times: "still no search bar". A control the reader cannot
+    find is a control that does not exist.
+    """
+    return (f'<div class="railq">\n'
+            f' <input id="railq" type="search" placeholder="{placeholder}"\n'
+            f'        oninput="{oninput}" autocomplete="off" spellcheck="false">\n'
+            f' <span class="n" id="railn"></span>\n'
+            f' <button type="button" onclick="railClear()" title="clear">&times;</button>\n'
+            f'</div>')
+
+
+#: Back-compat for the two pages that use the default handler.
+SEARCH_HTML = search_html()
 
 SEARCH_JS = """
 function railFilter(){

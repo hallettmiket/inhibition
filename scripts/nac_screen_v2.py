@@ -86,6 +86,7 @@ from shared import receptors as R                 # noqa: E402
 from shared import pose_modes as pmod             # noqa: E402
 import nac_screen as ns
 from shared import pose_subsplit as psub                           # noqa: E402
+from shared import run_paths as rp        # noqa: E402
 import nac_rank as nr                             # noqa: E402
 
 log = logging.getLogger("nac-v2")
@@ -99,9 +100,9 @@ log = logging.getLogger("nac-v2")
 #: that impossible, and leave the 2.1.0 data intact for comparison.
 #: The topic every output of a run is keyed on. Rebound ONCE in `main()` from
 #: `--topic`; nothing below may hardcode a topic name again.
-TOPIC = "nac_v3"
-BLACKSMITH = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
-OUT = sout.Topic("blacksmith", TOPIC)
+TOPIC = tc.topic()
+BLACKSMITH = rp.BLACKSMITH
+OUT = sout.Topic(rp.AGENT, TOPIC)
 #: A run's poses go to the SAME topic as its tables, and this is not cosmetic --
 #: it is the defect that cost 2.2.0 and very nearly cost 3.0.0.
 #:

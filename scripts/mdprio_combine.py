@@ -52,7 +52,7 @@ from shared import run_paths as rp                  # noqa: E402
 log = logging.getLogger("mdprio-combine")
 #: Set from config in main(); see D0085.
 _HELD_BAR = 0.35
-B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
+B = rp.BLACKSMITH
 REPORTS = rp.reports_dir()
 
 
@@ -84,8 +84,7 @@ def _thumbs(idents) -> dict:
     smi = {}
     for d in ("04_t4_combinatorial/D4", "03_t3_reinvent/D3"):
         sub, stem = d.split("/")
-        fs = sorted(glob.glob(f"/data/lab_vm/append_only/inhibition/{sub}/{stem}_*.parquet"),
-                    key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+        fs = [str(x) for x in rp.frames(stem)]
         if not fs:
             continue
         fr = pd.read_parquet(fs[-1]).drop_duplicates("candidate_id")
@@ -191,7 +190,9 @@ def _classes() -> dict:
     """Warhead class per molecule, for the within-class ranking view."""
     out = {}
     for tier, score in (("T4", "conditional_eb"), ("T3", "enrichment_conditional")):
-        fs = sorted(glob.glob(str(B / f"rank_v2/rank_v2_{tier}_{score}_*.csv")))
+        # NO TOPIC AT ALL in this glob: it matched every screen's tables.
+        fs = sorted(glob.glob(str(rp.BLACKSMITH / "rank_v2" /
+                                  f"rank_v2_{tier}_{rp.topic()}_{score}_*.csv")))
         if not fs:
             continue
         d = pd.read_csv(fs[-1]).drop_duplicates("parent_ident")

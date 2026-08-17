@@ -67,16 +67,22 @@ from shared import nac_criterion as nac           # noqa: E402
 from shared import outputs as sout                # noqa: E402
 from shared import pose_consensus as pc           # noqa: E402
 from shared import target_config as tc            # noqa: E402
+from shared import run_paths as rp        # noqa: E402
 
 log = logging.getLogger("rank-v2")
 OUT = sout.Topic("blacksmith", "rank_v2")
-DATA = Path("/data/lab_vm/append_only/inhibition")
-V2 = DATA / "00_outputs/blacksmith/nac_v2"
+DATA = rp.DATA
+# Legacy 2.1.0/2.2.0 topics, kept only so an old table can still be
+# read explicitly with --topic. Nothing resolves to them by default.
+
 #: 2.2.0 writes one row per BINDING MODE to its own topic. Selected with
 #: --topic; the two must never be pooled, since their idents differ (`x` vs
 #: `x_m0`) so a dedup would not collapse them.
-V3 = DATA / "00_outputs/blacksmith/nac_v3"
-POSES = DATA / "00_outputs/blacksmith/nac_v2_poses"
+
+#: Both default to THIS RUN's topic and are rebound from `--topic` in main().
+#: `POSES` was pinned to `nac_v2_poses` and never rebound at all, so pose reads
+#: went to the 2.1.0 directory whatever topic was being ranked.
+POSES = rp.poses_dir()
 
 TOP_N = 10
 DEFAULT_QUOTA = 0.20
@@ -101,7 +107,7 @@ def load_references() -> tuple[pd.DataFrame, pd.DataFrame]:
     return agg, poses
 
 
-SRC = V2          # rebound by --topic
+SRC = rp.BLACKSMITH / tc.topic()      # rebound by --topic
 
 
 def derived_scores(d: pd.DataFrame) -> pd.DataFrame:
@@ -485,11 +491,11 @@ def main() -> None:
     # production topics made "rank this variant on its own" impossible, which is
     # the one thing that keeps two scorings from being mixed.
     ap.add_argument("--topic", default=tc.topic(),
-                    help="nac_v3 = 2.2.0 per-mode rows at nrun=500")
+                    help="a topic is a directory name; defaults to run.topic")
     ap.add_argument("--top", type=int, default=10)
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    global SRC
+    global SRC, POSES
     # ANY TOPIC RESOLVES TO ITS OWN DIRECTORY. This used to read
     # `V3 if args.topic == "nac_v3" else V2`, so every topic that was not
     # literally "nac_v3" -- including nac_v4, the entire 3.0.0 run -- silently
@@ -498,7 +504,8 @@ def main() -> None:
     # nac_v2: 1,683 + 4,082 per-MOLECULE rows in place of 34,080 per-MODE ones,
     # with no error anywhere. A topic is a directory name; treating it as a
     # two-valued flag is what made every third value mean "use the oldest data".
-    SRC = DATA / "00_outputs/blacksmith" / args.topic
+    SRC = rp.BLACKSMITH / args.topic
+    POSES = rp.poses_dir(args.topic)
     if not SRC.is_dir():
         raise SystemExit(f"no such topic: {SRC}")
     log.info("reading %s", SRC)

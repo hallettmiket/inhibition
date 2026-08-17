@@ -35,7 +35,7 @@ import pandas as pd
 
 from . import run_paths as rp
 
-B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
+B = rp.BLACKSMITH
 
 
 def results() -> pd.DataFrame:

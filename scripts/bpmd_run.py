@@ -94,16 +94,17 @@ from shared import gromacs_explicit as gx          # noqa: E402
 from shared import mmgbsa as mg                    # noqa: E402
 from shared import mmgbsa_noncovalent as mgn       # noqa: E402
 from shared import outputs as sout                 # noqa: E402
+from shared import run_paths as rp                # noqa: E402
 import nac_screen as ns                            # noqa: E402
 import nac_rank as nr                              # noqa: E402
 import export_nac_poses as enp                     # noqa: E402
 
 log = logging.getLogger("bpmd-run")
 
-OUT = sout.Topic("blacksmith", "bpmd")
+OUT = sout.Topic("blacksmith", rp.bpmd_topic())
 CONV = sout.Topic("blacksmith", "bpmd_convergence")
 
-WORK = Path("/data/lab_vm/modifiable/inhibition/bpmd_3ikd")
+WORK = rp.bpmd_work()
 # The CURRENT pose set. `export_nac_poses` versions these (nac_poses/vN) because
 # the directory lives under append_only and a re-run must not overwrite, so this
 # resolves the newest rather than naming a fixed path.
@@ -122,7 +123,7 @@ def set_poses_dir(d) -> None:
 
 # The receptor as the chemist prepared it — the same file the docking that
 # produced these poses used, so the pose and the protein are in one frame (D0059).
-RECEPTOR_3IKD = Path("/data/lab_vm/modifiable/inhibition/receptor_3ikd_prep/3IKD_noligand.pdb")
+RECEPTOR_3IKD = rp.receptor_prep()
 
 # The full protocol the convergence test measures DOWN from. Not asserted to be
 # necessary — that is the question.

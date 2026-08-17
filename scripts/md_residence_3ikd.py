@@ -88,15 +88,15 @@ log = logging.getLogger("md-residence")
 
 OUT = sout.Topic("blacksmith", rp.residence_topic())
 WORK = rp.residence_work()
-PLAIN_REC = Path("/data/lab_vm/modifiable/inhibition/receptor_3ikd_plain")
+PLAIN_REC = rp.receptor_plain()
 
 # The receptor as the chemist prepared it — the SAME file every 3IKD measurement
 # on this branch uses, so residence is comparable with the docking that selected
 # the candidate (D0059).
-RECEPTOR_3IKD = Path("/data/lab_vm/modifiable/inhibition/receptor_3ikd_prep/3IKD_noligand.pdb")
+RECEPTOR_3IKD = rp.receptor_prep()
 #: SMILES + pH 7.4 charge for poses that are not library candidates (crystal
 #: controls, references). One JSON per ident, written beside the pose.
-POSE_SIDECARS = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/pose_sidecars")
+POSE_SIDECARS = rp.sidecars()
 
 PRODUCTION_PS_FULL = 100_000.0        # the chemists' 100 ns
 

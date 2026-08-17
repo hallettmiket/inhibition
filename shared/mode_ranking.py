@@ -29,16 +29,20 @@ base64 is tens of megabytes; the results GUI can inline its 59 and this cannot.
 from __future__ import annotations
 
 import glob
+import logging
+import os
 import html
 import json
 from pathlib import Path
+
+from . import run_paths as rp
 
 import pandas as pd
 
 from shared import mode_key as mk
 
-B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
-RECEPTOR = Path("/data/lab_vm/modifiable/inhibition/receptor_3ikd_prep/3IKD_noligand.pdb")
+B = rp.BLACKSMITH
+RECEPTOR = rp.receptor_prep()
 CYS_RESI = 113
 #: Molecules to draw the eye to. They are ordinary candidates -- screened,
 #: ranked and swept through the identical path -- and the flag is presentational
@@ -113,7 +117,18 @@ def gather() -> pd.DataFrame:
         return pd.DataFrame()
     r = pd.concat(frames, ignore_index=True)
 
-    sf = sorted(glob.glob(str(B / "attack_sweep/attack_sweep_*.csv")))
+    # THIS RUN'S SWEEP, NOT EVERY SWEEP EVER. These read the UNSCOPED
+    # `attack_sweep/` and `md_residence/` directories, so every status badge on
+    # the ranking page described the PREVIOUS screen: a mode showed "100 ns"
+    # because it ran in 3.0.0, and a mode swept this morning showed "not run"
+    # because nac_v5's directory was not read at all. @tt8804: "why are these
+    # top ranked mols showing not run and some showing 100 ns??"
+    #
+    # Sorted by MTIME, not lexicographically: `keep="last"` over a lexicographic
+    # sort makes `_10` older than `_9`, which decides which of two measurements
+    # of the same mode is believed by string order.
+    sf = sorted(glob.glob(str(_rp().sweep_dir() / "attack_sweep_*.csv")),
+                key=os.path.getmtime)
     sweep = (pd.concat([pd.read_csv(x) for x in sf], ignore_index=True)
              .drop_duplicates("ident", keep="last") if sf else pd.DataFrame())
     if not sweep.empty:
@@ -124,14 +139,32 @@ def gather() -> pd.DataFrame:
         # successful ones as "swept" would report a mode that was tried and
         # crashed as one nobody ever chose.
         sweep = sweep.assign(_sent=True)
-        # bare_is_mode_zero: these rows predate #53, when the sweep wrote the
-        # bare ident for mode 0. Stated, not assumed.
-        r = mk.join(r, sweep[keep + ["_sent"]].rename(
-            columns={"status": "sweep_status"}),
-            right_bare_is_mode_zero=True, suffixes=("", "_sw"))
+        # A BARE IDENT HERE MEANS "THE MODE IS UNKNOWN", NOT "MODE 0".
+        #
+        # `bare_is_mode_zero` exists for sweep tables written before #53, when
+        # mode 0 really was recorded bare. This topic is post-#53: an `ok` row
+        # carries `<parent>_m<mode>`, and a row is bare only when the run DIED
+        # BEFORE IT KNEW ITS MODE -- which is what all 24 of this run's failures
+        # are, from a launcher that asked for pose ranks in the hundreds.
+        #
+        # Read as mode 0 they collided with the real mode-0 row of the same
+        # molecule: the join duplicated those modes (4,432 rows in, 4,434 out)
+        # and, worse, badged a real mode FAILED for a failure that belongs to no
+        # mode at all. A status is an accusation; it has to be attributable.
+        sw = mk.add_key(sweep[keep + ["_sent"]].rename(
+            columns={"status": "sweep_status"}), bare_is_mode_zero=False)
+        unattributable = int(sw.mode_key.isna().sum())
+        if unattributable:
+            logging.getLogger(__name__).info(
+                "sweep: %d row(s) carry no mode and cannot label one "
+                "(the run failed before it knew) — excluded", unattributable)
+            sw = sw[sw.mode_key.notna()]
+        r = mk.join(r, sw.drop(columns=[c for c in ("parent_ident", "mode")
+                                        if c in sw.columns]),
+                    suffixes=("", "_sw"))
 
     md_ids: set[str] = set()
-    for f in glob.glob(str(B / "md_residence/*.csv")):
+    for f in glob.glob(str(_rp().residence_dir() / "*.csv")):
         try:
             d = pd.read_csv(f)
         except Exception:                                  # noqa: BLE001
@@ -308,6 +341,7 @@ main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
  text-transform:uppercase;color:var(--blue);font-weight:600;padding:10px 14px 6px;
  background:var(--raise);border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:1}
 __ROWCSS__
+__RAILQCSS__
 /* Only what VIRTUALISATION requires, on top of the shared row. Every item is
    exactly ROW_H tall, because the window offset is computed as i * ROW_H
    rather than measured -- a row free to size itself would put every row below
@@ -374,11 +408,6 @@ __STEPCSS__
  <span class="msep"></span>
  <select id="scope" onchange="setScope(this.value)"
    title="rank within one warhead class, within every class, or across all of them"></select>
- <input id="railq" type="search" placeholder="filter &mdash; id, class, mode"
-   oninput="setQuery(this.value)" autocomplete="off" spellcheck="false"
-   title="matches the molecule id, its warhead class, and the mode label. / focuses, Esc clears."
-   style="font:12px var(--mono);padding:3px 8px;border:1px solid var(--rule);
-          border-radius:99px;background:var(--paper);color:var(--ink);width:22ch;flex:none">
  <span class="mhint" id="mhint"></span>
  <span class="msep"></span>
  <a class="mbtn lnk" href="pipeline.html" title="how a molecule becomes a row">how this works &#8599;</a>
@@ -395,6 +424,7 @@ __STEPNAV__
       the scrollbar stays honest about how much library there is; railWin holds
       only the ~40 items actually on screen. -->
  <div id="railcol">
+  __RAILSEARCH__
   <div class="railbn" id="railBanner" style="display:none"></div>
   <div id="rail"><div id="railPad"><div id="railWin"></div></div></div>
  </div>
@@ -516,6 +546,11 @@ document.addEventListener('keydown', function(e){
 });
 
 let QUERY = '';
+// The shared box's clear button calls this by name.
+function railClear(){
+  const el = document.getElementById('railq');
+  if (el){ el.value = ''; setQuery(''); el.focus(); }
+}
 function setQuery(q){
   QUERY = (q || '').trim().toLowerCase();
   // Rebuild rather than hide: THE RAIL IS VIRTUALISED, so only the rows
@@ -978,9 +1013,18 @@ def build(title: str, date_str: str, three: str = "",
             .replace("__CYS__", str(CYS_RESI))
             .replace("__POCKET__", json.dumps(pocket_residues()))
             .replace("__ROWCSS__", _rs().ROW_CSS)
+            .replace("__RAILQCSS__", _rs().SEARCH_CSS)
+            .replace("__RAILSEARCH__",
+                     _rs().search_html("setQuery(this.value)",
+                                       "filter — id, class, mode"))
             .replace("__STEPCSS__", _gs().CSS)
             .replace("__STEPNAV__", _gs().nav("modes.html", _step_counts(r)))
             .replace("__TITLE__", html.escape(title)))
+
+
+def _rp():
+    from shared import run_paths
+    return run_paths
 
 
 def _gs():

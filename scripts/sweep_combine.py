@@ -54,7 +54,7 @@ from shared import sweep_state as ss                      # noqa: E402
 from shared import run_paths as rp                  # noqa: E402
 
 log = logging.getLogger("sweep-combine")
-B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
+B = rp.BLACKSMITH
 REPORTS = rp.reports_dir()
 PAGES = REPORTS / "sweep_pages"
 

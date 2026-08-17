@@ -536,3 +536,52 @@ def test_the_ranking_page_keeps_only_its_virtualisation_override():
     # nothing else about the row may be redefined here
     for sel in (".mid-id{", ".eng{", ".meta{", ".tag{", ".bar{"):
         assert sel not in tpl, f"{sel} redefined after the shared block"
+
+
+def test_the_search_box_lives_in_the_rail_on_every_page():
+    """@tt8804, three times: "still no search bar".
+
+    It was there, served, and well-formed -- in the TOPBAR, which on the ranking
+    page is a flex row with `overflow-x:auto` carrying a long title, the class
+    select, a hint and two buttons. The box was pushed out of the visible strip.
+    A control the reader cannot find is a control that does not exist, and
+    'the HTML contains it' is not the same claim as 'it is on screen'.
+
+    So all three rails put the SAME box in the SAME place: the top of the rail,
+    where the sweep page always had it."""
+    mr = (REPO / "shared" / "mode_ranking.py").read_text()
+    # not in the topbar
+    tb = mr[mr.index('<div id="topbar">'):mr.index("</div>", mr.index('<div id="topbar">'))]
+    assert "railq" not in tb, "the search box is back in the topbar"
+    # in the rail column, before the rows
+    assert "__RAILSEARCH__" in mr
+    rail = mr[mr.index('<div id="railcol">'):]
+    assert rail.index("__RAILSEARCH__") < rail.index('id="rail"')
+
+
+def test_all_three_rails_render_the_same_search_markup():
+    from shared import results_shell as rs
+    a = rs.search_html()
+    b = rs.search_html("setQuery(this.value)", "filter — id, class, mode")
+    # same structure, only the handler and hint differ
+    for frag in ('class="railq"', 'id="railq"', 'id="railn"', "railClear()"):
+        assert frag in a and frag in b, frag
+
+
+def test_the_ranking_page_defines_the_clear_handler_it_renders():
+    """The shared markup's × button calls railClear() by name. The ranking page
+    has its own <script>, so inheriting the markup without the function would
+    give a button that throws on click."""
+    mr = (REPO / "shared" / "mode_ranking.py").read_text()
+    assert "function railClear(" in mr
+
+
+def test_the_search_css_reaches_a_page_with_its_own_stylesheet():
+    """The ranking page does not use `results_shell.CSS`, so `.railq` had to be
+    separable from it -- otherwise the box renders unstyled and looks like a
+    stray input."""
+    from shared import results_shell as rs
+    assert ".railq{" in rs.SEARCH_CSS
+    assert ".railq{" in rs.CSS                    # the rail pages still get it
+    mr = (REPO / "shared" / "mode_ranking.py").read_text()
+    assert "__RAILQCSS__" in mr and "_rs().SEARCH_CSS" in mr

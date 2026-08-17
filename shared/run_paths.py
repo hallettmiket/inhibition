@@ -35,12 +35,32 @@ from pathlib import Path
 
 from . import target_config as tc
 
-#: Governed outputs (append-only, hook-protected).
-BLACKSMITH = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
+def _p(key: str, default: str) -> Path:
+    """A root from `config/target.yaml`, so it can point at another dataset.
+
+    THE TOOL IS MEANT TO TRAVEL. A literal `/data/lab_vm/.../inhibition` is this
+    dataset on this filesystem forever, and 212 of them were spread across the
+    scripts. The defaults preserve the current deployment so nothing moves
+    today; the point is that they are defaults.
+    """
+    try:
+        return Path(str(tc.get(f"paths.{key}", default=default)))
+    except Exception:                                          # noqa: BLE001
+        return Path(default)
+
+
+#: The governed dataset root (append-only, hook-protected).
+DATA = _p("governed", "/data/lab_vm/append_only/inhibition")
+
+#: Which agent's outputs: `<DATA>/00_outputs/<agent>/<topic>/`.
+AGENT = str(tc.get("paths.agent", default="blacksmith"))
+
+#: Where this agent's topics live.
+BLACKSMITH = DATA / "00_outputs" / AGENT
 
 #: Scratch: trajectories and MD workdirs. Freely deletable, and deleted between
 #: runs -- 1.5 TB of it at the end of 3.0.0.
-SCRATCH = Path("/data/lab_vm/modifiable/inhibition")
+SCRATCH = _p("scratch", "/data/lab_vm/modifiable/inhibition")
 
 
 def topic() -> str:
@@ -68,6 +88,18 @@ def bpmd_topic(t: str | None = None) -> str:
     return f"bpmd_{t or topic()}"
 
 
+def worklist_topic(t: str | None = None) -> str:
+    """Topic for the sweep worklists.
+
+    THE LAST FLAT DIRECTORY, and the one that already cost a live incident: a
+    chained script took the newest `sweep_gaps_*.csv` and got the PREVIOUS
+    screen's, five days old, then reported its 170 modes as this run's
+    selection. `pipeline.worklist_path()` guards it with an mtime check, but a
+    guard downstream of a shared directory is a patch, not a fix.
+    """
+    return f"sweep_gaps_{t or topic()}"
+
+
 def sweep_dir(t: str | None = None) -> Path:
     return BLACKSMITH / sweep_topic(t)
 
@@ -84,6 +116,12 @@ def reports_dir(t: str | None = None) -> Path:
 
 def bpmd_dir(t: str | None = None) -> Path:
     return BLACKSMITH / bpmd_topic(t)
+
+
+def worklist_dir(t: str | None = None) -> Path:
+    d = BLACKSMITH / worklist_topic(t)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def poses_dir(t: str | None = None) -> Path:
@@ -114,3 +152,57 @@ def residence_work(t: str | None = None) -> Path:
 
 def bpmd_work(t: str | None = None) -> Path:
     return SCRATCH / f"bpmd_{t or topic()}"
+
+
+# -- the dataset's own inputs ------------------------------------------------
+
+def frames(tier: str) -> list[Path]:
+    """Every version of one tier's candidate library, oldest first.
+
+    THE LIBRARY IS NAMED IN CONFIG, NOT IN SIX SCRIPTS. `04_t4_combinatorial/D4`
+    was written out as a literal glob in pipeline.py, mdprio_combine,
+    mdprio_report and sweep_report -- so screening a different dataset meant
+    editing code in four places and hoping.
+
+    Sorted by the integer version suffix, never lexicographically: `_10` sorts
+    before `_9` as a string, and callers take the last element.
+    """
+    stem = tc.get(f"paths.frames.{tier.upper()}", default=None)
+    if not stem:
+        return []
+    fs = list(DATA.glob(f"{stem}_*.parquet"))
+
+    def _v(p: Path) -> int:
+        tail = p.stem.rsplit("_", 1)[-1]
+        return int(tail) if tail.isdigit() else -1
+
+    return sorted([f for f in fs if _v(f) >= 0], key=_v)
+
+
+def latest_frame(tier: str) -> Path | None:
+    fs = frames(tier)
+    return fs[-1] if fs else None
+
+
+def receptor_prep() -> Path:
+    """The prepared receptor, named from `target.pdb`.
+
+    Every script held `receptor_3ikd_prep/3IKD_noligand.pdb` as a literal, which
+    is the current TARGET rather than a property of the tool.
+    """
+    pdb = str(tc.get("target.pdb", default="3IKD"))
+    tpl = str(tc.get("paths.receptor_prep",
+                     default="receptor_{pdb}_prep/{PDB}_noligand.pdb"))
+    return SCRATCH / tpl.format(pdb=pdb.lower(), PDB=pdb.upper())
+
+
+def receptor_plain() -> Path:
+    pdb = str(tc.get("target.pdb", default="3IKD"))
+    tpl = str(tc.get("paths.receptor_plain", default="receptor_{pdb}_plain"))
+    return SCRATCH / tpl.format(pdb=pdb.lower(), PDB=pdb.upper())
+
+
+def sidecars() -> Path:
+    """SMILES + charge for poses that are not library rows (controls, refs)."""
+    d = BLACKSMITH / "pose_sidecars"
+    return d

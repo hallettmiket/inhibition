@@ -54,7 +54,7 @@ sys.path.insert(0, str(REPO))
 from shared import run_paths as rp                  # noqa: E402
 
 log = logging.getLogger("promote-bpmd")
-B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
+B = rp.BLACKSMITH
 PY = Path.home() / ".micromamba/envs/dwi_reactive/bin/python"
 
 RMSD_MAX = "explicit_ligand_rmsd_nm_max"
