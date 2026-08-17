@@ -317,7 +317,41 @@ def main() -> None:
     # build_gui after sweep_combine silently replaced the MD-shell page with the
     # earlier table layout, and the page "looked wrong again" for no reason
     # visible in either script. One file, one owner.
-    print(f"  index.html + sweep_state.json -> {OUT}")
+    #
+    # A STAGE WITH NO RESULTS STILL HAS A PAGE. On a fresh topic only index.html
+    # exists, so every other nav link and every bookmark 404s -- the server
+    # answers "File not found", which reads as a broken deployment rather than
+    # as a run that has not reached that stage. @tt8804 hit exactly that on
+    # /sweep.html minutes after the topic was bumped.
+    #
+    # These are placeholders, and they are OVERWRITTEN by the real builders the
+    # moment those have anything to show: `sweep_combine` owns sweep.html and
+    # `mdprio_combine` owns modes.html and combined.html. Written only when
+    # absent, so a rebuild during a live run never clobbers real results.
+    n_placeholder = 0
+    for href, label, why in (
+        ("modes.html", "Ranking",
+         "No modes ranked yet. Ranking runs after the docking + NAC screen "
+         "finishes, and reads that screen's aggregates."),
+        ("sweep.html", "Sweep",
+         "No triage sweeps yet. The 8&nbsp;ns sweep runs on the modes the "
+         "ranking selects, so it waits on the two stages before it."),
+        ("combined.html", "MD results",
+         "No 100&nbsp;ns runs yet. Only modes that hold under "
+         "0.35&nbsp;nm through the triage sweep earn one."),
+    ):
+        p = OUT / href
+        if p.is_file():
+            continue
+        p.write_text(_page(
+            f"{label} — awaiting stage", href, nav_counts,
+            f"<section class='card'><h2>{label}</h2><p class='muted'>{why}</p>"
+            f"<p class='muted'>This page fills in on its own as the run "
+            f"reaches this stage — the GUI rebuilds every few minutes.</p>"
+            f"</section>"))
+        n_placeholder += 1
+    extra = f" (+{n_placeholder} awaiting-stage placeholders)" if n_placeholder else ""
+    print(f"  index.html + sweep_state.json -> {OUT}{extra}")
     print(f"  {s}")
 
 

@@ -1,6 +1,6 @@
 # How this project breaks
 
-*Written 2026-07-31, at handover. Last updated 2026-08-06 (catalogue now 22
+*Written 2026-07-31, at handover. Last updated 2026-08-17 (catalogue now 25
 entries). Read this before the README.*
 
 Every substantive bug found in this project has been the same bug.
@@ -48,6 +48,9 @@ test, because the code was doing exactly what it was written to do.**
 | 20 | mmCIF parsed as `loop_` only | Also the single-record `_tag value` form | Reported **zero** covalent entries across all 190 — which reads as a finding |
 | 21 | Covalent ligands matched against the **adduct** pattern | The warhead-as-drawn: PDB component SMILES is the FREE ligand | Reported **11 novel chemistries**. Sulfopin itself came back "unclassified" |
 | 22 | `bpmd_run.already_done()` keyed on `(ident, replicate)` | Keyed on `(ident, replicate, **trajectory length**)` | `bpmd/` still held `status == ok` replicates for two elevation-cohort molecules at 300 ps and 10,000 ps. A 3 ns between-group run would have SKIPPED both molecules and seated a 300 ps replica beside 3 ns ones. Caught by reading the existing chunk files before launching — nothing in the code would have said |
+| 23 | `sweep_assets.rep_dir()` matched the **molecule** | `(molecule, pose_rank)` — the runner writes one directory per swept mode | Every mode of a multi-mode molecule was drawn from whichever sibling sorted first. 114 of 168 modes had the wrong trajectory in their plot and movie, median disagreement 0.478 nm. The rail's number was right beside a plot from another pose; @tt8804 read the two together and asked why they differed |
+| 24 | `protonate()` protonated **one site**, then tested `charge == want` | Protons accumulated across sites, in basicity order, until the recorded charge is reached | It could only ever build a ±1 species, so every dication was stamped `docked_species_ok = False` and dropped — all 60 of D4's failures, **all BDHI**, zero acrylamide. Both BDHI arms would have entered the screen 15% short against a full acrylamide arm, and the only symptom would have been BDHI underperforming |
+| 25 | The GUI read **flat** run directories (`attack_sweep/`, `md_residence/`) | Directories scoped to `run.topic`, as docking and ranking already were | Bumping the topic emptied one page of three; the other two kept showing 554 sweep rows and 647 residence rows from four superseded screens *under the new run's title*. The report server had the same defect, serving the old directory from a literal path |
 
 ---
 

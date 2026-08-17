@@ -99,32 +99,70 @@ def protonate(smiles: str, target_charge: float):
         "[PX4](=O)([OX2H1])",                        # phosphate/phosphonate
         "[nX3H1]1nnnc1", "[nX3H1]1ncnn1",            # tetrazole
     )
+    # SITES ACCUMULATE ONTO ONE MOLECULE, IN BASICITY ORDER.
+    #
+    # THE ±1 CEILING. This used to protonate exactly ONE site -- hits[0][0] --
+    # and then test `GetFormalCharge(out) == want`. Worse, `em` was rebuilt from
+    # `m` inside the loop, so nothing accumulated: each pattern produced a fresh
+    # +1. A molecule needing +2 therefore made +1, failed the equality, tried the
+    # next pattern, made +1 again, and returned None -- however many basic sites
+    # it actually had.
+    #
+    # It was never a chemistry failure and never a hard case. It was arithmetic,
+    # and it silently removed EVERY dication in the library: all 60 of D4's
+    # `docked_species_ok = False` rows, which are all BDHI (30 bdhi_c4, 30
+    # bdhi_c5, zero acrylamide) and all N-aryl piperazines, plus 7 in D3. That
+    # deleted 15% of each BDHI family from the screen while acrylamide lost
+    # none, so every cross-family comparison ran on unequal denominators.
+    #
+    # Order still matters and is still the point: CATION_SITES is written most-
+    # basic-first, so when a molecule has more basic sites than protons to place,
+    # the protons land on the sites that are actually protonated at 7.4. Within a
+    # pattern, matches are taken in RDKit's order -- arbitrary between equivalent
+    # sites, which is correct, because equivalent sites give the same species.
+    sites: list[int] = []
     for sma in (CATION_SITES if want > 0 else ANION_SITES):
         patt = Chem.MolFromSmarts(sma)
         if patt is None:
             continue
-        hits = m.GetSubstructMatches(patt)
-        if not hits:
+        for hit in m.GetSubstructMatches(patt):
+            # cation patterns name the basic atom first; anion patterns name the
+            # acidic O/N last
+            idx = hit[0] if want > 0 else hit[-1]
+            if idx not in sites:
+                sites.append(idx)
+    if not sites:
+        return None
+
+    em = Chem.RWMol(m)
+    placed = 0
+    need = abs(want) - abs(Chem.GetFormalCharge(m))
+    for idx in sites:
+        if placed >= need:
+            break
+        a = em.GetAtomWithIdx(idx)
+        if a.GetFormalCharge() != 0:
             continue
-        em = Chem.RWMol(m)
         if want > 0:
-            a = em.GetAtomWithIdx(hits[0][0])
             a.SetFormalCharge(1)
             a.SetNumExplicitHs(a.GetTotalNumHs() + 1)
-            a.SetNoImplicit(True)
         else:
-            # the acidic O/N is the last atom of every ANION pattern above
-            a = em.GetAtomWithIdx(hits[0][-1])
             a.SetFormalCharge(-1)
             a.SetNumExplicitHs(0)
-            a.SetNoImplicit(True)
-        try:
-            out = em.GetMol(); Chem.SanitizeMol(out)
-        except Exception:                                  # noqa: BLE001
-            continue
-        if Chem.GetFormalCharge(out) == want:
-            return Chem.MolToSmiles(out)
-    return None
+        a.SetNoImplicit(True)
+        placed += 1
+    try:
+        out = em.GetMol()
+        Chem.SanitizeMol(out)
+    except Exception:                                      # noqa: BLE001
+        return None
+    # STILL AN EQUALITY, NOT A BEST EFFORT. A molecule with fewer basic sites
+    # than the recorded charge demands is a real disagreement between the
+    # ionisation model and the structure, and docking it at the wrong charge is
+    # the silent substitution this script exists to prevent. It stays stamped.
+    if Chem.GetFormalCharge(out) != want:
+        return None
+    return Chem.MolToSmiles(out)
 
 
 def main() -> None:
