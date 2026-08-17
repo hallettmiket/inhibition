@@ -79,12 +79,14 @@ def rp_topic_in(body: str) -> bool:
 
 
 def test_children_are_killed_parents_first():
-    """`md_residence_3ikd` spawns `gmx` and relaunches it for the next stage of
+    """`md_residence_3ikd` spawns `gmx` and relaunches it for the next step of
     its own chain, so killing `gmx` first makes a new one appear ~13 s later --
-    a "stopped" fleet held eight GPUs at 90% that way."""
-    order = list(pl._KILL_ORDER)
-    assert order.index("md_residence_3ikd.py") < order.index("gmx mdrun")
-    assert order.index("attack_sweep.py") < order.index("md_residence_3ikd.py")
+    a "stopped" fleet held eight GPUs at 90% that way. Each stage lists its
+    parents in order, and gmx is handled afterwards by tree, never in the list."""
+    for name, (pats, tree) in pl._STAGE_PROCS.items():
+        assert "gmx mdrun" not in pats, f"{name} kills gmx before its parents"
+    sweep_pats, _ = pl._STAGE_PROCS["sweep"]
+    assert sweep_pats.index("attack_sweep.py") < sweep_pats.index("--tag sweep_")
 
 
 def test_stopping_never_touches_another_users_gmx():
@@ -92,7 +94,8 @@ def test_stopping_never_touches_another_users_gmx():
     src = (REPO / "shared" / "pipeline.py").read_text()
     body = src[src.index("def stop("):]
     assert "/proc/" in body and "cwd" in body
-    assert "rp.topic() not in cwd" in body
+    # scoped to THIS stage's tree for THIS topic, not merely to the topic
+    assert "want not in cwd" in body and "rp.topic()" in body
 
 
 def test_process_matching_excludes_the_querying_shell():
@@ -105,7 +108,7 @@ def test_process_matching_excludes_the_querying_shell():
 
 def test_a_stage_refuses_to_start_before_its_inputs_are_done():
     src = (REPO / "shared" / "pipeline.py").read_text()
-    body = src[src.index("def start("):src.index("_KILL_ORDER")]
+    body = src[src.index("def start("):src.index("_STAGE_PROCS")]
     assert "already running" in body
     assert "needs" in body and "raise StageError" in body
 
@@ -143,3 +146,35 @@ def test_every_stage_has_a_launch_command(stage):
     assert s.launch is not None, f"{stage} cannot be started"
     cmd = s.launch()
     assert cmd and all(isinstance(x, str) for x in cmd)
+
+
+def test_production_is_not_confused_with_the_sweeps_own_md_workers():
+    """attack_sweep RUNS md_residence_3ikd itself, tagged `sweep_r<rank>`. So
+    matching production on the script name counted the sweep's two workers as
+    production jobs: the stage read "running" with zero production jobs,
+    `auto` would never have started it, and `stop production` would have killed
+    the sweep. @tt8804: "i thought we were running the sweep on 2 and the 100ns
+    on a third"."""
+    assert pl.BY_NAME["production"].proc == "--tag md100_"
+    assert "md_residence_3ikd.py" != pl.BY_NAME["production"].proc
+
+
+def test_each_stage_stops_only_its_own_processes():
+    """Stopping one stage must not reach another's, and must never reach
+    another user's gmx on this shared box."""
+    sweep_pats, sweep_tree = pl._STAGE_PROCS["sweep"]
+    prod_pats, prod_tree = pl._STAGE_PROCS["production"]
+    assert sweep_tree != prod_tree
+    # the tags are what separate two md_residence fleets
+    assert any("sweep_" in p for p in sweep_pats)
+    assert any("md100_" in p for p in prod_pats)
+    # and neither kill list names the bare script both stages run
+    for pats in (sweep_pats, prod_pats):
+        assert "md_residence_3ikd.py" not in pats
+
+
+def test_gmx_is_killed_last_and_only_inside_this_run_s_tree():
+    src = (REPO / "shared" / "pipeline.py").read_text()
+    body = src[src.index("def stop("):]
+    assert body.index("_STAGE_PROCS") < body.index("gmx mdrun")
+    assert "want not in cwd" in body and "rp.topic()" in body

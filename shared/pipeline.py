@@ -47,6 +47,7 @@ import json
 import os
 import signal
 import subprocess
+import time
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -290,8 +291,14 @@ STAGES: list[Stage] = [
     Stage("sweep", "Triage sweep (8 ns)", ("worklist",), p_sweep, gpus=2,
           launch=_sweep_cmd, proc="attack_sweep.py",
           note="is the pose stable at all — max ligand RMSD over 8 ns"),
+    # `--tag md100_`, NOT `md_residence_3ikd.py`. attack_sweep runs
+    # md_residence itself (tagged `sweep_r<rank>`), so matching the script name
+    # counted the SWEEP's two workers as production: the stage read "running"
+    # with zero production jobs, `auto` would never start it, and `stop
+    # production` would have killed the sweep. Caught by @tt8804 asking why
+    # both stages showed 4 processes.
     Stage("production", "Production MD (100 ns)", ("sweep",), p_production,
-          gpus=1, launch=_prod_cmd, proc="md_residence_3ikd.py",
+          gpus=1, launch=_prod_cmd, proc="--tag md100_",
           note="survivors only; does it stay for a long time"),
     Stage("bpmd", "BPMD", ("production",), p_bpmd, gpus=1, launch=_bpmd_cmd,
           proc="bpmd_run.py",
@@ -402,30 +409,50 @@ def start(name: str) -> int:
 
 
 #: Kill order matters and is not alphabetical. `md_residence_3ikd` spawns `gmx`
-#: and relaunches it for the next stage of its own chain, so killing `gmx` first
+#: and relaunches it for the next step of its own chain, so killing `gmx` first
 #: makes a new one appear ~13 s later; a "stopped" fleet kept eight GPUs at 90%
 #: for several minutes that way. Parents first, innermost last.
-_KILL_ORDER = ("pipeline_stage.py", "attack_sweep.py", "md_residence_3ikd.py",
-               "bpmd_run.py", "nac_screen_v2.py", "gmx mdrun")
+#:
+#: Each entry is (process match, scratch-tree name for its gmx children). The
+#: tree is what keeps one stage's stop from reaching another's -- and what keeps
+#: it away from other users' gmx on this shared box.
+_STAGE_PROCS: dict[str, tuple[tuple[str, ...], str]] = {
+    "screen":     (("nac_screen_v2.py",), ""),
+    "sweep":      (("pipeline_stage.py sweep", "attack_sweep.py",
+                    "--tag sweep_"), "attack_sweep_"),
+    "production": (("pipeline_stage.py production", "--tag md100_"),
+                   "md_residence_"),
+    "bpmd":       (("pipeline_stage.py bpmd", "bpmd_run.py"), "bpmd_"),
+}
 
 
 def stop(name: str) -> int:
+    """Kill a stage and its children, parents first. Returns how many died."""
     s = BY_NAME[name]
+    pats, tree = _STAGE_PROCS.get(name, ((s.proc,), ""))
     killed = 0
-    targets = [s.proc] if s.proc else []
-    if s.name in ("sweep", "production", "bpmd"):
-        targets = list(_KILL_ORDER)
-    for pat in targets:
+    for pat in pats:
+        if not pat:
+            continue
         for pid in _procs(pat):
-            # `gmx` is shared with other users on this box; only ever kill one
-            # whose working directory is inside this run's scratch tree.
-            if pat == "gmx mdrun":
-                try:
-                    cwd = os.readlink(f"/proc/{pid}/cwd")
-                except OSError:
-                    continue
-                if rp.topic() not in cwd:
-                    continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+                killed += 1
+            except OSError:
+                pass
+    if tree:
+        # Only now the innermost, and only ours: `gmx` is shared with other
+        # users, so a pid is a target only if its working directory is inside
+        # THIS stage's scratch tree for THIS topic.
+        want = f"{tree}{rp.topic()}"
+        time.sleep(2)
+        for pid in _procs("gmx mdrun"):
+            try:
+                cwd = os.readlink(f"/proc/{pid}/cwd")
+            except OSError:
+                continue
+            if want not in cwd:
+                continue
             try:
                 os.kill(pid, signal.SIGKILL)
                 killed += 1
