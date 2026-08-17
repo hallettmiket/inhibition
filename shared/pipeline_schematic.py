@@ -531,8 +531,10 @@ def _split_counts() -> tuple[str, str]:
     full frame is ~2.9M rows across 131 files and the page needs none of the rest.
     """
     import glob as _g
-    fs = sorted(_g.glob("/data/lab_vm/append_only/inhibition/00_outputs/"
-                        "blacksmith/nac_v3/*.csv"))
+    # THIS RUN's screen output. This was hardcoded `nac_v3/`, so the page
+    # explaining the CURRENT pipeline stated a superseded run's split: "5,773
+    # candidates -> 8,152 modes" against this screen's 561 -> 4,432.
+    fs = sorted(_g.glob(str(rp.BLACKSMITH / rp.topic() / "*.csv")))
     if not fs:
         return "", ""
     # PER FILE, not one try around the lot. Half this directory is aggregate
@@ -561,7 +563,6 @@ def _run_counts() -> dict:
     """
     import glob as _g
     out = {"swept": 0, "survivors": 0, "md": 0, "held": 0}
-    B = "/data/lab_vm/append_only/inhibition/00_outputs/blacksmith"
     try:
         import pandas as _pd
         sw = _pd.concat([_pd.read_csv(f) for f in
@@ -573,9 +574,15 @@ def _run_counts() -> dict:
         # that this filter discards the brief approaches n_visits exists to
         # count, so the number is reported as what the sweep DID, not as a
         # statement that the rest are unreactive.
-        if "n_visits" in sw.columns:
-            out["survivors"] = int(sw.drop_duplicates("parent_ident")
-                                     .n_visits.gt(0).sum())
+        # SURVIVED = held under the bar, which is what earns a 100 ns run.
+        # This counted `n_visits > 0` -- a mode that merely approached the
+        # anchor once -- so the arrow claimed a shortlist the cascade does not
+        # act on. D0085 made stability the gate.
+        try:
+            from . import pipeline as _pl
+            out["survivors"] = int(len(_pl.survivors()))
+        except Exception:                                  # noqa: BLE001
+            out["survivors"] = 0
         md = _pd.concat([_pd.read_csv(f) for f in
                          _g.glob(str(rp.residence_dir() / "*.csv"))], ignore_index=True)
         m = md[md.production_ps >= 50000].drop_duplicates("ident", keep="last")
@@ -727,7 +734,6 @@ def _mode_panel(pts, m) -> str:
 
 #: Sulfopin, the covalent parent every T_3/T_4 molecule is grown from.
 SULFOPIN = "CC(C)(C)CN(C1CCS(=O)(=O)C1)C(=O)CCl"
-D4_GLOB = "/data/lab_vm/append_only/inhibition/04_t4_combinatorial/D4_*.parquet"
 
 
 def _svg(smiles: str, w: int, h: int) -> str:
@@ -775,8 +781,7 @@ def _chemspace(n: int = 8) -> str:
     if not core:
         return ""
     sats = []
-    fs = sorted(_g.glob(D4_GLOB),
-                key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+    fs = [str(x) for x in rp.frames("T4")]
     if fs:
         try:
             import pandas as _pd
@@ -838,13 +843,29 @@ def _chemspace(n: int = 8) -> str:
 
 
 def _n_candidates() -> str:
-    """How many molecules the T_3/T_4 arms actually generated."""
+    """How many molecules THIS RUN screens.
+
+    It used to sum every candidate in both generation arms -- 7,179 -- which is
+    the library, not the run. This screen takes T_4 across three warhead
+    families after the chemistry gates: 561. Stating the library where the run
+    belongs overstates the funnel's first step by an order of magnitude.
+    """
+    try:
+        from . import pipeline as _pl
+        n = len(_pl.scope_idents())
+        if n:
+            return f"{n:,}"
+    except Exception:                                      # noqa: BLE001
+        pass
+    return _library_size()
+
+
+def _library_size() -> str:
+    """Every molecule in both arms — context, not the run."""
     import glob as _g
     n = 0
-    for pat in (D4_GLOB,
-                "/data/lab_vm/append_only/inhibition/03_t3_reinvent/D3_*.parquet"):
-        fs = sorted(_g.glob(pat),
-                    key=lambda q: int(q.rsplit("_", 1)[1].split(".")[0]))
+    for tier in ("T4", "T3"):
+        fs = [str(x) for x in rp.frames(tier)]
         if not fs:
             continue
         try:

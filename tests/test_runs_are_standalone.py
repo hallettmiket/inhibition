@@ -51,6 +51,10 @@ PIPELINE_PATH = [
     "scripts/mdprio_report.py", "scripts/promote_to_bpmd.py",
     "scripts/serve_reports.py",
     "shared/pipeline.py", "shared/run_paths.py", "shared/mode_ranking.py",
+    # build_gui imports this to draw the "how this works" page, so it is
+    # part of producing a run and was missing from this list -- which is
+    # how a hardcoded `nac_v3/` survived in it.
+    "shared/pipeline_schematic.py",
     "shared/sweep_state.py", "shared/mode_assets.py",
 ]
 
