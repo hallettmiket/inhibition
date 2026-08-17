@@ -44,11 +44,49 @@ class NoCache(SimpleHTTPRequestHandler):
         pass
 
 
+def archive_root(name: str) -> Path:
+    """A snapshot under `gui_archive/`, resolved by NAME rather than by path.
+
+    THE ROOT IS STILL NOT TYPED, AND THAT IS THE POINT. This server exists
+    because it once served a superseded topic's pages for hours from a literal
+    path, so a general `--root` would hand that hazard straight back. An
+    archived GUI is a real need -- a released run has to stay browsable after
+    the topic moves on -- but an archive is a NAMED, FROZEN thing, so it is
+    resolved inside `gui_archive/` and nowhere else.
+
+    A live topic directory therefore cannot be reached through this flag, even
+    by accident: `--archive nac_v4` does not resolve, because `nac_v4` is a run,
+    not a snapshot.
+    """
+    base = rp.BLACKSMITH / "gui_archive"
+    root = (base / name).resolve()
+    if base.resolve() not in root.parents:
+        raise SystemExit(
+            f"{name!r} does not resolve inside {base}. This flag serves frozen "
+            f"snapshots only; the live run is served with no argument.")
+    if not root.is_dir():
+        have = sorted(p.name for p in base.iterdir() if p.is_dir()) \
+            if base.is_dir() else []
+        raise SystemExit(
+            f"no archived GUI called {name!r}. Available: {have or 'none'}")
+    return root
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--port", type=int, default=8931)
+    ap.add_argument("--archive", metavar="NAME", default=None,
+                    help="serve a frozen snapshot from gui_archive/ instead of "
+                         "the live run, e.g. --archive galena_3.0.0_20260816")
     args = ap.parse_args()
-    root = rp.reports_dir()
+    if args.archive:
+        root = archive_root(args.archive)
+        # SAY WHICH RUN THIS IS, EVERY TIME. Two GUIs on two ports that look
+        # identical is exactly how a superseded page gets read as current.
+        print(f"serving ARCHIVED GUI {args.archive!r} — a frozen snapshot, NOT "
+              f"the live run")
+    else:
+        root = rp.reports_dir()
     print(f"serving {root} on http://127.0.0.1:{args.port}  (no-store)")
     # THREADING, because `HTTPServer` serves ONE request at a time. A browser
     # holding a connection open, or a slow transfer of a 100 MB report, blocks
