@@ -31,7 +31,7 @@ import json
 import logging
 import sys
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -171,7 +171,10 @@ class _Handler(BaseHTTPRequestHandler):
 
 def cmd_serve(args) -> int:
     pl.write_status()
-    srv = HTTPServer(("127.0.0.1", args.port), _Handler)
+    # Threaded for the same reason the report server is: `status()` walks the
+    # trajectory tree and can take seconds, and a serial server would make the
+    # dashboard's poll block its own start/stop buttons.
+    srv = ThreadingHTTPServer(("127.0.0.1", args.port), _Handler)
     log.info("pipeline control on http://127.0.0.1:%d  (GET /status, "
              "POST /start/<stage>, POST /stop/<stage>)", args.port)
     srv.serve_forever()

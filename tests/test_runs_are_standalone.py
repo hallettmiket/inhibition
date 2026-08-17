@@ -149,3 +149,19 @@ def test_the_pipeline_path_list_covers_every_declared_stage():
         cmd = " ".join(s.launch())
         named = [p for p in PIPELINE_PATH if Path(p).name in cmd]
         assert named, f"stage {s.name} launches {cmd}, which no test guards"
+
+
+def test_both_servers_are_threaded():
+    """`HTTPServer` serves ONE request at a time. A browser holding a connection
+    open, or a slow transfer of a 100 MB report, blocks every other request and
+    the whole GUI stops answering -- it looks down while the process is fine.
+
+    `python -m http.server` has used ThreadingHTTPServer since 3.7, so replacing
+    it with the plain class to add no-store headers silently downgraded that."""
+    for f in ("scripts/serve_reports.py", "scripts/pipeline.py"):
+        src = (REPO / f).read_text()
+        assert "ThreadingHTTPServer" in src, f
+        code = "\n".join(l for l in src.splitlines()
+                         if not l.strip().startswith("#"))
+        assert re.search(r"(?<!Threading)HTTPServer\(", code) is None, \
+            f"{f} instantiates a serial HTTPServer"

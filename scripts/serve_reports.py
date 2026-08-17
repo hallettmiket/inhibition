@@ -24,7 +24,7 @@ from __future__ import annotations
 import argparse
 import sys
 from functools import partial
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -50,8 +50,13 @@ def main() -> None:
     args = ap.parse_args()
     root = rp.reports_dir()
     print(f"serving {root} on http://127.0.0.1:{args.port}  (no-store)")
-    HTTPServer(("127.0.0.1", args.port),
-               partial(NoCache, directory=str(root))).serve_forever()
+    # THREADING, because `HTTPServer` serves ONE request at a time. A browser
+    # holding a connection open, or a slow transfer of a 100 MB report, blocks
+    # every other request -- the whole GUI stops answering and looks down.
+    # `python -m http.server` has used ThreadingHTTPServer since 3.7; replacing
+    # it with the plain class to add no-store headers silently downgraded that.
+    ThreadingHTTPServer(("127.0.0.1", args.port),
+                        partial(NoCache, directory=str(root))).serve_forever()
 
 
 if __name__ == "__main__":
