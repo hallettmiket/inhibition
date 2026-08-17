@@ -219,7 +219,16 @@ def _md() -> pd.DataFrame:
     if eng in d.columns:
         d["_has"] = d[eng].notna().astype(int)
         d = d.sort_values("_has")
-    return d.drop_duplicates("ident", keep="last")
+    # DEDUPED PER (MOLECULE, MODE), NOT PER MOLECULE. Two modes of one molecule
+    # are two different complexes with two different trajectories; collapsing
+    # them on `ident` keeps one arbitrarily and silently discards the other --
+    # the same "value taken by label, not identity" failure that gave every mode
+    # of a molecule the same sweep trajectory. No molecule has two 100 ns modes
+    # yet, so this changes nothing today; it is here so that the first one does
+    # not have to be noticed.
+    d["_mode"] = (d["pose_mode"] if "pose_mode" in d.columns
+                  else pd.Series(index=d.index, dtype="float64")).fillna(-1)
+    return d.drop_duplicates(["ident", "_mode"], keep="last")
 
 
 def _version() -> tuple[str, str]:
@@ -392,7 +401,11 @@ def main() -> None:
             log.info("dropped %s — %s", c, why)
     args.candidates = kept
 
-    rows, tabs, missing = [], [], []
+    # `rows` (a second, per-candidate <table>) was built here and never
+    # rendered -- the page has used `rows_html` since the rail replaced it.
+    # Dead code that formats data is worse than absent: it reads as the
+    # thing on screen, so a fix applied to it changes nothing visible.
+    tabs, missing = [], []
     for c in args.candidates:
         f = REPORTS / f"{c}.html"
         if not f.is_file():
@@ -401,6 +414,18 @@ def main() -> None:
             continue
         s = swi.loc[c] if c in getattr(swi, "index", []) else None
         m = mdi.loc[c] if c in getattr(mdi, "index", []) else None
+        # `.loc` on a duplicated index returns a FRAME, not a row, and every
+        # `g()` below would then format a Series into a cell. Now that `_md`
+        # keeps one row per (molecule, mode), a molecule with two 100 ns modes
+        # is exactly that case. One rail entry per molecule can only show one of
+        # them; it shows the best-resolved, and says so rather than picking by
+        # file order. The per-mode rail arrives with the re-run.
+        if isinstance(m, pd.DataFrame):
+            log.info("%s: %d 100 ns modes; showing the lowest max RMSD", c, len(m))
+            k = "explicit_ligand_rmsd_nm_max"
+            m = (m.sort_values(k).iloc[0] if k in m.columns else m.iloc[0])
+        if isinstance(s, pd.DataFrame):
+            s = s.iloc[0]
 
         def g(src, k, fmt="{:.3f}", dash="—"):
             if src is None or k not in src or pd.isna(src[k]):
@@ -410,19 +435,6 @@ def main() -> None:
             except Exception:                          # noqa: BLE001
                 return str(src[k])
 
-        mode = "—"
-        if s is not None and "ident" in s and isinstance(s["ident"], str):
-            mode = s["ident"].split("_m")[-1] if "_m" in s["ident"] else "0"
-        rows.append(
-            f"<tr><td class='id'>{html.escape(c)}</td>"
-            f"<td>{mode}</td>"
-            f"<td class='n'>{g(s,'frac_attack_ready')}</td>"
-            f"<td class='n'>{g(s,'n_visits','{:.0f}')}</td>"
-            f"<td class='n'>{g(s,'frac_in_window')}</td>"
-            f"<td class='n'>{g(m,'explicit_frac_frames_engaged')}</td>"
-            f"<td class='n'>{g(m,'explicit_ligand_rmsd_nm_max')}</td>"
-            f"<td class='n'>{g(m,'explicit_ligand_rmsd_nm_n_independent','{:.1f}')}</td>"
-            f"</tr>")
         tabs.append(c)
 
     if not tabs:
@@ -443,6 +455,30 @@ def main() -> None:
     for k, t in enumerate(tabs):
         s_ = swi.loc[t] if t in getattr(swi, "index", []) else None
         m_ = mdi.loc[t] if t in getattr(mdi, "index", []) else None
+        # `.loc` on a duplicated index returns a FRAME, and every `g()` below
+        # would format a Series into a cell. `_md` now keeps one row per
+        # (molecule, mode), so a molecule with two 100 ns modes lands here.
+        if isinstance(m_, pd.DataFrame):
+            _k = "explicit_ligand_rmsd_nm_max"
+            m_ = (m_.sort_values(_k).iloc[0] if _k in m_.columns else m_.iloc[0])
+        if isinstance(s_, pd.DataFrame):
+            s_ = s_.iloc[0]
+        # WHICH POSE THIS RUN STARTED FROM -- from the run's own row. `pose_mode`
+        # is written by the runner out of --pose-rank and is the only record of
+        # it. The rail showed the molecule alone, so two modes of one molecule
+        # were indistinguishable on screen. @tt8804: "it doesnt show sub modes
+        # only molecules".
+        #
+        # Present on 3 of 70 rows. Everything before today was launched per
+        # MOLECULE, and the mode cannot be recovered after the fact either --
+        # matching each run's ligand_pose.sdf against the current representatives
+        # puts only 10 of 83 within 0.05 A, the rest having been built from poses
+        # that no longer exist. So the others read "mode not recorded", which is
+        # the true state; borrowing a label from a same-molecule sweep row would
+        # make an unknown look like a measurement.
+        mode = None
+        if m_ is not None and "pose_mode" in m_ and pd.notna(m_["pose_mode"]):
+            mode = int(m_["pose_mode"])
         def g(src, key, fmt="{:.3f}"):
             if src is None or key not in src or pd.isna(src[key]):
                 return "\u2014"
@@ -513,7 +549,12 @@ def main() -> None:
             + (f"<img class='thumb' alt='' src=\"{thumbs[t]}\">"
                if t in thumbs else "<span class='thumb'></span>")
             + f"<span class='body'>"
-            f"<span class='l1'><span class='mid-id'>{html.escape(t)}</span>"
+            f"<span class='l1'><span class='mid-id'>{html.escape(t)}"
+            + (f"<span class='mode'>m{mode}</span>" if mode is not None
+               else "<span class='mode unk' title='this run was launched per "
+                    "molecule; which pose it started from was not recorded and "
+                    "cannot be recovered'>mode ?</span>")
+            + f"</span>"
             f"<span class='eng{'' if has_md else ' pend'}' "
             f"title='{'largest ligand RMSD over the 100 ns run — the sort key, lowest first' if has_md else 'no 100 ns run yet — 10 ns triage sweep only'}'>"
             f"{headline}</span></span>"

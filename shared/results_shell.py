@@ -86,6 +86,12 @@ main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
 .l1{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
 .mid-id{font-family:var(--mono);font-size:12.5px;overflow:hidden;
  text-overflow:ellipsis;white-space:nowrap}
+/* Which pose the run started from. `unk` is deliberately muted: an unrecorded
+   mode is an absence, and styling it like a value would let the eye read it as
+   one. */
+.mode{font-family:var(--mono);font-size:10px;margin-left:5px;padding:0 4px;
+ border-radius:3px;background:rgba(0,114,206,.12);color:var(--blue)}
+.mode.unk{background:transparent;color:var(--muted,#8a94a6);font-style:italic}
 .eng{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--navy);
  flex:none}
 .l2{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;min-width:0}
