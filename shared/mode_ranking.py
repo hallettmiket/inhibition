@@ -288,6 +288,18 @@ main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
    elements. Both are enforced, not assumed -- a row that overflowed its box
    would drift the whole list out of register with the scrollbar. */
 .row{height:64px;box-sizing:border-box;overflow:hidden}
+/* AND THIS PAGE'S OWN VOCABULARY, which the shared row does not carry and must
+   not: the rail pages badge a mode held/left against an RMSD bar, this one
+   badges HOW FAR DOWN THE CASCADE it got. Extracting ROW_CSS deleted these
+   along with the duplicated rules, and the rows rendered their mode badge and
+   status tag unstyled -- present, legible, and wrong, which is why it read as
+   "the selectors look different" rather than as anything broken. */
+.mtag{display:inline-block;padding:0 .3rem;margin-left:.3rem;border-radius:3px;
+  color:#fff;font:600 10px var(--mono);vertical-align:1px}
+.t-md{background:#e6f4ee;color:var(--good)}
+.t-swept{background:#e8f1fb;color:var(--navy)}
+.t-failed{background:#faf3e0;color:var(--warn)}
+.t-none{background:var(--raise);color:var(--muted)}
 /* The class banner that replaces sticky headers under virtualisation. */
 .railbn{font-family:var(--mono);font-size:.6rem;letter-spacing:.14em;
  text-transform:uppercase;color:var(--blue);font-weight:600;padding:8px 14px 6px;
