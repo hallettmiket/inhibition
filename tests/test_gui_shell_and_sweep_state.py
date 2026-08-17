@@ -194,3 +194,29 @@ def test_only_a_finished_sweep_supplies_assets():
     """A partial trajectory rendered as a whole one is the #53 neighbourhood."""
     src = (REPO / "scripts" / "sweep_assets.py").read_text()
     assert "Finished mdrun" in src
+
+
+def test_every_page_that_renders_the_nav_also_ships_its_css():
+    """THE REGRESSION. `mdprio_combine` interpolated the stepper markup but its
+    CSS line was deleted when the shell stylesheet was moved into
+    `shared/results_shell` -- the extraction replaced everything between <style>
+    and </style>, and `{_stepcss}` was inside that range. The page still built,
+    still had the nav, and rendered it as a run-on line of plain hyperlinks.
+    @tt8804: "the nav bar on the gui is just hyperlinks".
+
+    Markup without styles is the failure mode, so the test is markup implies
+    styles -- checked at the BUILDER, not on built artefacts, so it runs
+    anywhere."""
+    builders = {
+        "scripts/mdprio_combine.py": ("_stepnav", "_stepcss"),
+        "shared/mode_ranking.py": ("__STEPNAV__", "__STEPCSS__"),
+        "scripts/build_gui.py": ("gs.nav(", "gs.CSS"),
+        "scripts/sweep_combine.py": ("gs.nav(", "gs.CSS"),
+    }
+    for path, (nav, css) in builders.items():
+        src = (REPO / path).read_text()
+        if nav not in src:
+            continue                      # this builder does not render the nav
+        assert css in src, (
+            f"{path} renders the step nav ({nav}) but never interpolates its "
+            f"CSS ({css}) -- it will render as plain hyperlinks")
