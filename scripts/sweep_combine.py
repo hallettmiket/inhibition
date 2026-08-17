@@ -201,6 +201,7 @@ def main() -> None:
 {gs.nav("sweep.html", {"sweep.html": f"{summ['ok']} ok · {summ['pending']} pending"})}
 <main>
  <div id="rail">
+  {rs.SEARCH_HTML}
   <div class="legend">ranked by <b>max ligand RMSD</b> over the 10&nbsp;ns run,
    lowest first &mdash; how far the molecule ever got from where it started, the
    same headline the 100&nbsp;ns results page ranks on. <b>held</b> means it never
@@ -228,6 +229,8 @@ function toggleTheme(){{
   const d = document.documentElement.getAttribute('data-theme') === 'dark';
   document.documentElement.setAttribute('data-theme', d ? 'light' : 'dark'); }}
 show(CUR);
+{rs.SEARCH_JS}
+railFilter();
 </script>
 </body></html>"""
     (REPORTS / "sweep.html").write_text(page)

@@ -69,6 +69,19 @@ a.mbtn.lnk:hover{background:var(--blue-pale)}
 main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0}
 @media(max-width:880px){main{grid-template-columns:1fr;grid-template-rows:250px 1fr}}
 #rail{overflow-y:auto;border-right:1px solid var(--rule);background:var(--rail)}
+/* Rail search. Sticky, because a filter you have to scroll back up to change is
+   one you stop using on a 147-row list. */
+.railq{position:sticky;top:0;z-index:3;display:flex;gap:6px;align-items:center;
+ padding:6px 8px;background:var(--raise);border-bottom:1px solid var(--rule)}
+.railq input{flex:1;min-width:0;font:12px var(--mono);padding:.3rem .45rem;
+ border:1px solid var(--rule);border-radius:3px;background:var(--paper);
+ color:var(--ink)}
+.railq input:focus{outline:none;border-color:var(--blue)}
+.railq .n{font:600 10px var(--sans);color:var(--muted);white-space:nowrap}
+.railq button{font:600 11px var(--sans);border:1px solid var(--rule);
+ border-radius:3px;background:var(--paper);color:var(--muted);cursor:pointer;
+ padding:.25rem .4rem}
+.railq button:hover{background:var(--blue-pale);color:var(--ink)}
 .chd{font-family:var(--mono);font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;
  color:var(--blue);font-weight:600;padding:10px 14px 6px;background:var(--raise);
  border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:1}
@@ -131,4 +144,61 @@ iframe{flex:1;width:100%;border:0;background:var(--paper)}
  --raise:#16202a;--rail:#121b24;--good:#4fc4a0;--bad:#e08a70}
 :root[data-theme="dark"] .thumb{background:#fff}
 {_stepcss}
+"""
+
+
+#: The rail's search box and its filter. Shared so the two rail pages cannot
+#: drift into two behaviours -- which is the same reason `CSS` lives here.
+#:
+#: FILTERS THE DOM, NOT THE DATA. Both rails are static markup, so hiding rows
+#: is enough and nothing has to be re-rendered or re-sorted. The rank numbers
+#: keep their original values on purpose: renumbering 1..n over a filtered list
+#: would make "rank 3" mean something different depending on what was typed.
+#:
+#: Matches the row's whole text -- ident, mode, warhead class, the readings --
+#: so `bdhi_c5`, `held`, `0.3`, and a molecule id all work without the user
+#: having to know which field they are searching.
+SEARCH_HTML = """\
+<div class="railq">
+ <input id="railq" type="search" placeholder="filter — id, class, held/left, a number"
+        oninput="railFilter()" autocomplete="off" spellcheck="false">
+ <span class="n" id="railn"></span>
+ <button type="button" onclick="railClear()" title="clear">&times;</button>
+</div>"""
+
+SEARCH_JS = """
+function railFilter(){
+  const el = document.getElementById('railq');
+  const q = (el ? el.value : '').trim().toLowerCase();
+  const rows = document.querySelectorAll('#rail .row');
+  let shown = 0;
+  rows.forEach(function(r){
+    const hit = !q || r.textContent.toLowerCase().indexOf(q) !== -1;
+    r.style.display = hit ? '' : 'none';
+    if (hit) shown++;
+  });
+  // Section headers with nothing under them would otherwise float free.
+  document.querySelectorAll('#rail .ohd').forEach(function(h){
+    let n = 0;
+    for (let s = h.nextElementSibling; s && !s.classList.contains('ohd');
+         s = s.nextElementSibling) {
+      if (s.classList.contains('row') && s.style.display !== 'none') n++;
+    }
+    h.style.display = n ? '' : 'none';
+  });
+  const c = document.getElementById('railn');
+  if (c) c.textContent = q ? shown + ' / ' + rows.length : rows.length + '';
+}
+function railClear(){
+  const el = document.getElementById('railq');
+  if (el) { el.value = ''; railFilter(); el.focus(); }
+}
+// `/` focuses the box, Escape clears it -- the list is long enough that reaching
+// for the mouse to filter is the thing that stops people filtering.
+document.addEventListener('keydown', function(e){
+  const el = document.getElementById('railq');
+  if (!el) return;
+  if (e.key === '/' && document.activeElement !== el) { e.preventDefault(); el.focus(); }
+  else if (e.key === 'Escape' && document.activeElement === el) railClear();
+});
 """

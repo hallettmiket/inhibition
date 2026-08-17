@@ -390,3 +390,52 @@ def test_the_ranking_page_builds_from_the_ranking_alone():
     # the same mistake the addModelsAsFrames test above had to correct for.
     assert "import mdprio_combine" not in src
     assert "mdprio_combine.py" not in src
+
+
+# --------------------------------------------------------------------------
+# rail search
+# --------------------------------------------------------------------------
+
+def test_the_search_widget_is_shared_not_copied():
+    """Two rails with two filters is two behaviours that drift -- the same
+    reason `results_shell.CSS` exists."""
+    from shared import results_shell as rs
+    assert 'id="railq"' in rs.SEARCH_HTML
+    assert "railFilter" in rs.SEARCH_JS
+    for f in ("scripts/sweep_combine.py", "scripts/mdprio_combine.py"):
+        src = (REPO / f).read_text()
+        assert "SEARCH_HTML" in src and "SEARCH_JS" in src, f
+
+
+def test_the_ranking_page_filters_the_data_not_the_dom():
+    """THE RAIL IS VIRTUALISED -- only rows currently on screen exist in the
+    DOM. Hiding elements would filter the visible window and leave everything
+    below it unfiltered the moment you scrolled, which looks like a working
+    filter until you scroll."""
+    src = (REPO / "shared" / "mode_ranking.py").read_text()
+    assert "function setQuery(" in src and "railHTML()" in src
+    body = src[src.index("function visible(){"):]
+    assert "r.filter(matches)" in body[:400], "query not applied inside visible()"
+
+
+def test_the_ranking_filter_rebuilds_the_ident_it_does_not_assume_one():
+    """`i` is deliberately not sent per row -- it is p + "_m" + m and cost a
+    megabyte of payload. A filter matching on a field that is not there would
+    silently match nothing."""
+    src = (REPO / "shared" / "mode_ranking.py").read_text()
+    body = src[src.index("function matches("):src.index("function visible(){")]
+    assert "x.p + '_m' + x.m" in body
+
+
+def test_filtering_does_not_renumber_the_ranks():
+    """Renumbering 1..n over a filtered list would make "rank 3" mean something
+    different depending on what was typed."""
+    from shared import results_shell as rs
+    assert "textContent" in rs.SEARCH_JS          # reads rows, does not rewrite
+    assert "innerHTML" not in rs.SEARCH_JS
+
+
+def test_empty_section_headers_are_hidden_when_filtered_out():
+    """A held/left banner with nothing under it reads as an empty category."""
+    from shared import results_shell as rs
+    assert ".ohd" in rs.SEARCH_JS

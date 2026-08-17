@@ -393,6 +393,11 @@ __STEPCSS__
  <span class="msep"></span>
  <select id="scope" onchange="setScope(this.value)"
    title="rank within one warhead class, within every class, or across all of them"></select>
+ <input id="railq" type="search" placeholder="filter &mdash; id, class, mode"
+   oninput="setQuery(this.value)" autocomplete="off" spellcheck="false"
+   title="matches the molecule id, its warhead class, and the mode label. / focuses, Esc clears."
+   style="font:12px var(--mono);padding:3px 8px;border:1px solid var(--rule);
+          border-radius:99px;background:var(--paper);color:var(--ink);width:22ch;flex:none">
  <span class="mhint" id="mhint"></span>
  <span class="msep"></span>
  <a class="mbtn lnk" href="pipeline.html" title="how a molecule becomes a row">how this works &#8599;</a>
@@ -521,10 +526,37 @@ function lib(){ return window.$3Dmol || window['3Dmol']; }
 function fmt(x, d){ return (x === null || x === undefined) ? '—' : (+x).toFixed(d); }
 
 function isGlobal(){ return SCOPE === '__global__'; }
+document.addEventListener('keydown', function(e){
+  const el = document.getElementById('railq');
+  if (!el) return;
+  if (e.key === '/' && document.activeElement !== el){ e.preventDefault(); el.focus(); }
+  else if (e.key === 'Escape' && document.activeElement === el){
+    el.value = ''; setQuery(''); }
+});
 
+let QUERY = '';
+function setQuery(q){
+  QUERY = (q || '').trim().toLowerCase();
+  // Rebuild rather than hide: THE RAIL IS VIRTUALISED, so only the rows
+  // currently on screen exist in the DOM. Hiding those would filter the window
+  // and leave everything below it unfiltered as soon as you scrolled.
+  railHTML();
+  const c = document.getElementById('mhint');
+  if (c && QUERY) c.textContent = visible().length.toLocaleString()
+    + ' of ' + ROWS.length.toLocaleString() + ' match';
+  else if (c) c.textContent = ROWS.length.toLocaleString() + ' modes';
+}
+function matches(x){
+  if (!QUERY) return true;
+  // The ident is not stored per row (it is rebuilt from p + "_m" + m to save a
+  // megabyte of payload), so it is rebuilt here too rather than assumed absent.
+  const id = x.p + '_m' + x.m;
+  return (id + ' ' + x.c + ' ' + (x.ml || '')).toLowerCase().indexOf(QUERY) !== -1;
+}
 function visible(){
   let r = ROWS.slice();
   if (SCOPE !== '*' && !isGlobal()) r = r.filter(x => x.c === SCOPE);
+  if (QUERY) r = r.filter(matches);
   const K = x => (x === null || x === undefined) ? 1e9 : x;   // unranked sorts last
   if (isGlobal()) r.sort((a,b) => K(a.gr) - K(b.gr));
   else r.sort((a,b) => a.c.localeCompare(b.c) || K(a.cr) - K(b.cr));

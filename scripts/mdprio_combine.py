@@ -801,7 +801,7 @@ chemistries is the cheapest way to turn two points into a distribution.</p>
      opposite of one instrument with four steps. -->
 {_stepnav}
 <main>
- <div id="rail"><div class="legend">ranked by <b>max ligand RMSD</b> over the
+ <div id="rail">{_rs.SEARCH_HTML}<div class="legend">ranked by <b>max ligand RMSD</b> over the
   100&nbsp;ns run, lowest first &mdash; how far the molecule ever got from where it
   started. <b>held</b> means it never exceeded {_HELD_BAR:.2f}&nbsp;nm, the bar
   that earns a molecule BPMD (D0085) and the same one the {int(_SWEEP_NS)}&nbsp;ns
@@ -942,6 +942,8 @@ function show(t){{
 }}
 relayout();
 show({json.dumps(tabs[0])});
+{_rs.SEARCH_JS}
+railFilter();
 </script></body></html>"""
 
     dest = sout.Topic("blacksmith", rp.reports_topic()).write("combined", ".html")
