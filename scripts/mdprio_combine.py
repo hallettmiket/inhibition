@@ -725,6 +725,7 @@ chemistries is the cheapest way to turn two points into a distribution.</p>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(_full_title)}</title><style>
 {_shellcss}
+{_stepcss}
 </style></head><body>
 <div id="topbar">
  <h1 title="Pick a molecule on the left; its pose, movie and plots load on the right.">{html.escape(_full_title)}</h1>

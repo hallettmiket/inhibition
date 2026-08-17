@@ -89,9 +89,16 @@ def main() -> None:
     import sweep_assets as sa
     from shared import target_config as tc
     bound = float(tc.get("md.bound_rmsd_nm", default=1.2))
+    # POSE RANK IS PART OF THE KEY. Without it every mode of a molecule resolves
+    # to the same trajectory: three modes of t4_59100a17abd6 all reported max
+    # RMSD 0.347 nm when they are 0.416, 0.663 and 6.62 -- the last of which
+    # leaves the pocket entirely and was sitting in the held list.
+    wlf = pd.read_csv(wl)
+    prank = (dict(zip(wlf.ident.astype(str), wlf.pose_rank.astype(int)))
+             if "pose_rank" in wlf.columns else {})
     mx, mean = {}, {}
     for ident in ok.ident.astype(str):
-        rep = sa.rep_dir(ident.rsplit("_m", 1)[0])
+        rep = sa.rep_dir(ident.rsplit("_m", 1)[0], prank.get(ident))
         if rep is None:
             continue
         _t, y = sa._xvg(rep / "rmsd.xvg")

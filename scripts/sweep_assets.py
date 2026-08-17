@@ -47,19 +47,32 @@ OUT = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith/"
 SWEEP_ROOT = Path("/data/lab_vm/modifiable/inhibition/attack_sweep_10ns")
 
 
-def rep_dir(parent: str) -> Path | None:
-    """The rep directory holding this molecule's finished 10 ns run.
+def rep_dir(parent: str, pose_rank: int | None = None) -> Path | None:
+    """The rep directory for THIS MODE's finished 10 ns run.
 
-    Searched rather than constructed: the runner names the parent directory
-    `rank<N>_<ps>ps` after the pose rank it was given, and that rank is not
-    recoverable from the ident. A finished run is one whose prod.log says so --
-    the same completeness test the sweep's own resume guard uses, because a
-    partial trajectory analysed as a whole one is how #53's neighbours happened.
+    KEYED ON POSE RANK, NOT JUST THE MOLECULE. The runner writes
+    `rank<pose_rank>_<ps>ps/<parent>/md/rep1`, so a molecule with four swept
+    modes has four sibling directories. Matching on the parent alone returned
+    whichever sorted first and handed EVERY mode of that molecule the same
+    trajectory -- one mode's RMSD, one mode's plots, one mode's movie, shown
+    under four different idents.
+
+    It was visible in the ranking as identical `rmsd_max` to six decimal places
+    for modes that are different binding poses, which is not something two
+    trajectories do. Caught before 12 GPU-days were committed on that order.
+
+    `pose_rank` is required for a correct answer; without it this still resolves
+    to the first finished run, which is right only for single-mode molecules.
+    A finished run is one whose prod.log says so -- the same completeness test
+    the sweep's resume guard uses.
     """
-    for p in sorted(SWEEP_ROOT.glob(f"*/{parent}/md/rep1")):
-        log_f = p / "prod.log"
-        if log_f.is_file() and "Finished mdrun" in log_f.read_text(errors="replace"):
-            return p
+    pats = ([f"rank{int(pose_rank)}_*ps/{parent}/md/rep1"] if pose_rank is not None
+            else [f"*/{parent}/md/rep1"])
+    for pat in pats:
+        for p in sorted(SWEEP_ROOT.glob(pat)):
+            log_f = p / "prod.log"
+            if log_f.is_file() and "Finished mdrun" in log_f.read_text(errors="replace"):
+                return p
     return None
 
 
@@ -156,6 +169,9 @@ def main() -> None:
     wl = pd.read_csv(args.worklist)
     OUT.mkdir(parents=True, exist_ok=True)
     idents = list(wl.ident.astype(str))[:args.limit]
+    # ident -> pose_rank, so each mode's OWN trajectory is found.
+    prank = dict(zip(wl.ident.astype(str), wl.pose_rank.astype(int))) \
+        if "pose_rank" in wl.columns else {}
     n_mov = n_png = 0
     miss: dict = {}
     for i, ident in enumerate(idents, 1):
@@ -168,7 +184,7 @@ def main() -> None:
         # "0 plots" while looking like it had succeeded.
         if not (args.force or args.plots_only) and png.is_file() and pdb.is_file():
             continue
-        rep = rep_dir(parent)
+        rep = rep_dir(parent, prank.get(ident))
         if rep is None:
             miss[parent] = "no finished 10 ns run"
             continue
