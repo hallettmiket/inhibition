@@ -368,7 +368,20 @@ def main() -> None:
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    wl = Path(args.worklist) if args.worklist else None
+    # THE CAMPAIGN'S WORKLIST, discoverable now that it is topic-scoped and
+    # validated against this run's ranking. It used to be required on the
+    # command line -- reasonable when "newest file" could return a previous
+    # screen's -- so a plain `build_gui` had no worklist, and without one the
+    # page cannot tell a mode this campaign selected from one it never asked
+    # for. That is why Home kept reading `failed: 24` for jobs a broken
+    # launcher invented.
+    if args.worklist:
+        wl = Path(args.worklist)
+    else:
+        from shared import pipeline as _pl
+        wl = _pl.worklist_path()
+        if wl:
+            log.info("worklist (from run.topic): %s", wl.name)
     d = ss.state(wl)
     s = ss.summary(d)
     OUT.mkdir(parents=True, exist_ok=True)

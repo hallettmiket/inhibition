@@ -585,3 +585,34 @@ def test_the_search_css_reaches_a_page_with_its_own_stylesheet():
     assert ".railq{" in rs.CSS                    # the rail pages still get it
     mr = (REPO / "shared" / "mode_ranking.py").read_text()
     assert "__RAILQCSS__" in mr and "_rs().SEARCH_CSS" in mr
+
+
+def test_a_row_for_a_mode_nobody_selected_is_not_counted():
+    """The 24 rows a broken launcher produced -- (molecule, a pose_rank in the
+    hundreds) -- are keyed on pairs no real run will ever request, so nothing
+    supersedes them and Home read `failed: 24` permanently. They cannot be
+    deleted: the outputs root is append-only.
+
+    The filter must run BEFORE the ident union, or the dropped rows still
+    contribute an ident and merely change label from `failed` to `not sent` --
+    which is what the first version did."""
+    src = (REPO / "shared" / "sweep_state.py").read_text()
+    body = src[src.index("def state("):]
+    assert "asked = set(zip(" in body
+    assert body.index("res = res[keep_row]") < body.index("idents = set()")
+
+
+def test_the_filter_needs_a_worklist_and_does_nothing_without_one():
+    """With no worklist there is nothing to judge against, and dropping rows on
+    a guess would hide real results."""
+    src = (REPO / "shared" / "sweep_state.py").read_text()
+    body = src[src.index("def state("):]
+    seg = body[body.index("asked = set(zip(") - 400:body.index("asked = set(zip(")]
+    assert "not wl.empty" in seg
+
+
+def test_build_gui_finds_the_campaign_worklist_itself():
+    """It used to require --worklist, so a plain `build_gui` had none -- and
+    without one the page cannot tell a selected mode from an invented one."""
+    src = (REPO / "scripts" / "build_gui.py").read_text()
+    assert "_pl.worklist_path()" in src

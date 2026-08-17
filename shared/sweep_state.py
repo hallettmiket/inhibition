@@ -81,6 +81,33 @@ def state(worklist: Path | None = None) -> pd.DataFrame:
         wl = pd.read_csv(worklist)
         wl["_queued"] = True
 
+    # A ROW FOR A MODE NOBODY SELECTED IS NOT A RESULT OF THIS CAMPAIGN.
+    #
+    # 24 rows in this topic come from a launcher that read the worklist
+    # positionally and asked for `global_rank` as `pose_rank` -- ranks in the
+    # hundreds against molecules with a handful of poses. The runner refused
+    # each one against the pose SDF, which is the guard working; but the refusal
+    # rows are keyed on (molecule, a pose_rank no real run will ever request),
+    # so nothing supersedes them and Home read `failed: 24` permanently.
+    #
+    # They cannot be deleted -- the outputs root is append-only. So they are not
+    # COUNTED: a row whose (parent, pose_rank) is not on the worklist describes
+    # a job this campaign never asked for. Requires a worklist to judge against,
+    # so with none passed nothing is dropped.
+    if not res.empty and not wl.empty and \
+            {"parent_ident", "pose_rank"} <= set(res.columns) and \
+            {"parent_ident", "pose_rank"} <= set(wl.columns):
+        asked = set(zip(wl.parent_ident.astype(str), wl.pose_rank.astype(int)))
+        keep_row = [(p, r) in asked for p, r in
+                    zip(res.parent_ident.astype(str), res.pose_rank.astype(int))]
+        dropped = len(res) - sum(keep_row)
+        if dropped:
+            import logging as _lg
+            _lg.getLogger(__name__).info(
+                "%d sweep row(s) name a (molecule, pose_rank) this campaign "
+                "never selected — not counted", dropped)
+        res = res[keep_row]
+
     idents = set()
     if not res.empty:
         idents |= set(res.ident.astype(str))
