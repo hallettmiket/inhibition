@@ -47,6 +47,7 @@ from shared import outputs as sout                     # noqa: E402
 from shared import pipeline_schematic as schematic     # noqa: E402
 from shared import mode_ranking as moderank        # noqa: E402
 from shared import mode_key                        # noqa: E402
+from shared import target_config as tc             # noqa: E402
 from shared import run_paths as rp                  # noqa: E402
 
 log = logging.getLogger("mdprio-combine")
@@ -546,7 +547,12 @@ def main() -> None:
             + (f"<img class='thumb' alt='' src=\"{thumbs.get(t) or thumbs[par]}\">"
                if (t in thumbs or par in thumbs) else "<span class='thumb'></span>")
             + f"<span class='body'>"
-            f"<span class='l1'><span class='mid-id'>{html.escape(t)}"
+            # THE MOLECULE IN THE NAME, THE MODE IN THE BADGE. Printing the
+            # full ident and then a badge repeating its suffix gives
+            # `t4_710417e24b49_m4` followed by `m4` -- the mode stated twice,
+            # which reads as two different facts. Legacy idents carry no
+            # suffix, so `split_ident` leaves them whole.
+            f"<span class='l1'><span class='mid-id'>{html.escape(par)}"
             + (f"<span class='mode'>m{mode}</span>" if mode is not None
                else "<span class='mode unk' title='this run was launched per "
                     "molecule; which pose it started from was not recorded and "
@@ -563,6 +569,56 @@ def main() -> None:
             + "</span>"
             f"<span class='bar'><i style='width:{max(1.5,(eng if has_md else 0)*100):.1f}%'></i></span>"
             f"</span></button>")
+
+    # THE QUEUE, NOT ONLY THE FINISHED (@tt8804). A survivor waits hours for its
+    # 100 ns run, and until now the page showed nothing at all in that window --
+    # the same gap the sweep page had before "show results as pending what is
+    # sweeped". A stage whose queue is invisible looks idle.
+    #
+    # A pending row carries its 8 ns readings and points the viewer at its SWEEP
+    # report, which exists: that is the evidence on which it was queued, and it
+    # is the right thing to look at while waiting. It is NOT given a held/left
+    # tag -- that verdict belongs to the 100 ns run and does not exist yet.
+    pending_rows = []
+    try:
+        from shared import pipeline as _pl
+        surv = _pl.survivors()
+        _prod_ns = int(tc.md_production_ps() / 1000)
+        for r in surv.itertuples():
+            ident = str(r.ident)
+            if ident in tabs:
+                continue                      # its 100 ns run is already done
+            parent = ident.rsplit("_m", 1)[0]
+            sweep_pg = f"sweep_pages/{ident}.html"
+            has_pg = (REPORTS / sweep_pg).is_file()
+            ar = float(getattr(r, "frac_attack_ready", float("nan")))
+            ar_s = "—" if ar != ar else f"{ar*100:.0f}% attack-ready"
+            th = thumbs.get(parent)
+            pending_rows.append(
+                f"<button class='row pend' data-cls=\"{html.escape(str(cls_of.get(parent,'unclassified')))}\" "
+                f"data-eng='-1' data-rmax='9998' "
+                f"data-sweep='{(ar if ar == ar else -1):.6f}' data-md='0' data-held='0' "
+                + (f"data-src='{sweep_pg}' " if has_pg else "")
+                + f"id='b_{html.escape(ident)}' onclick=\"show('{html.escape(ident)}')\">"
+                f"<span class='rk'>&middot;</span>"
+                + (f"<img class='thumb' loading='lazy' alt='' src=\"{th}\">" if th
+                   else "<span class='thumb'></span>")
+                + f"<span class='body'><span class='l1'>"
+                f"<span class='mid-id'>{html.escape(parent)}"
+                f"<span class='mode'>m{ident.rsplit('_m',1)[-1]}</span></span>"
+                f"<span class='eng pend'>{r.rmsd_max:.3f} nm at 8&nbsp;ns</span></span>"
+                f"<span class='l2'>"
+                f"<span class='wc'>{html.escape(str(cls_of.get(parent,'—')))}</span>"
+                f"<span class='meta'>{ar_s}</span>"
+                f"<span class='tag t-pend'>queued</span></span>"
+                f"<span class='bar'><i style='width:1.5%'></i></span>"
+                f"</span></button>")
+        if pending_rows:
+            pending_rows.insert(0, f"<div class='ohd o-pend'>queued for "
+                                   f"{_prod_ns}&nbsp;ns &mdash; {len(pending_rows)} "
+                                   f"survivor(s), showing their 8&nbsp;ns evidence</div>")
+    except Exception as exc:                                   # noqa: BLE001
+        log.warning("pending survivors unavailable: %s", exc)
 
     # CONTROLS (#47/#48). The catalogue previously showed candidates only, so a
     # ranking under active falsification had none of the falsifying evidence on
@@ -809,7 +865,7 @@ chemistries is the cheapest way to turn two points into a distribution.</p>
   triage applies. Engagement is shown beside it. The triage sweep chooses what
   earns a 100&nbsp;ns run and is not the result; it is on each molecule&rsquo;s
   own page.</div>
- {''.join(rows_html)}{''.join(ctl_rows_html)}</div>
+ {''.join(rows_html)}{''.join(pending_rows)}{''.join(ctl_rows_html)}</div>
  <div id="viewer">
   <div id="vhead"><span id="vname">&mdash;</span>
    <a id="vopen" href="#" target="_blank" rel="noopener">open full report &#8599;</a></div>

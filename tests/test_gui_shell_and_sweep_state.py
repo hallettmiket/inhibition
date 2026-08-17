@@ -688,3 +688,31 @@ def test_no_user_facing_page_hardcodes_a_sweep_length():
     assert not offenders, (
         f"these name a {stale} sweep while md.sweep_ps says {current}; "
         f"use gui_shell.sweep_label(): {offenders}")
+
+
+def test_the_md_rail_shows_the_queue_not_only_the_finished():
+    """A survivor waits hours for its 100 ns run, and the page showed nothing at
+    all in that window -- the same gap the sweep page had before "show results
+    as pending what is sweeped". A stage whose queue is invisible looks idle.
+
+    A queued row carries its 8 ns readings and points the viewer at its SWEEP
+    report, which is the evidence it was queued on. It gets no held/left tag:
+    that verdict belongs to the 100 ns run and does not exist yet."""
+    src = (REPO / "scripts" / "mdprio_combine.py").read_text()
+    assert "pending_rows" in src
+    body = src[src.index("pending_rows = []"):src.index("# CONTROLS (#47")]
+    assert "_pl.survivors()" in body
+    assert "if ident in tabs:" in body, "a finished run would be listed twice"
+    assert "sweep_pages/" in body, "queued rows do not point at their evidence"
+    assert "t-held" not in body and "t-left" not in body, \
+        "a queued row must not carry a 100 ns verdict"
+
+
+def test_the_mode_is_stated_once_in_a_rail_row():
+    """Printing the full ident and then a badge repeating its suffix gives
+    `t4_710417e24b49_m4` followed by `m4` -- the same fact twice, which reads as
+    two. The name carries the molecule, the badge carries the mode."""
+    src = (REPO / "scripts" / "mdprio_combine.py").read_text()
+    for frag in ("<span class='mid-id'>{html.escape(par)}",
+                 "<span class='mid-id'>{html.escape(parent)}"):
+        assert frag in src, f"a rail row still prints the full ident: {frag}"
