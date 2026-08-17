@@ -1007,19 +1007,14 @@ def _gs():
 
 
 def _step_counts(r) -> dict:
-    """Counts under each step label, so the funnel is visible from any page.
+    """Delegates to `gui_shell.step_counts()` -- the one source.
 
-    Read from the same sources the pages themselves use -- the ranking frame in
-    hand, and `sweep_state.json` if the sweep page has been built. Absent counts
-    are omitted rather than shown as 0: "not measured yet" and "measured, none"
-    are different claims and a bare 0 makes the second.
+    THIS IS WHERE THE 447 CAME FROM. It computed its own counts and read
+    `mdprio_reports/sweep_state.json`: the UNSCOPED path, so a page built for
+    nac_v5 showed 3.0.0's 447 swept modes in its nav while the Sweep page next
+    to it showed this run's 34. Both files existed, so nothing failed.
+
+    Kept as a shim rather than deleted because two call sites use it, one of them
+    inside a template replacement.
     """
-    out = {"modes.html": f"{len(r):,} modes"} if r is not None and len(r) else {}
-    try:
-        import json as _j
-        j = _j.loads((B / "mdprio_reports" / "sweep_state.json").read_text())
-        s = j.get("summary", {})
-        out["sweep.html"] = f"{s.get('ok', 0)} ok · {s.get('pending', 0)} pending"
-    except Exception:                                      # noqa: BLE001
-        pass
-    return out
+    return _gs().step_counts()

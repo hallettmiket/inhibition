@@ -198,7 +198,7 @@ def main() -> None:
  <a class="mbtn lnk" href="pipeline.html">how this works &#8599;</a>
  <button id="theme" class="mbtn tbtn" onclick="toggleTheme()">dark</button>
 </div>
-{gs.nav("sweep.html", {"sweep.html": f"{summ['ok']} ok · {summ['pending']} pending"})}
+{gs.nav("sweep.html", gs.step_counts())}
 <main>
  <div id="rail">
   {rs.SEARCH_HTML}

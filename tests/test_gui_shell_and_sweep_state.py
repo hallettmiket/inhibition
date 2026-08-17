@@ -439,3 +439,64 @@ def test_empty_section_headers_are_hidden_when_filtered_out():
     """A held/left banner with nothing under it reads as an empty category."""
     from shared import results_shell as rs
     assert ".ohd" in rs.SEARCH_JS
+
+
+# --------------------------------------------------------------------------
+# cohesion: one number, every page
+# --------------------------------------------------------------------------
+
+def test_only_one_module_computes_the_step_counts():
+    """THE 447. Four builders computed these independently, and
+    `mode_ranking._step_counts` read `mdprio_reports/sweep_state.json` -- the
+    UNSCOPED path -- so the Ranking page's nav showed 3.0.0's 447 swept modes
+    while the Sweep page beside it showed this run's 34. Both files existed, so
+    nothing failed. @tt8804: "on ranking it shows sweep is 447 okay while
+    clicking on sweep shows 32 ok, can we make this whole gui cohesive"."""
+    assert hasattr(gs, "step_counts")
+    for f in ("scripts/build_gui.py", "scripts/sweep_combine.py"):
+        src = (REPO / f).read_text()
+        assert "step_counts()" in src, f
+    # and nobody may reach the unscoped reports directory for them
+    mr = (REPO / "shared" / "mode_ranking.py").read_text()
+    body = mr[mr.index("def _step_counts("):]
+    body = body[:body.index("\n\n\n")] if "\n\n\n" in body else body
+    code = "\n".join(l for l in body.splitlines() if not l.strip().startswith("#"))
+    assert 'mdprio_reports" / "sweep_state.json"' not in code
+    assert "step_counts()" in code
+
+
+def test_the_counts_come_from_the_pipeline_probes():
+    """So a page cannot disagree with the dashboard, which is the other half of
+    the same complaint."""
+    src = (REPO / "shared" / "gui_shell.py").read_text()
+    body = src[src.index("def step_counts("):]
+    assert "from . import pipeline as pl" in body
+    assert "pl.status()" in body
+
+
+def test_an_absent_count_is_omitted_not_zero():
+    """A bare 0 asserts "measured, none"; the truth is "not measured yet"."""
+    src = (REPO / "shared" / "gui_shell.py").read_text()
+    body = src[src.index("def step_counts("):]
+    assert 'state != "unknown"' in body
+    assert "total" in body        # only emitted when there is a denominator
+
+
+def test_home_does_not_pass_its_card_dict_as_the_nav():
+    """`counts` keys the funnel cards (molecules/modes); the nav is keyed by page
+    href. Passing one as the other is why Home was the only page whose stepper
+    showed no counts at all -- `gs.nav` looked up 'sweep.html' in a dict that had
+    never heard of it and correctly omitted it."""
+    src = (REPO / "scripts" / "build_gui.py").read_text()
+    assert "nav: dict | None = None" in src
+    assert "home(counts, s, wl, nav_counts)" in src
+
+
+def test_a_placeholder_is_refreshed_but_a_built_page_is_never_clobbered():
+    """Writing only when absent froze combined.html's counts at the previous
+    night's values while every page beside it was current."""
+    src = (REPO / "scripts" / "build_gui.py").read_text()
+    assert "_PLACEHOLDER" in src
+    assert "awaiting stage" in src          # the pre-marker fallback
+    body = src[src.index("n_placeholder = 0"):]
+    assert "_PLACEHOLDER not in head" in body

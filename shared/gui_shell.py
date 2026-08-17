@@ -79,3 +79,58 @@ def nav(current: str, counts: dict | None = None) -> str:
             + '</a>')
     out.append('</nav>')
     return "".join(out)
+
+
+def step_counts() -> dict:
+    """The counts under each step label — ONE source for every page.
+
+    WHY THIS EXISTS. Four builders computed these independently: `build_gui`
+    from `sweep_state.summary()`, `sweep_combine` from its own inline dict,
+    `mdprio_combine` and the ranking page from `mode_ranking._step_counts`,
+    which read `mdprio_reports/sweep_state.json` -- the UNSCOPED directory. So
+    the Ranking page's nav said "447 ok" (3.0.0's sweep) while the Sweep page
+    beside it said 34 (this run's), and both were reading a file that existed.
+    @tt8804: "on ranking it shows sweep is 447 okay while clicking on sweep
+    shows 32 ok, can we make this whole gui cohesive".
+
+    Four sources for one row of numbers is four numbers. This is the one, and it
+    reads the pipeline's own probes -- which count artefacts on disk under
+    `run.topic`, are already tested, and are what the dashboard shows. A page
+    cannot now disagree with the dashboard or with another page.
+
+    Absent counts are OMITTED, never shown as 0: "not measured yet" and
+    "measured, none" are different claims and a bare 0 makes the second. A count
+    the pipeline reports as `unknown` is omitted for the same reason.
+    """
+    try:
+        from . import pipeline as pl
+        st = {s["name"]: s for s in pl.status()["stages"]}
+    except Exception:                                      # noqa: BLE001
+        return {}
+
+    out: dict[str, str] = {}
+
+    def n(stage):
+        s = st.get(stage) or {}
+        return s.get("done"), s.get("total"), s.get("state")
+
+    # Ranking: the number of MODES ranked, which is the rail's own length --
+    # not the (1/1) "did the table get written" the pipeline tracks.
+    try:
+        from . import mode_ranking as mr
+        r = mr.gather()
+        if r is not None and len(r):
+            out["modes.html"] = f"{len(r):,} modes"
+    except Exception:                                      # noqa: BLE001
+        pass
+
+    done, total, state = n("sweep")
+    if state != "unknown" and done is not None and total:
+        pend = max(0, total - done)
+        out["sweep.html"] = f"{done} ok · {pend} pending"
+
+    done, total, state = n("production")
+    if state != "unknown" and done is not None and total:
+        out["combined.html"] = f"{done} of {total} at 100 ns"
+
+    return out

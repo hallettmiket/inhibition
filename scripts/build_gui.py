@@ -44,6 +44,9 @@ from shared import run_paths as rp                  # noqa: E402
 from shared import pipeline_schematic as schematic   # noqa: E402
 
 log = logging.getLogger("build-gui")
+#: Marks a page as an awaiting-stage stand-in, so it can be refreshed
+#: with current counts and so a REAL page is never mistaken for one.
+_PLACEHOLDER = "<!--murmurent:awaiting-stage-->"
 OUT = rp.reports_dir()
 
 #: The palette is the ranking view's, verbatim, because "uniform" is the whole
@@ -219,7 +222,13 @@ pipeRender(); setInterval(pipeRender,10000);
 '''
 
 
-def home(counts: dict, s: dict, worklist: Path | None) -> str:
+def home(counts: dict, s: dict, worklist: Path | None,
+         nav: dict | None = None) -> str:
+    # TWO DIFFERENT DICTS. `counts` keys the funnel CARDS
+    # (molecules/modes); `nav` keys the STEPPER by page href. Passing
+    # the card dict as the nav is why Home was the one page whose
+    # stepper showed no counts -- `gs.nav` looked up 'sweep.html' in a
+    # dict that had never heard of it and correctly omitted it.
     from shared import target_config as tc
     c = tc.load()
     t, dk, sp = c.get("target", {}), c.get("docking", {}), c.get("splitting", {})
@@ -331,8 +340,8 @@ def home(counts: dict, s: dict, worklist: Path | None) -> str:
             ("salt", f"{md.get('salt_molar')} M"),
             ("docked species", ch.get("docked_species"))]),
     ]
-    return _page("DWI covalent screen — Home", "index.html", counts,
-                 "".join(body), extra_js=PIPE_JS)
+    return _page("DWI covalent screen — Home", "index.html",
+                 nav or {}, "".join(body), extra_js=PIPE_JS)
 
 
 def sweep_json(d, s, worklist: Path | None) -> str:
@@ -372,11 +381,12 @@ def main() -> None:
     rk = mr.gather()
     counts = {"molecules": f"{rk.parent_ident.nunique():,}" if not rk.empty else "—",
               "modes": f"{len(rk):,}" if not rk.empty else "—"}
-    nav_counts = {
-        "modes.html": f"{len(rk):,} modes" if not rk.empty else "",
-        "sweep.html": f"{s['ok']} ok · {s['pending']} pending",
-    }
-    (OUT / "index.html").write_text(home(counts, s, wl))
+    # ONE SOURCE. This built its own from `sweep_state.summary()` while three
+    # other builders each built theirs differently -- and one of those read an
+    # unscoped path and showed a previous run's numbers. See
+    # gui_shell.step_counts().
+    nav_counts = gs.step_counts()
+    (OUT / "index.html").write_text(home(counts, s, wl, nav_counts))
     # SWEEP.HTML IS NOT WRITTEN HERE ANY MORE. `scripts/sweep_combine.py` owns
     # it and builds it on the MD results shell, which is what @tt8804 asked for.
     # Both scripts used to write the file, so whichever ran last won -- running
@@ -425,9 +435,20 @@ def main() -> None:
          "measurements to compare them against."),
     ):
         p = OUT / href
+        # REWRITTEN WHILE IT IS STILL A PLACEHOLDER. Writing only when absent
+        # froze the stepper counts at whatever they were the first time the file
+        # appeared -- combined.html sat at "0 ok · 0 pending" from the night
+        # before while the three pages beside it read the current numbers, which
+        # is the same disagreement this change set out to remove. The marker is
+        # what the real builders overwrite, so a built page is never clobbered.
         if p.is_file():
-            continue
-        p.write_text(_page(
+            head = p.read_text(errors="replace")[:2000]
+            # The title fallback catches placeholders written before the marker
+            # existed. Without it those pages read as already-built and kept
+            # whatever counts they were born with.
+            if _PLACEHOLDER not in head and "awaiting stage" not in head:
+                continue
+        p.write_text(_PLACEHOLDER + _page(
             f"{label} — awaiting stage", href, nav_counts,
             f"<section class='card'><h2>{label}</h2><p class='muted'>{why}</p>"
             f"<p class='muted'>This page fills in on its own as the run "
