@@ -49,11 +49,21 @@ from shared import report_theme as rt               # noqa: E402
 from shared import md_movie as mov                  # noqa: E402
 from shared import mode_key                         # noqa: E402
 from shared import run_paths as rp        # noqa: E402
+from shared import residence_tier as rtier            # noqa: E402
+from shared import target_config as _tc               # noqa: E402
+
+#: The triage sweep's length, DERIVED. Every one of these strings said "10 ns"
+#: while the sweep has run at 8 ns since D0085 (@tt8804: "update the gui to say
+#: 8 ns sweep not 10"). A length written into prose is a number that stops
+#: tracking the run the first time the spec changes.
+_SWEEP_NS = int(round(_tc.md_sweep_ps() / 1000))
 
 log = logging.getLogger("mdprio-report")
 MD = rp.residence_work()
 OUT = sout.Topic("blacksmith", rp.reports_topic())
-BOUND_NM = 1.0            # the residence criterion: ligand RMSD <= 1.0 nm
+# The residence criterion: ligand RMSD <= 1.0 nm. Imported rather than redefined
+# so the tier rule and this page agree by construction.
+BOUND_NM = rtier.BOUND_NM
 
 #: BPMD occupancy each molecule was selected on (docs/prereg_md_priority.md).
 #: Carried here so a report can state what was PREDICTED for this molecule
@@ -579,8 +589,16 @@ def main() -> None:
                 f"Contacts could not be computed: <code>{exc}</code>. The "
                 "residence numbers above are unaffected.", "warn")
 
-    verdict = ("Held" if not res["dissociated"] else
-               f"Left at {res['left_at_ns']:.0f} ns")
+    # THREE TIERS, NOT A PASS/FAIL (@tt8804: "held in pocket, held but not
+    # optimal and below max .35 is optimal"). Against 1.0 nm alone this page
+    # could not tell a ligand pinned at the warhead from one rattling around the
+    # site; against 0.35 alone it called a run that never left a failure.
+    # shared/residence_tier owns the rule, so this page and the combined rail
+    # cannot drift on what "optimal" means.
+    tier_key = rtier.tier(res.get("rmsd_max_nm"), res.get("dissociated"),
+                          res.get("residence_frac"))
+    verdict = (f"Left at {res['left_at_ns']:.0f} ns" if tier_key == "left"
+               else rtier.label(tier_key).capitalize())
 
     # The NAC series needs the fitted movie frames, so it comes after the movie.
     nacs = (nac_series(args.candidate, rep, mpdb, total_ns)
@@ -616,10 +634,11 @@ def main() -> None:
             rt.eyebrow(f"PRODUCTION MD · {int(total_ns)} NS"), facts),
         (f'<div class="structrow"><div class="structbox">{struct_svg}</div>'
          f'<div class="structnote"><b>{cls or "unclassified"}</b>'
-         + (f' &middot; attack-ready {sweep_ar*100:.1f}% of the 10 ns sweep'
+         + (f' &middot; attack-ready {sweep_ar*100:.1f}% of the {_SWEEP_NS} ns sweep'
             f' over {sweep_v} sustained visits' if sweep_ar is not None else '')
          + '</div></div>') if struct_svg else "",
-        f'<p>{rt.pill("Held" if not res["dissociated"] else "Left")} '
+        f'<style>{rtier.TIER_CSS}</style>'
+        f'<p>{rtier.badge(tier_key)} '
         f'Mean RMSD {res["rmsd_mean_nm"]:.3f} nm &middot; max '
         f'{res["rmsd_max_nm"]:.3f} nm &middot; final {res["rmsd_final_nm"]:.3f} nm.</p>',
         f'<details class="panel"><summary>RMSD plots'
@@ -638,10 +657,10 @@ def main() -> None:
          f'</summary><div class="pbody">{inter_block}</div></details>')
         if inter_block else "",
         '<details class="panel"><summary>How it was selected, and what that is worth'
-        '<span class="hint">the 10 ns triage sweep — not a result</span></summary>'
+        f'<span class="hint">the {_SWEEP_NS} ns triage sweep — not a result</span></summary>'
         '<div class="pbody">',
         (('<table class="kv"><tbody>'
-          f'<tr><th>attack-ready, 10 ns sweep</th><td>{sweep_ar*100:.1f}%</td></tr>'
+          f'<tr><th>attack-ready, {_SWEEP_NS} ns sweep</th><td>{sweep_ar*100:.1f}%</td></tr>'
           f'<tr><th>sustained visits</th><td>{sweep_v}</td></tr>'
           '</tbody></table>'
           '<p>These are the numbers that decided this molecule earned a 100 ns '
@@ -649,7 +668,7 @@ def main() -> None:
           'result is the 100&nbsp;ns engagement and RMSD above. D0075 and D0076 '
           'record what this sweep does and does not order correctly.</p>')
          if sweep_ar is not None else
-         '<p>No 10 ns sweep reading for this molecule.</p>'),
+         f'<p>No {_SWEEP_NS} ns sweep reading for this molecule.</p>'),
         f"<p>It was selected on a BPMD occupancy of "
         f"<strong>{rt.num(occ, '{:.3f}')}</strong>, against a crystallographic "
         f"median of {REF_MEDIAN:.3f}. That number is what the pre-registration "
@@ -669,6 +688,23 @@ def main() -> None:
         "</div></details>",
     ]
     dest = Path(args.out) if args.out else OUT.dir / f"{args.candidate}.html"
+    # THE TIER TRAVELS WITH THE PAGE. The md100 row carries rmsd max but not
+    # whether the ligand ever came back, and max alone cannot separate "crossed
+    # 1.0 nm and returned" from "left" -- t4_071099f4034c_m1 is 4 frames out of
+    # 10,001 above the line and is held. Rather than have the rail re-parse
+    # rmsd.xvg and re-derive the rule, this run writes what it already computed
+    # and the rail reads it. A run with no sidecar is shown as not scored, not
+    # as left.
+    (dest.with_suffix(".tier.json")).write_text(json.dumps({
+        "ident": args.candidate, "tier": tier_key,
+        "label": rtier.label(tier_key), "colour": rtier.colour(tier_key),
+        "rmsd_mean_nm": res.get("rmsd_mean_nm"),
+        "rmsd_max_nm": res.get("rmsd_max_nm"),
+        "residence_frac": res.get("residence_frac"),
+        "dissociated": res.get("dissociated"),
+        "left_at_ns": res.get("left_at_ns"),
+        "bound_nm": rtier.BOUND_NM, "optimal_nm": rtier.optimal_nm(),
+    }, indent=2))
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"

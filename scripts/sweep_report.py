@@ -35,6 +35,11 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts"))
 
 from shared import md_movie as mov                        # noqa: E402
+from shared import target_config as _tc                   # noqa: E402
+
+#: Sweep length, derived -- these strings said 10 ns while the sweep has run
+#: at 8 ns since D0085 (@tt8804: "update the gui to say 8 ns sweep not 10").
+_SWEEP_NS = int(round(_tc.md_sweep_ps() / 1000))
 from shared import report_theme as rt                     # noqa: E402
 from shared import run_paths as rp                  # noqa: E402
 
@@ -118,7 +123,7 @@ def main() -> None:
         except Exception as exc:                           # noqa: BLE001
             movie_block = rt.callout(
                 "Movie unavailable",
-                f"The 10 ns trajectory rendered no viewer: <code>{html.escape(str(exc))}</code>. "
+                f"The {_SWEEP_NS} ns trajectory rendered no viewer: <code>{html.escape(str(exc))}</code>. "
                 "The readings below are unaffected — they come from the trajectory "
                 "directly.", "warn")
 
@@ -218,14 +223,19 @@ def main() -> None:
         (f'<details class="panel" open><summary>Trajectory plots'
          f'<span class="hint">ligand RMSD with its maximum, and warhead–Cys113 '
          f'distance against the attack window</span></summary><div class="pbody">'
-         f'<img src="data:image/png;base64,{img}" alt="10 ns trajectory"></div>'
+         f'<img src="data:image/png;base64,{img}" alt="{_SWEEP_NS} ns trajectory"></div>'
          f'</details>') if img else "",
-        (f'<details class="panel"><summary>10 ns movie'
+        # OPEN BY DEFAULT (@tt8804: "update the sweep results page to show the md
+        # movies"). The movie was built for all 147 modes and embedded in every
+        # page -- but inside a collapsed <details>, while Structure, plots and
+        # readings all open. A panel nobody expands is a panel nobody knows is
+        # there, which is indistinguishable from one that was never built.
+        (f'<details class="panel" open><summary>{_SWEEP_NS} ns movie'
          f'<span class="hint">surface by charge, ligand in yellow, CA-fitted</span>'
          f'</summary><div class="pbody">{movie_block}</div></details>')
         if movie_block else "",
         '<details class="panel" open><summary>Sweep readings'
-        '<span class="hint">what the 10 ns run measured</span></summary>'
+        f'<span class="hint">what the {_SWEEP_NS} ns run measured</span></summary>'
         f'<div class="pbody">{sweep_tbl}</div></details>',
         '<details class="panel"><summary>How it was selected'
         '<span class="hint">the docked numbers — provenance, not evidence</span>'

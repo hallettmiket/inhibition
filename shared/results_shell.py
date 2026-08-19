@@ -72,7 +72,16 @@ ROW_CSS = """\
  text-overflow:ellipsis;flex:1}
 .tag{font-size:9px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;
  padding:1px 6px;border-radius:99px;flex:none}
+/* THREE TIERS (@tt8804: "should show optimal, held, left" / "red green
+   yellow"). Green used to be the only positive tag, so a molecule that stayed
+   in the pocket but moved around inside it had to be coloured as a failure --
+   all four finished runs read LEFT while two never dissociated. Yellow is that
+   middle state. Each tag also carries its word: these tables are pass/fail and
+   are read by people with red-green deficiency, so colour is the second
+   signal, never the only one. */
+.t-optimal{background:#e6f4ee;color:var(--good)}
 .t-held{background:#e6f4ee;color:var(--good)}
+.t-unstable{background:#fdf2e0;color:var(--warn)}
 .t-left{background:#fbeae8;color:var(--bad)}
 /* Controls read as a different KIND of row, not a better or worse one: an amber
    accent and a monospace badge instead of a structure thumbnail, because the
@@ -124,7 +133,9 @@ h1{margin:0;font-size:.86rem;font-weight:600;letter-spacing:-.01em;color:var(--n
 .ohd{font-family:var(--mono);font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;
  font-weight:700;padding:11px 14px 7px;border-bottom:1px solid var(--rule);
  position:sticky;top:0;z-index:2}
+.o-optimal{background:#e6f4ee;color:var(--good)}
 .o-held{background:#e6f4ee;color:var(--good)}
+.o-unstable{background:#fdf2e0;color:var(--warn)}
 .o-left{background:#fbeae8;color:var(--bad)}
 .o-ctl{background:#fdf0dc;color:#8a5a00}
 .o-pend{background:var(--raise);color:var(--muted)}

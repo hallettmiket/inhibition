@@ -101,9 +101,16 @@ def test_one_bar_gates_sweep_production_and_promotion():
 
 
 def test_the_spec_resolves_to_the_decisions_on_record():
-    """D0085 (8 ns / 0.35 nm) and D0081 (T_4 only), read back through the API
-    the runners now use. A config edit that contradicts a decision fails here."""
-    assert tc.md_sweep_ps() == 8_000.0
+    """D0087 (5 ns), D0085 (0.35 nm) and D0081 (T_4 only), read back through the
+    API the runners now use. A config edit that contradicts a decision fails
+    here.
+
+    The sweep length was 8 ns under D0085 and is 5 ns under D0087, which amends
+    it on length alone: the optimum was measured as a plateau (bootstrap 95% CI
+    4.3-9.5 ns) and truncation is one-sided, so a shorter window can only admit
+    extras, never drop a survivor. The BAR is untouched.
+    """
+    assert tc.md_sweep_ps() == 5_000.0
     assert tc.md_survivor_rmsd_nm() == 0.35
     assert tc.md_production_ps() == 100_000.0
     assert list(tc.get("run.tiers")) == ["T4"]

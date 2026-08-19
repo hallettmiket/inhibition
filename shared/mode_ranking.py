@@ -451,7 +451,7 @@ __STEPNAV__
    <div id="vempty" class="note">This is the <strong>ranking</strong> view: every
    molecule and every mode the screen scored, simulated or not. In the pipeline's
    real order it comes first — you read the ranked list and look at the poses, then
-   choose what goes to the 10&nbsp;ns sweep. It was built after the fact, which is
+   choose what goes to the triage sweep. It was built after the fact, which is
    how <a href="https://github.com/hallettmiket/inhibition/issues/53">#53</a> went
    unnoticed: nothing in the project had ever shown the per-mode ranking it
    computes.</div>

@@ -209,6 +209,15 @@ def write_sdf(mol, order: list[int], dest: Path,
     n = 0
     for rank, i in enumerate(order, 1):
         mol.SetProp("pose_rank", str(rank))
+        # THE KEY BACK TO poses_s*.csv (#76). `pose_rank`/`energy_rank` are both
+        # the ENUMERATION POSITION, which for the all-poses file is a position in
+        # label order -- not an energy rank, and not comparable with the
+        # per-pose table, which numbers all 500 conformers. So the cloud on disk
+        # could not be joined to its own measurements: joining on energy_rank
+        # paired the wrong rows, and the ordinal fallback agreed on `mode` for
+        # 19.8% of poses. The conformer id is the thing that identifies a pose
+        # everywhere else; write it down.
+        mol.SetProp("pose_idx", str(int(i)))
         mol.SetProp("energy_rank", str(rank))
         # The mode this pose represents, so a downstream reader selects by
         # IDENTITY rather than by file position -- the same rule pose_rank
@@ -244,6 +253,15 @@ def gnina_scores(receptor: Path, sdf: Path, gpu: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _seed_for(args) -> int | None:
+    """The docking seed for this run: the flag if given, else config, and -1
+    means "seed from the clock" so a replicate experiment can ask for one."""
+    v = args.seed if getattr(args, "seed", None) is not None else _cfg("docking.seed", None)
+    if v is None or int(v) < 0:
+        return None
+    return int(v)
+
+
 def _cfg(key: str, default):
     """One target setting, tolerant of a missing config, strict about a key."""
     try:
@@ -255,7 +273,8 @@ def _cfg(key: str, default):
 
 def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         do_gnina: bool, all_poses: bool = False,
-        sub_split: int = psub.DEFAULT_MAX_SUB) -> tuple[pd.DataFrame, list[dict]]:
+        sub_split: int = psub.DEFAULT_MAX_SUB,
+        seed: int | None = None) -> tuple[pd.DataFrame, list[dict]]:
     """Dock one candidate; return (per-pose rows, ONE AGGREGATE ROW PER MODE).
 
     2.2.0 (@tt8804): a binding mode is a candidate, not a property of one. The
@@ -271,7 +290,7 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
     try:
         best = None
         for j, lig in enumerate(ns.prepare_ligand(cand, work / "lig.pdbqt")):
-            dlg = ns.dock(lig, rec_dir, work / f"c{j}", nrun, gpu)
+            dlg = ns.dock(lig, rec_dir, work / f"c{j}", nrun, gpu, seed=seed)
             # ONE rebuild, ONE reactive-atom match, shared by the criterion and
             # the clustering, so they can never describe different atoms.
             mol_j, match_j = ns.rebuild_and_match(dlg, cand)
@@ -472,11 +491,17 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         if all_poses:
             ALL_POSE_DIR.mkdir(parents=True, exist_ok=True)
             adest = ALL_POSE_DIR / f"{cand.ident}.sdf"
-            if not adest.exists():
-                order = [int(i) for i in np.argsort(labels, kind="stable")
-                         if labels[i] in mode_ids]
-                write_sdf(mol, order, adest,
-                          modes=[int(labels[i]) for i in order])
+            # ALWAYS REWRITTEN. This was `if not adest.exists()`, so a
+            # re-screened molecule kept the PREVIOUS run's cloud beside the
+            # current run's table -- different pose sets, different labels, and
+            # nothing saying so. On nac_v5 the two disagree on how many poses
+            # were mode-assigned (e.g. 418 in the SDF against 405 in the table),
+            # which is #44's rule -- the cloud must come from the same run that
+            # produced the scores -- broken by a cache check.
+            order = [int(i) for i in np.argsort(labels, kind="stable")
+                     if labels[i] in mode_ids]
+            write_sdf(mol, order, adest,
+                      modes=[int(labels[i]) for i in order])
 
         if do_gnina:
             tmp = work / "modes.sdf"
@@ -528,6 +553,12 @@ def main() -> None:
     # Defaults come from config/target.yaml so the screen's settings and the
     # recorded decisions cannot drift apart; an explicit flag still wins.
     ap.add_argument("--nrun", type=int, default=_cfg("docking.n_runs", 500))
+    # SEED OVERRIDE. `docking.seed` pins the cloud so a run is reproducible
+    # (#77) -- which means a replicate experiment, whose whole point is
+    # INDEPENDENT draws, would otherwise get five identical clouds. Pass a
+    # distinct seed per replicate, or -1 for clock behaviour.
+    ap.add_argument("--seed", type=int, default=None,
+                    help="override docking.seed; -1 seeds from the clock")
     ap.add_argument("--chunk", type=int, default=100)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--no-gnina", action="store_true")
@@ -640,7 +671,7 @@ def main() -> None:
     for i, c in enumerate(cands, 1):
         rows, aggs = one(c, rec_dir, Path(plain_rec), args.nrun, args.gpu,
                          not args.no_gnina, all_poses=args.all_poses,
-                         sub_split=args.sub_split)
+                         sub_split=args.sub_split, seed=_seed_for(args))
         # `one` returns ONE ROW PER MODE now, so a molecule contributes several
         # candidates. `done` still counts MOLECULES -- resume and progress are
         # per-molecule, and counting modes would make the chunk size depend on

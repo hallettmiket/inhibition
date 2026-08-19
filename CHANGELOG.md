@@ -18,6 +18,61 @@ Every entry below states whether prior numbers survive it.
 
 ## 3.1.0 — in progress
 
+### 2026-08-19 — the run completed, and the modes it ranked are mixtures
+
+**The screen finished**: 147/147 triaged, 15/15 at 100 ns — 5 held, 1 held
+unstably, 9 left. Then the modes underneath it did not survive inspection.
+
+**MAJOR, pending.** Every per-mode number in `nac_v5` — `viable_fraction`,
+`enrichment`, `conditional_eb` — is measured over a group that is not one pose.
+Median mode spans 3.51 A, 42% have a viable fraction between 0.1 and 0.9, and
+the largest holds 137 poses across 9.3 A. The cause is circular: the pipeline
+clusters on the reactive atom's position and direction, which ARE the score's
+distance and angle terms (D0088). The 100 ns trajectories stand; which pose
+earned each one was chosen by this machinery.
+
+Fixed outright:
+
+- **The screen was not reproducible.** AutoDock-GPU was invoked with no `--seed`,
+  so every run drew a different cloud — v4 and v5 ranked the same 504 molecules
+  at rho = +0.43, agreeing on the winning sub-mode 22.6% of the time.
+  `docking.seed: 42` (#77).
+- **The persisted pose cloud could not be joined to its own table.** The SDF
+  numbered poses by position and was never rewritten on a re-screen, so it
+  described a different run than the measurements beside it. `pose_idx` is now
+  written (#76).
+- **AutoDock-GPU fails silently above ~2,000 runs**: at 5,000 it exits -6 with
+  "stack smashing detected" *and still writes a .dlg*; at 10,000 it reports
+  failure and exits 0. `dock()` now verifies exit code, output file and log.
+- **The empirical-Bayes prior did nothing.** Method of moments fitted it at 2.17
+  poses on this heterogeneous library — a prior worth two poses shrinks nothing.
+  A floor of 10 moves rho(score, mode_size) from +0.143 to -0.016
+  (`ranking.eb_prior_min_strength`).
+- **The GUI reported the wrong run.** The rail took its headline number from the
+  md CSV and its verdict from the trajectory sidecar; with replicates those were
+  different runs, so one row read "6.324 nm max / HELD". Both now come from one
+  place, ranked on mean RMSD with max beside it.
+
+Spec changes:
+
+- **Triage sweep 8 ns → 5 ns** (D0087). Inside D0085's own bootstrap CI
+  (4.3–9.5 ns), and truncation is one-sided, so it can only admit extras.
+- **The 100 ns "optimal" bar is 0.45 nm** and is now separate from the 0.35 nm
+  sweep bar. They were the same number, which made "optimal" unreachable at
+  100 ns by construction.
+- **Four residence tiers**: optimal / held / held-unstable / left, the last split
+  by a residence floor so a run that travels 5.8 nm and returns is not reported
+  beside one that never moved.
+
+Built and **not adopted**: `shared/pose_cluster.py` — one clustering step on pose
+similarity alone (HDBSCAN), attack geometry used only to rank. The only rule
+measured that never produces a bag (largest mode 14 poses, widest 3.91 A), and it
+places the validated pose in an 8-pose group 1.5 A wide against the shipped
+rule's 108 poses across 8 A. Held at `proposed`: 29% of poses become noise and
+the validated pose was lost in 3 of 30 replicates (#78); adopting it requires a
+re-screen (#79).
+
+
 **MAJOR: no 3.0.0 number survives this release, and 3.0.0 never closed.** The
 re-run is on a new topic (`nac_v5`) with a different molecule set, so nothing
 from Galena is quotable beside it:

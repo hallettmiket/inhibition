@@ -74,6 +74,17 @@ def _steps() -> list[tuple[str, str, str]]:
     ]
 
 
+#: NOT a step, but reachable from every page (@tt8804: "lets see the how it
+#: works slides. not working with the link"). The deck was built, served and
+#: correct the whole time -- it simply had no link outside the MD results
+#: toolbar, so from Home, Ranking or Sweep there was no way in, and a page
+#: nobody can navigate to is indistinguishable from one that is broken.
+#: It stays out of STEPS because the stepper draws chevrons between its items:
+#: appended there, an explainer would read as the pipeline's final stage.
+ASIDE = ("pipeline.html", "How it works",
+         "the screen explained, one stage per slide")
+
+
 #: Kept as a module attribute because three templates and a test read it by
 #: name. It is built at import from the config, so it cannot disagree with the
 #: run -- but anything that needs it after a config change should call
@@ -93,6 +104,10 @@ CSS = """
 #steps a:not(:first-child)::before{content:"";position:absolute;left:6px;top:50%;
  width:7px;height:7px;border-top:2px solid var(--rule);border-right:2px solid var(--rule);
  transform:translateY(-50%) rotate(45deg)}
+/* The explainer is not a stage: it sits apart at the end of the row, takes no
+   chevron, and does not continue the funnel's numbering. */
+#steps a.aside{margin-left:auto;padding-left:20px;border-left:1px solid var(--rule)}
+#steps a.aside::before{display:none}
 #steps a .sl{font:600 12.5px var(--sans);letter-spacing:.01em}
 #steps a .sd{font:400 10px var(--sans);opacity:.85;max-width:30ch;overflow:hidden;
  text-overflow:ellipsis}
@@ -124,6 +139,11 @@ def nav(current: str, counts: dict | None = None) -> str:
             + (f'<span class="sn">{n}</span>' if n else
                f'<span class="sd">{desc}</span>')
             + '</a>')
+    href, label, desc = ASIDE
+    cls = "aside on" if href == current else "aside"
+    out.append(f'<a href="{href}" class="{cls}" title="{desc}">'
+               f'<span class="sl">{label}</span>'
+               f'<span class="sd">{desc}</span></a>')
     out.append('</nav>')
     return "".join(out)
 

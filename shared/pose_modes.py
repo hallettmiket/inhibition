@@ -155,8 +155,37 @@ def _dbscan(dist: np.ndarray, eps: float, min_samples: int) -> np.ndarray:
     return labels
 
 
+def _complete_linkage(dist: np.ndarray, diameter: float,
+                      min_samples: int) -> np.ndarray:
+    """Cluster so NO two members are further apart than `diameter`. -1 is noise.
+
+    The alternative to DBSCAN, and the difference is the whole point (D0086).
+    DBSCAN bounds the LINK: A-B-C-D each within `eps` of the next is one cluster
+    however wide the chain grows. Complete linkage bounds the DIAMETER: the
+    merge criterion is the FURTHEST pair, so a cluster is only formed if every
+    member is within the tolerance of every other. Same number, enforced.
+
+    Clusters below `min_samples` are labelled noise, matching DBSCAN's treatment
+    so the two are swappable without changing what "unassigned" means.
+    """
+    from scipy.cluster.hierarchy import fcluster, linkage
+    from scipy.spatial.distance import squareform
+    n = len(dist)
+    if n < 2:
+        return np.zeros(n, dtype=int) if n else np.empty(0, dtype=int)
+    z = linkage(squareform(dist, checks=False), method="complete")
+    lab = fcluster(z, diameter, criterion="distance")
+    out = np.full(n, -1, dtype=int)
+    for c in np.unique(lab):
+        m = lab == c
+        if int(m.sum()) >= min_samples:
+            out[m] = int(c)
+    return out
+
+
 def split(feat: np.ndarray, eps: float = DEFAULT_EPS,
-          min_population_frac: float = MIN_POPULATION_FRAC) -> np.ndarray:
+          min_population_frac: float = MIN_POPULATION_FRAC,
+          method: str = "dbscan") -> np.ndarray:
     """Mode label per pose; -1 means noise. Count is measured, not requested.
 
     Density-based, so the number of modes falls out of the pose cloud rather
@@ -164,12 +193,23 @@ def split(feat: np.ndarray, eps: float = DEFAULT_EPS,
     has, so the same rule applies whether it was docked 200 times or 2,000 -- a
     fixed count would make a molecule look more multi-modal simply for having
     been sampled harder.
+
+    `method="complete"` swaps the density rule for complete linkage at the same
+    `eps`, read as a DIAMETER rather than a neighbour radius -- see D0086 and
+    `_complete_linkage`. The default is unchanged until the comparison in
+    exp/3_linkage is decided.
     """
     n = len(feat)
     if n == 0:
         return np.empty(0, dtype=int)
     min_samples = max(3, int(round(min_population_frac * n)))
-    lab = _dbscan(distances(feat), eps, min_samples)
+    if method == "complete":
+        lab = _complete_linkage(distances(feat), eps, min_samples)
+    elif method == "dbscan":
+        lab = _dbscan(distances(feat), eps, min_samples)
+    else:
+        raise ValueError(f"unknown split method {method!r}; "
+                         "expected 'dbscan' or 'complete'")
     # Relabel so 0 is the most populated mode, 1 the next, and so on. Without
     # this, mode ids are an artefact of scan order and two runs of the same
     # molecule would disagree about which mode is "mode 0".

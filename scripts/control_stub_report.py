@@ -44,6 +44,11 @@ log = logging.getLogger("control-stub")
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
 REPORTS = rp.reports_dir()               # this run only (#74)
 BOUND_NM = 1.2
+#: Sweep length, derived -- these strings said "10 ns" while the sweep has
+#: run at 8 ns since D0085 (@tt8804).
+import sys as _s; _s.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from shared import target_config as _tc  # noqa: E402
+_SWEEP_NS = int(round(_tc.md_sweep_ps() / 1000))
 
 
 def md_row(ident: str) -> pd.Series | None:
@@ -104,8 +109,8 @@ def main() -> None:
         if k in m and pd.notna(m[k]):
             rows.append((lbl, f"{float(m[k]):.3f} nm"))
     if s is not None:
-        rows.append(("10 ns sweep, attack-ready", f"{float(s.frac_attack_ready):.4f}"))
-        rows.append(("10 ns sweep, sustained visits", f"{float(s.n_visits):.0f}"))
+        rows.append((f"{_SWEEP_NS} ns sweep, attack-ready", f"{float(s.frac_attack_ready):.4f}"))
+        rows.append((f"{_SWEEP_NS} ns sweep, sustained visits", f"{float(s.n_visits):.0f}"))
 
     # THE SAME LAYOUT AS EVERY OTHER REPORT (@tt8804). A control that renders
     # differently from a candidate is harder to compare against, which is the only
@@ -118,7 +123,7 @@ def main() -> None:
                   (f"{rmax:.3f} nm", "max ligand RMSD")]
     if s is not None:
         mast_facts.append((f"{float(s.frac_attack_ready)*100:.1f}%  ·  "
-                           f"{float(s.n_visits):.0f} visits", "attack-ready (10 ns)"))
+                           f"{float(s.n_visits):.0f} visits", f"attack-ready ({_SWEEP_NS} ns)"))
     mast_facts.append((f"{float(m['production_ps']) / 1000:.0f} ns", "trajectory"))
 
     stand = (f"{'Held' if held else 'Left'}. Engaged the target in "
@@ -128,7 +133,7 @@ def main() -> None:
     sweep_panel = ""
     if s is not None and float(s.n_visits) == 0:
         sweep_panel = (
-            '<details class="panel"><summary>Rejected by the 10 ns sweep'
+            f'<details class="panel"><summary>Rejected by the {_SWEEP_NS} ns sweep'
             '<span class="hint">and then produced the result above</span></summary>'
             '<div class="pbody"><p>'
             f"{float(s.frac_attack_ready):.4f} attack-ready, "

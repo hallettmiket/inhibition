@@ -224,15 +224,49 @@ def prepare_ligand(cand: Candidate, path: Path) -> list[Path]:
     return out
 
 
-def dock(lig: Path, rec_dir: Path, work: Path, nrun: int, gpu: str) -> Path:
+def dock(lig: Path, rec_dir: Path, work: Path, nrun: int, gpu: str,
+         seed: int | None = None) -> Path:
+    """One AutoDock-GPU run.
+
+    SEEDED, OR THE SCREEN IS NOT REPRODUCIBLE (#77). AutoDock-GPU's Lamarckian GA
+    seeds from the clock when `--seed` is absent, so every re-run drew a
+    different 500-pose cloud -- and since the mode split and the ranking are
+    deterministic GIVEN the poses, all downstream instability entered here. v4
+    against v5 ranked the same 504 molecules at rho = +0.43, with 22.6% agreeing
+    on the winning sub-mode. gnina rescoring was already seeded (`--seed 42`),
+    which is why this went unnoticed.
+
+    A seed makes a run REPEATABLE. It does not make the answer stable: it fixes
+    whichever draw was taken, and the election instability in D0086 is untouched
+    by it. `seed=None` keeps the old clock behaviour for anyone who wants
+    independent draws -- exp/1_mode_stability needs exactly that.
+    """
     work.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpu)
-    subprocess.run(
-        [str(AUTODOCK), "-C", "1", "--import_dpf", "rec.reactive_config",
-         "--flexres", "rec_flex.pdbqt", "-L", str(lig.resolve()),
-         "--nrun", str(nrun), "--resnam", str((work / "out").resolve())],
-        cwd=rec_dir, check=True, capture_output=True, env=env)
-    return work / "out.dlg"
+    cmd = [str(AUTODOCK), "-C", "1", "--import_dpf", "rec.reactive_config",
+           "--flexres", "rec_flex.pdbqt", "-L", str(lig.resolve()),
+           "--nrun", str(nrun), "--resnam", str((work / "out").resolve())]
+    if seed is not None:
+        cmd += ["--seed", str(int(seed))]
+    r = subprocess.run(cmd, cwd=rec_dir, capture_output=True, text=True, env=env)
+    dlg = work / "out.dlg"
+    # AUTODOCK-GPU FAILS IN TWO WAYS THAT `check=True` DOES NOT CATCH, and both
+    # were reachable by raising --nrun (measured on this build, 2026-08-19):
+    #   nrun=5000   exit -6, "*** stack smashing detected ***" -- AND IT STILL
+    #               WRITES A .dlg, so a caller that only checks for the file
+    #               ingests the output of a process that corrupted its own stack
+    #   nrun=10000  exit 0, "The job was not successful", no .dlg at all
+    # The second is the dangerous shape: a zero exit with no result, which
+    # surfaces later as a FileNotFoundError far from its cause.
+    out = (r.stdout or "") + (r.stderr or "")
+    if r.returncode != 0 or not dlg.is_file() or "not successful" in out:
+        tail = "\n".join(out.strip().splitlines()[-4:])
+        raise RuntimeError(
+            f"autodock_gpu failed for {lig.name} at --nrun {nrun} "
+            f"(exit {r.returncode}, dlg={'present' if dlg.is_file() else 'absent'})."
+            f" A .dlg may exist and still be untrustworthy -- this build corrupts"
+            f" its stack above ~2000 runs.\n{tail}")
+    return dlg
 
 
 def sg_position(dlg: Path) -> np.ndarray:

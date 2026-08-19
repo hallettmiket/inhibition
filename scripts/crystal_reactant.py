@@ -47,6 +47,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import outputs as sout                     # noqa: E402
+from shared import run_paths as rp                     # noqa: E402
 
 log = logging.getLogger("crystal-reactant")
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
@@ -152,7 +153,9 @@ def main() -> None:
         rows.append(rec)
 
     t = pd.DataFrame(rows)
-    dest = sout.Topic("blacksmith", "crystal_controls").write("crystal_reactant", ".csv")
+    # Run-scoped, for the same reason as crystal_controls: written flat, these
+    # rows surfaced on the report rail of every later, unrelated run.
+    dest = sout.Topic("blacksmith", rp.controls_topic()).write("crystal_reactant", ".csv")
     t.to_csv(dest, index=False)
     print("\n" + "=" * 74)
     print("  CRYSTAL REACTANTS — the intact molecule in its crystallographic pose")

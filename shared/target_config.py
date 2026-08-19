@@ -241,9 +241,33 @@ def md_replicates(cfg: dict | None = None) -> int:
 
 
 def md_survivor_rmsd_nm(cfg: dict | None = None) -> float:
-    """Max ligand RMSD that earns the next stage (D0085: 0.35 nm).
+    """Max ligand RMSD in the 8 ns TRIAGE SWEEP that earns a 100 ns run
+    (D0085: 0.35 nm).
 
-    The same number gates the sweep, the 100 ns run and BPMD promotion, because
-    it is the same question at three timescales.
+    This used to gate the sweep, the 100 ns verdict and BPMD promotion alike,
+    "because it is the same question at three timescales". It is not: a ligand
+    explores more in 100 ns than in 8, so the same number that selects tight
+    8 ns poses makes the 100 ns "optimal" tier unreachable. The production bar
+    is `md_production_optimal_rmsd_nm`.
     """
     return float(get("md.sweep_survivor_rmsd_nm", cfg, default=0.35))
+
+
+def md_production_optimal_rmsd_nm(cfg: dict | None = None) -> float:
+    """Max ligand RMSD over a finished 100 ns run that counts as OPTIMAL
+    (@tt8804, 2026-08-18: 0.45 nm).
+
+    Held vs left is decided separately, by the 1.0 nm dissociation criterion in
+    `shared.residence_tier`; this only splits the runs that never left.
+    """
+    return float(get("md.production_optimal_rmsd_nm", cfg, default=0.45))
+
+
+def md_held_residence_floor(cfg: dict | None = None) -> float:
+    """Fraction of frames bound that separates a clean hold from an excursion
+    that came back (@tt8804, 2026-08-18: 0.95).
+
+    Dissociation (`bound_rmsd_nm`) says whether the ligand ever left for good;
+    this says whether it stayed put while it was there.
+    """
+    return float(get("md.held_residence_floor", cfg, default=0.95))

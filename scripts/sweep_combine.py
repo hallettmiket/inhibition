@@ -57,6 +57,10 @@ log = logging.getLogger("sweep-combine")
 B = rp.BLACKSMITH
 REPORTS = rp.reports_dir()
 PAGES = REPORTS / "sweep_pages"
+#: Sweep length, derived -- this legend said 10 ns while the sweep has run
+#: at 8 ns since D0085 (@tt8804).
+from shared import target_config as _tc                   # noqa: E402
+_SWEEP_NS = int(round(_tc.md_sweep_ps() / 1000))
 
 
 def main() -> None:
@@ -202,7 +206,7 @@ def main() -> None:
 <main>
  <div id="rail">
   {rs.SEARCH_HTML}
-  <div class="legend">ranked by <b>max ligand RMSD</b> over the 10&nbsp;ns run,
+  <div class="legend">ranked by <b>max ligand RMSD</b> over the {int(_SWEEP_NS)}&nbsp;ns run,
    lowest first &mdash; how far the molecule ever got from where it started, the
    same headline the 100&nbsp;ns results page ranks on. <b>held</b> means it never
    exceeded {bound:.2f}&nbsp;nm. Attack-ready % is shown beside it as the triage

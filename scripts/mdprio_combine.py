@@ -22,7 +22,7 @@ at is loaded. The originals stay individually openable.
 THE COMPARISON TABLE IS THE POINT. Flipping between four reports to remember which
 molecule was 50% attack-ready is the work this is meant to remove, so the numbers
 that decide the shortlist sit above the viewer where they can be read together:
-the 10 ns sweep readings, the 100 ns engagement, and which binding MODE was
+the triage-sweep readings, the 100 ns engagement, and which binding MODE was
 actually elevated -- that last one because a molecule promoted on its minority
 mode is a different claim from one promoted on its dominant mode.
 """
@@ -49,10 +49,43 @@ from shared import mode_ranking as moderank        # noqa: E402
 from shared import mode_key                        # noqa: E402
 from shared import target_config as tc             # noqa: E402
 from shared import run_paths as rp                  # noqa: E402
+from shared import residence_tier as _rtier         # noqa: E402
 
 log = logging.getLogger("mdprio-combine")
-#: Set from config in main(); see D0085.
+#: Set from config in main(); see D0085. The OPTIMAL tier, not the dissociation
+#: bar -- residence_tier owns the distinction.
 _HELD_BAR = 0.35
+#: The 100 ns OPTIMAL bar -- deliberately not the sweep bar above.
+_OPT_BAR = _rtier.optimal_nm()
+#: The dissociation criterion, imported so the legend cannot contradict the rule.
+_BOUND_NM = _rtier.BOUND_NM
+
+
+def _scored(ident: str) -> dict | None:
+    """This run's own scoring: the tier AND the RMSD it was scored on.
+
+    ONE TRAJECTORY, ONE ROW. This returned only the tier, and the rail took its
+    headline number from the md CSV instead -- harmless until a molecule had
+    more than one 100 ns run. Six do: the CSV carries three replicate rows each
+    while the sidecar describes whichever trajectory is on disk, so the rail
+    printed replicate 1's 0.410 nm beside replicate 3's verdict, and one row
+    read "6.324 nm max / HELD". Each half was true of a different run, which is
+    worse than either being wrong.
+
+    Returns None when the run has no sidecar, and the caller shows "not scored".
+    Guessing a tier from rmsd max would reintroduce the bug this replaces.
+    """
+    p = rp.reports_dir() / f"{ident}.tier.json"
+    if not p.is_file():
+        return None
+    try:
+        d = json.loads(p.read_text())
+        if "tier" not in d:
+            raise KeyError("tier")
+        return d
+    except Exception as exc:                               # noqa: BLE001
+        log.warning("%s: unreadable tier sidecar: %s", ident, exc)
+        return None
 B = rp.BLACKSMITH
 REPORTS = rp.reports_dir()
 
@@ -283,7 +316,14 @@ def _controls() -> list[dict]:
     silently vanished from the page would be indistinguishable from one that was
     never run.
     """
-    T = sout.Topic("blacksmith", "crystal_controls")
+    # RUN-SCOPED, LIKE EVERY OTHER TOPIC (@tt8804: "get rid of the yellow
+    # controls, they dont belong in this version"). This read a flat
+    # `crystal_controls` directory, so nac_v5 showed eight controls no stage of
+    # nac_v5 produced -- among them xtal_6VAJ and rx_6VAJ, built against the
+    # receptor 3IKD replaced and every measurement from which was invalidated.
+    # A control is evidence about one screen against one receptor; carried
+    # across runs it is decoration that reads as evidence.
+    T = sout.Topic("blacksmith", rp.controls_topic())
     out: list[dict] = []
     swa = _sweep_all()
     swi = swa.set_index("parent_ident") if not swa.empty else pd.DataFrame()
@@ -337,6 +377,8 @@ def main() -> None:
     from shared import target_config as _tc
     global _HELD_BAR
     _HELD_BAR = float(_tc.get("md.sweep_survivor_rmsd_nm", default=0.35))
+    global _OPT_BAR
+    _OPT_BAR = _rtier.optimal_nm()
     _SWEEP_NS = float(_tc.get("md.sweep_ps", default=8000)) / 1000.0
     log.info("qualifying bar for a 100 ns hold: %.2f nm; triage %.0f ns (config)",
              _HELD_BAR, _SWEEP_NS)
@@ -444,9 +486,23 @@ def main() -> None:
         # `.loc` on a duplicated index returns a FRAME, and every `g()` below
         # would format a Series into a cell. `_md` now keeps one row per
         # (molecule, mode), so a molecule with two 100 ns modes lands here.
+        # WHICH RUN, WHEN THERE IS MORE THAN ONE. This took the row with the
+        # SMALLEST max RMSD -- written for a molecule with two 100 ns MODES,
+        # where the rows describe different poses. It is the wrong rule for
+        # REPLICATES of one mode, which six molecules now have: picking the
+        # smallest reports each molecule's luckiest seed, which is a cherry-pick
+        # (0.410 nm displayed for a molecule whose three runs were 0.410, 1.716
+        # and 5.765). Prefer the run the sidecar and the plots describe; with no
+        # sidecar take the most recent, never the flattering one.
+        _sc0 = _scored(t)
         if isinstance(m_, pd.DataFrame):
             _k = "explicit_ligand_rmsd_nm_max"
-            m_ = (m_.sort_values(_k).iloc[0] if _k in m_.columns else m_.iloc[0])
+            if _k not in m_.columns:
+                m_ = m_.iloc[-1]
+            elif _sc0 is not None and _sc0.get("rmsd_max_nm") is not None:
+                m_ = m_.iloc[(m_[_k] - float(_sc0["rmsd_max_nm"])).abs().argsort().iloc[0]]
+            else:
+                m_ = m_.iloc[-1]
         if isinstance(s_, pd.DataFrame):
             s_ = s_.iloc[0]
         # WHICH POSE THIS RUN STARTED FROM -- from the run's own row. `pose_mode`
@@ -477,7 +533,7 @@ def main() -> None:
                 return fmt.format(src[key])
             except Exception:                          # noqa: BLE001
                 return str(src[key])
-        # THE 10 ns SWEEP IS TRIAGE, NOT THE RESULT. It exists to choose which
+        # THE TRIAGE SWEEP IS NOT THE RESULT. It exists to choose which
         # molecules earn a 100 ns run. Ranking on it ranks the SELECTION FILTER
         # and not the endpoint -- the same shape as ranking on docking energy,
         # one stage further down. The endpoint is 100 ns target engagement, so
@@ -493,12 +549,26 @@ def main() -> None:
         rmax = None
         if m_ is not None and "explicit_ligand_rmsd_nm_max" in m_ and not pd.isna(m_["explicit_ligand_rmsd_nm_max"]):
             rmax = float(m_["explicit_ligand_rmsd_nm_max"])
-        # THE QUALIFYING BAR, FROM CONFIG (D0085). 0.35 nm -- the same number
-        # the 8 ns sweep uses and the same one BPMD promotion reads, because it
-        # is the same question at a longer timescale. It was hardcoded 1.2 here,
-        # which is the old "did not dissociate" reading and three times looser
-        # than what now earns a molecule anything.
-        held = rmax is not None and rmax < _HELD_BAR
+        # THREE TIERS, FROM THE RUN'S OWN SIDECAR (@tt8804: "should show
+        # optimal, held, left"). The rule lives in shared/residence_tier; the
+        # per-run tier is written beside the report by the run that produced it.
+        #
+        # AND THE NUMBER COMES FROM THE SAME PLACE AS THE TIER. The line above
+        # takes rmax from the md CSV, which holds one row per 100 ns RUN -- three
+        # of them for molecules that were run more than once -- while the sidecar
+        # describes the trajectory actually on disk. Mixing the two put
+        # replicate 1's 0.410 nm next to replicate 3's verdict, and printed
+        # "6.324 nm max / HELD". @tt8804: "plots and numbers are all out of
+        # wack". The sidecar wins whenever it exists, so the rail number, the
+        # tier, and the plots on the molecule's page are all the same run.
+        sc = _scored(t)
+        tier_key = sc["tier"] if sc else None
+        rmean = None
+        if sc is not None and sc.get("rmsd_max_nm") is not None:
+            rmax = float(sc["rmsd_max_nm"])
+        if sc is not None and sc.get("rmsd_mean_nm") is not None:
+            rmean = float(sc["rmsd_mean_nm"])
+        held = tier_key in ("optimal", "held", "unstable")
         has_md = eng is not None
         wcls = str(cls_of.get(par, cls_of.get(t, "unclassified")))
         # A molecule with no 100 ns run cannot be placed on the ranked axis at
@@ -507,10 +577,21 @@ def main() -> None:
         # THE HEADLINE IS WHAT THE RAIL IS SORTED ON (@tt8804, #55): max ligand
         # RMSD over the 100 ns run, lowest first. Engagement moves to the meta
         # line -- still shown, no longer the thing being ordered.
-        headline = (f"{rmax:.3f} nm max" if has_md and rmax is not None
-                    else ("—" if not has_md else f"{eng*100:.0f}% engaged"))
+        # RANKED ON THE MEAN, READ WITH THE MAX (@tt8804: "we rank by mean RMSD
+        # but show max RMSD along with it ... mean/max on the selector").
+        #
+        # The max is ONE FRAME. A molecule that sat still for 99 ns and made a
+        # single excursion was ordered by that excursion -- which is how
+        # t4_cc678a20a3d0_m2 (mean 1.07, max 5.77) sorted below molecules that
+        # were never as tight. The mean is where the ligand actually spent the
+        # run. Both are shown: "how far did it stray" is still worth reading, it
+        # is just not the ordering.
+        headline = (f"{rmean:.3f}/{rmax:.3f} nm"
+                    if has_md and rmean is not None and rmax is not None
+                    else (f"{rmax:.3f} nm max" if has_md and rmax is not None
+                          else ("—" if not has_md else f"{eng*100:.0f}% engaged")))
         # THE SELECTOR CARRIES 100 ns FACTS ONLY (@tt8804, #55): max ligand RMSD,
-        # held/left, engaged %. The 10 ns sweep is triage for deciding what earns
+        # held/left, engaged %. The triage sweep decides what earns
         # a 100 ns run -- it is not a result, and sitting in the rail beside the
         # engagement number it read as a second, competing score. It moves to a
         # table in the viewer, where it is clearly labelled as what selected the
@@ -532,9 +613,10 @@ def main() -> None:
             # cannot be given 0. It gets a sentinel that sorts last, and is in
             # the unranked band anyway.
             f"data-rmax='{(rmax if has_md and rmax is not None else 9999):.6f}' "
+            f"data-rmean='{(rmean if rmean is not None else (rmax if has_md and rmax is not None else 9999)):.6f}' "
             f"data-sweep='{(ar if ar is not None else -1):.6f}' "
             f"data-md='{1 if has_md else 0}' "
-            f"data-held='{1 if held else 0}' "
+            f"data-held='{1 if held else 0}' data-tier='{tier_key or ''}' "
             f"id='b_{html.escape(t)}' onclick=\"show('{html.escape(t)}')\">"
             f"<span class='rk'>{k+1}</span>"
             + (f"<img class='thumb' alt='' src=\"{thumbs.get(t) or thumbs[par]}\">"
@@ -552,12 +634,14 @@ def main() -> None:
                     "cannot be recovered'>mode ?</span>")
             + f"</span>"
             f"<span class='eng{'' if has_md else ' pend'}' "
-            f"title='{'largest ligand RMSD over the 100 ns run — the sort key, lowest first' if has_md else 'no 100 ns run yet — 10 ns triage sweep only'}'>"
+            f"title='{'mean / max ligand RMSD over the 100 ns run — ranked on the mean, lowest first' if has_md else 'no 100 ns run yet — ' + str(int(_SWEEP_NS)) + ' ns triage sweep only'}'>"
             f"{headline}</span></span>"
             f"<span class='l2'><span class='wc'>{html.escape(wcls)}</span>"
             f"<span class='meta'>{meta}</span>"
-            + (f"<span class='tag {'t-held' if held else 't-left'}'>"
-               f"{'held' if held else 'left'}</span>"
+            + ((f"<span class='tag t-{tier_key}'>{_rtier.label(tier_key)}</span>"
+                if tier_key else
+                "<span class='tag t-pend' title='100 ns run finished but no tier "
+                "sidecar — rebuild its report page'>not scored</span>")
                if has_md else "<span class='tag t-pend'>swept</span>")
             + "</span>"
             f"<span class='bar'><i style='width:{max(1.5,(eng if has_md else 0)*100):.1f}%'></i></span>"
@@ -589,9 +673,16 @@ def main() -> None:
             th = thumbs.get(parent)
             pending_rows.append(
                 f"<button class='row pend' data-cls=\"{html.escape(str(cls_of.get(parent,'unclassified')))}\" "
-                f"data-eng='-1' data-rmax='9998' "
+                f"data-eng='-1' data-rmax='9998' data-rmean='9998' "
                 f"data-sweep='{(ar if ar == ar else -1):.6f}' data-md='0' data-held='0' "
-                + (f"data-src='{sweep_pg}' " if has_pg else "")
+                # NEVER POINT THE VIEWER AT A PAGE THAT IS NOT THERE. With no
+                # data-src, show() falls back to `<ident>.html`, which for a
+                # queued molecule does not exist -- so the pane rendered the
+                # server's 404 inside the layout and the GUI read as broken.
+                # sweep.html always exists and carries this mode's 8 ns
+                # evidence, so it is the honest destination while the per-mode
+                # page is missing.
+                + f"data-src='{sweep_pg if has_pg else 'sweep.html'}' "
                 + f"id='b_{html.escape(ident)}' onclick=\"show('{html.escape(ident)}')\">"
                 f"<span class='rk'>&middot;</span>"
                 + (f"<img class='thumb' loading='lazy' alt='' src=\"{th}\">" if th
@@ -599,7 +690,7 @@ def main() -> None:
                 + f"<span class='body'><span class='l1'>"
                 f"<span class='mid-id'>{html.escape(parent)}"
                 f"<span class='mode'>m{ident.rsplit('_m',1)[-1]}</span></span>"
-                f"<span class='eng pend'>{r.rmsd_max:.3f} nm at 8&nbsp;ns</span></span>"
+                f"<span class='eng pend'>{r.rmsd_max:.3f} nm at {int(_SWEEP_NS)}&nbsp;ns</span></span>"
                 f"<span class='l2'>"
                 f"<span class='wc'>{html.escape(str(cls_of.get(parent,'—')))}</span>"
                 f"<span class='meta'>{ar_s}</span>"
@@ -609,7 +700,7 @@ def main() -> None:
         if pending_rows:
             pending_rows.insert(0, f"<div class='ohd o-pend'>queued for "
                                    f"{_prod_ns}&nbsp;ns &mdash; {len(pending_rows)} "
-                                   f"survivor(s), showing their 8&nbsp;ns evidence</div>")
+                                   f"survivor(s), showing their {int(_SWEEP_NS)}&nbsp;ns evidence</div>")
     except Exception as exc:                                   # noqa: BLE001
         log.warning("pending survivors unavailable: %s", exc)
 
@@ -648,7 +739,7 @@ def main() -> None:
                else f"<span class='thumb tctl'>{'RX' if c['kind']=='reactant' else 'XT'}</span>")
             + f"<span class='body'>"
             f"<span class='l1'><span class='mid-id'>{html.escape(nm)}</span>"
-            f"<span class='eng pend' title='control — 10 ns only, no 100 ns run'>"
+            f"<span class='eng pend' title='control — {int(_SWEEP_NS)} ns only, no 100 ns run'>"
             f"&mdash;</span></span>"
             f"<span class='l2'><span class='wc'>control &middot; {html.escape(c['pdb'])}</span>"
             f"<span class='meta'>"
@@ -851,11 +942,20 @@ chemistries is the cheapest way to turn two points into a distribution.</p>
      opposite of one instrument with four steps. -->
 {_stepnav}
 <main>
- <div id="rail">{_rs.SEARCH_HTML}<div class="legend">ranked by <b>max ligand RMSD</b> over the
-  100&nbsp;ns run, lowest first &mdash; how far the molecule ever got from where it
-  started. <b>held</b> means it never exceeded {_HELD_BAR:.2f}&nbsp;nm, the bar
-  that earns a molecule BPMD (D0085) and the same one the {int(_SWEEP_NS)}&nbsp;ns
-  triage applies. Engagement is shown beside it. The triage sweep chooses what
+ <div id="rail">{_rs.SEARCH_HTML}<div class="legend">ranked by <b>mean ligand RMSD</b> over the
+  100&nbsp;ns run, lowest first &mdash; where the ligand actually spent the run.
+  The <b>max</b> is shown beside it (<code>mean/max</code>) because how far it ever
+  strayed is worth reading, but a single excursion frame is not the ordering.
+  Four verdicts:
+  <span class="tag t-optimal">optimal</span> never dissociated and never exceeded
+  {_OPT_BAR:.2f}&nbsp;nm over the 100&nbsp;ns run. That is a different bar from the
+  {_HELD_BAR:.2f}&nbsp;nm the {int(_SWEEP_NS)}&nbsp;ns triage applies: a ligand
+  explores more in 100&nbsp;ns than in {int(_SWEEP_NS)}, and one number for both
+  left this tier empty while nine runs never left the pocket;
+  <span class="tag t-held">held</span> stayed in the pocket but moved
+  around inside it;
+  <span class="tag t-left">left</span> passed {_BOUND_NM:.1f}&nbsp;nm and never came
+  back. Engagement is shown beside it. The triage sweep chooses what
   earns a 100&nbsp;ns run and is not the result; it is on each molecule&rsquo;s
   own page.</div>
  {''.join(rows_html)}{''.join(pending_rows)}{''.join(ctl_rows_html)}</div>
@@ -875,7 +975,9 @@ function hdr(cls,txt){{var h=document.createElement('div');h.className=cls;h.tex
 // ASCENDING on max ligand RMSD: lowest excursion first. Every other ordering in
 // this file is descending-is-better, so the direction is stated rather than left
 // to be inferred from a minus sign.
-function byRank(a,b){{return parseFloat(a.dataset.rmax)-parseFloat(b.dataset.rmax)}}
+// SORTED ON THE MEAN (@tt8804). data-rmax is kept so the max stays
+// available to any view that wants it, but it is no longer the order.
+function byRank(a,b){{return parseFloat(a.dataset.rmean)-parseFloat(b.dataset.rmean)}}
 function bySweep(a,b){{return parseFloat(b.dataset.sweep)-parseFloat(a.dataset.sweep)}}
 function layoutGroup(rows){{
   if(MODE==='all'){{rows.forEach(function(b){{RAIL.appendChild(b)}});renumber(rows);return;}}
@@ -909,16 +1011,24 @@ function relayout(){{
   else{{
     if(!SPLIT){{ layoutGroup(done); }}
     else{{
-      var held=done.filter(function(b){{return b.dataset.held==='1'}});
-      var gone=done.filter(function(b){{return b.dataset.held!=='1'}});
-      if(held.length){{hdr('ohd o-held','held the pocket  ('+held.length+')'); layoutGroup(held);}}
+      // THREE GROUPS, NOT TWO. Splitting on held/left alone put a molecule
+      // pinned at the warhead in the same band as one merely rattling around
+      // the site -- which is the whole distinction the chemists rank on.
+      var byTier=function(k){{return done.filter(function(b){{return b.dataset.tier===k}})}};
+      var opt=byTier('optimal'), hld=byTier('held'), uns=byTier('unstable'), gone=byTier('left');
+      var none=done.filter(function(b){{return !b.dataset.tier}});
+      if(opt.length){{hdr('ohd o-optimal','optimal — never left, stayed inside '
+          +{_HELD_BAR:.2f}+' nm  ('+opt.length+')'); layoutGroup(opt);}}
+      if(hld.length){{hdr('ohd o-held','held  ('+hld.length+')'); layoutGroup(hld);}}
+      if(uns.length){{hdr('ohd o-unstable','held, unstable \u2014 came back but spent time outside  ('+uns.length+')'); layoutGroup(uns);}}
       if(gone.length){{hdr('ohd o-left','dissociated  ('+gone.length+')'); layoutGroup(gone);}}
+      if(none.length){{hdr('ohd o-pend','not scored  ('+none.length+')'); layoutGroup(none);}}
     }}
     // Controls sit here too: none has a 100 ns trajectory, so none can be ranked
     // and none carries a held/left verdict.
     if(pend.length){{
       var nctl=pend.filter(function(b){{return b.dataset.ctl==='1'}}).length;
-      hdr('ohd o-pend','10 ns sweep only \u2014 not yet ranked  ('+pend.length
+      hdr('ohd o-pend','{int(_SWEEP_NS)} ns sweep only \u2014 not yet ranked  ('+pend.length
           +(nctl?', incl. '+nctl+' controls':'')+')');
       pend.forEach(function(b){{RAIL.appendChild(b)}}); renumber(pend);
     }}

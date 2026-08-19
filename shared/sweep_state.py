@@ -7,7 +7,7 @@ happening at all.
 
 FOUR STATES, AND THE DISTINCTIONS ARE LOAD-BEARING:
 
-    ok       a 10 ns trajectory finished and was measured
+    ok       a triage trajectory finished and was measured
     failed   it was attempted and did not produce a result, WITH the reason
     pending  on the active worklist, no result row yet -- queued or in flight
     (absent) ranked, never selected for this campaign

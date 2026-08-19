@@ -58,6 +58,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from shared import outputs as sout                     # noqa: E402
+from shared import run_paths as rp                     # noqa: E402
 
 log = logging.getLogger("crystal-controls")
 CASES = Path("/data/lab_vm/append_only/inhibition/05_redock_benchmark/cases_1/pdb")
@@ -211,7 +212,9 @@ def main() -> None:
         rows.append(rec)
 
     t = pd.DataFrame(rows)
-    dest = sout.Topic("blacksmith", "crystal_controls").write("crystal_controls", ".csv")
+    # Run-scoped: a control is evidence about ONE screen against ONE receptor.
+    # Written flat, it was picked up by every later run's report rail.
+    dest = sout.Topic("blacksmith", rp.controls_topic()).write("crystal_controls", ".csv")
     t.to_csv(dest, index=False)
 
     print("\n" + "=" * 76)

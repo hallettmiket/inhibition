@@ -175,6 +175,45 @@ def derived_scores(d: pd.DataFrame) -> pd.DataFrame:
     if len(p.dropna()) > 50:
         mu, var = float(np.nanmean(p)), float(np.nanvar(p))
         conc = max(mu * (1 - mu) / var - 1, 1e-6) if var > 0 else 1e-6
+        # A FLOOR ON THE PRIOR'S STRENGTH (@tt8804, 2026-08-18).
+        #
+        # Method of moments fits the prior to the SPREAD of the population, and
+        # this population is genuinely heterogeneous -- different warhead
+        # classes, different sub-pockets -- so the variance is large and the
+        # concentration collapses to ~2.2 poses. A prior worth two poses barely
+        # moves anything, so the shrinkage meant to protect against small-n
+        # noise was in practice absent.
+        #
+        # It does NOT reverse a real difference, and should not: 5/12 (0.42)
+        # still outscores 20/82 (0.24) at every prior strength. What it shrinks
+        # is the thin mode's ADVANTAGE -- ratio 1.58 at the fitted prior, 1.34
+        # at 10 -- because the thin estimate moves and the well-evidenced one
+        # barely does. The gain is a partial one and the numbers below say how
+        # partial.
+        #
+        # MEASURED on this library's 2,721 scorable modes:
+        #   prior  2.2 (fitted) : rho(score, mode_size) = +0.143
+        #   prior 10            : rho(score, mode_size) = -0.016
+        # The floor makes the score LESS size-biased, not more, which is the
+        # property the empirical-Bayes step was introduced to obtain. And over
+        # five independent 500-pose screens of t4_716800c125a7
+        # (exp/1_mode_stability), the mode 3.0.0 elected and then validated with
+        # a 100 ns run ranks first 3/5 times at a prior of 10, against 2/5 at
+        # the fitted value.
+        #
+        # REJECTED, and recorded so it is not retried: multiplying the score by
+        # sqrt(mode_size) elects that mode 5/5 -- but rho(score, size) = +0.72,
+        # so it is largely a size proxy and would discard genuine minority
+        # modes. A rule that wins by ranking big things first has not solved
+        # the problem it was aimed at.
+        #
+        # The floor stays well below the median evidence (n_in_range = 26), so
+        # it bites only where the estimate is thin, which is where it should.
+        floor = float(tc.get("ranking.eb_prior_min_strength", default=10.0))
+        if conc < floor:
+            log.info("empirical-Bayes prior fitted at %.2f poses; raising to the "
+                     "configured floor of %.1f", conc, floor)
+            conc = floor
         a0, b0 = mu * conc, (1 - mu) * conc
         log.info("empirical-Bayes prior: alpha=%.2f beta=%.2f (mean %.4f, worth "
                  "~%.0f poses)", a0, b0, mu, a0 + b0)

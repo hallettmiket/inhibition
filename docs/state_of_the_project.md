@@ -1,6 +1,6 @@
 # State of the project
 
-*Written 2026-07-31 at handover. Last updated 2026-08-04. Start here.*
+*Written 2026-07-31 at handover. Last updated 2026-08-19. Start here.*
 
 > **The measured numbers in §7 are generated now** — `scripts/refresh_orientation.py`,
 > and `tests/test_orientation_current.py` fails the suite if they drift (D0055,
@@ -25,6 +25,64 @@ Read alongside:
   problem, audited against the code rather than against the threads). **#4**
   remains the plan and reasoning of record. #2, #6 and #8 are closed into those
   two; read them for history, not for status.
+
+---
+
+## 0. Where 3.1.0 landed, and the thing it uncovered
+
+*2026-08-19. Read this before §3 — it changes how much of §3 you should trust.*
+
+**The run finished.** 561 molecules screened, 4,432 modes ranked, 147 triaged at
+8 ns, 15 given 100 ns runs. Five held the pocket, one held unstably, nine left.
+The GUI reports it at `http://localhost:8931/`, ranked on mean ligand RMSD with
+max shown beside it, four tiers (optimal / held / held-unstable / left).
+
+**And the modes it ranked are not modes.** @tt8804, looking at one: *"why would
+only 20 out of 82 poses be good?? that suggests that they arent the same
+poses."* They are not. Measured across nac_v5: the median mode spans **3.51 A**
+in warhead-to-anchor distance, 87% span more than 2 A, and **42% have a viable
+fraction between 0.1 and 0.9** — two populations under one label. The largest is
+137 poses spanning 9.3 A.
+
+**The cause is an ordering mistake, and it is circular** (D0088). The pipeline
+clusters on the reactive atom's POSITION and the direction its warhead faces,
+then scores each group by how often it reaches attack geometry. But attack
+geometry *is* position and direction — SG is fixed within a run. It forms groups
+along the axis it then grades them on. The code comment claiming otherwise
+(*"never on the NAC geometry itself, which is the score"*) is wrong.
+
+**So `viable_fraction`, `enrichment` and `conditional_eb` are all measured over
+mixtures.** Every per-mode number in nac_v5 carries that caveat. The 100 ns
+results do not — a trajectory is a trajectory — but *which* pose earned each one
+was chosen by this machinery.
+
+**Three things were fixed outright** and are on `main`-track code:
+
+| | |
+|---|---|
+| the screen was not reproducible | `docking.seed` now set; it was seeded from the clock, so v4 and v5 ranked the same 504 molecules at rho = +0.43 (#77) |
+| the pose cloud could not be joined to its own measurements | `pose_idx` is now written, and the cloud is rewritten with its run rather than cached (#76) |
+| AutoDock-GPU failed silently above ~2,000 runs | at 5,000 it corrupts its stack **and still writes a .dlg**; at 10,000 it fails with exit 0. `dock()` now checks all three |
+
+**One replacement is built and NOT adopted**: `shared/pose_cluster.py` — a single
+clustering step on pose similarity alone (HDBSCAN over heavy-atom RMSD), with
+attack geometry used only to rank afterwards. It is the only rule measured that
+never produces a bag (largest mode 14 poses, widest 3.91 A), and it puts the
+pose a 100 ns run validated into an **8-pose group 1.5 A wide** where the shipped
+rule puts it in **108 poses spanning 8 A**. It stays `proposed` because it
+discards 29% of the cloud as noise and lost the validated pose in 3 of 30
+replicates (#78), and adopting it means a full re-screen (#79).
+
+**What NOT to do next:** do not run the enrichment-floor pilot (#71) or BPMD
+(#72) against nac_v5's modes. Both would calibrate against the artefact. The
+sequence is #78, then #79, then re-screen, then those.
+
+**Also settled since §3 was written:** the triage sweep is 5 ns (D0087, inside
+D0085's own CI, and truncation is one-sided so it cannot drop a survivor); the
+100 ns "optimal" bar is 0.45 nm and separate from the 0.35 nm sweep bar (they
+were the same number, which made "optimal" unreachable); and mode count does not
+saturate with sampling depth because the density threshold is 5% *of the sample*
+(D0088).
 
 ---
 
@@ -301,7 +359,7 @@ within 24 h of being written.*
 <!-- AUTO:t2:END -->
 
 <!-- AUTO:decisions:BEGIN -->
-**84** decision records.
+**87** decision records.
 <!-- AUTO:decisions:END -->
 
 All six T_2 variants are ranked (size-decorrelated, D0049) and carry rebuilt

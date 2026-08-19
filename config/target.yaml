@@ -82,6 +82,14 @@ docking:
   # the true one PROVIDED the per-run hit rate exceeds 0.597% (>=99% at 0.917%).
   # Sulfopin's measured rate is 20.8% [17.4, 24.8], where 13 runs would do.
   sampling_floor_p: 0.00597
+  # THE DOCKING SEED (#77). AutoDock-GPU seeds its GA from the clock unless told
+  # otherwise, so a re-screen drew a different cloud and produced a different
+  # ranking -- v4 vs v5 agreed at rho = +0.43 over 504 shared molecules. Fixing
+  # it makes a run reproducible, which is the precondition for A/B-ing any
+  # scoring change. It does NOT make the ranking stable (D0086); it fixes which
+  # draw you get. Set to null for independent draws, which is what a replicate
+  # experiment wants.
+  seed: 42
 
 splitting:
   # Stage 1: mechanistically meaningful modes. Clustered on the reactive atom's
@@ -286,6 +294,15 @@ ranking:
   # 63.5%), 4,399 gained and 0 lost; among modes clearing enrichment 4.0, 325 ->
   # 518. Nothing is re-docked and no score changes -- only which modes are
   # allowed to hold a position.
+  # THE EMPIRICAL-BAYES PRIOR'S MINIMUM STRENGTH, in poses (@tt8804,
+  # 2026-08-18). Method of moments fits the prior to the population's spread,
+  # and this population is heterogeneous enough that it collapses to ~2.2
+  # poses -- effectively no shrinkage, which let thinly-evidenced modes win.
+  # Measured on 2,721 scorable modes, raising it to 10 moves
+  # rho(score, mode_size) from +0.143 to -0.016: LESS size-biased, which is
+  # what the shrinkage was for. Still far below the median evidence
+  # (n_in_range = 26), so it only bites where the estimate is thin.
+  eb_prior_min_strength: 10.0
   mode_gate:
     parameter: n_poses_mode  # absolute, so it does not move with the cloud
     min_poses: 12            # == sweep_rule.min_mode_poses; asserted by a test
@@ -312,7 +329,20 @@ md:
   # down at the 0.5 bar), and past 10 ns the curve declines on sweep cost alone.
   # The exchange rate is why the gate should be generous rather than short: one
   # 100 ns run costs as much as 66 ns of sweeping one mode.
-  sweep_ps: 8000             # triage: decides what earns a 100 ns run
+  # TRIAGE LENGTH: 5 ns (@tt8804, 2026-08-19), down from 8. See D0087.
+  #
+  # SAFE IN THE DIRECTION THAT MATTERS. D0085 measured the optimum as a PLATEAU
+  # with a bootstrap 95% CI of 4.3-9.5 ns, so 5 sits inside the interval that
+  # produced 8. And truncation is one-sided -- max@5 <= max@8 -- so a shorter
+  # sweep can never drop a genuine survivor from the set, only admit extras that
+  # the 100 ns stage then rejects. The cost of being wrong here is GPU time, not
+  # a lost candidate.
+  #
+  # WHY NOW: the fine pose split (0.1 nm, no cap) raises the worklist from ~5 to
+  # ~25 modes per molecule. At 4.10 min/ns measured over 251 sweeps, 8 -> 5 ns
+  # takes a mode from 32.8 to 20.5 min. That is a 37% cut per mode against a 5x
+  # larger worklist, so it softens the increase rather than absorbing it.
+  sweep_ps: 5000             # triage: decides what earns a 100 ns run
   production_ps: 100000
   salt_molar: 0.15           # #57. Every 2.2.0 system was built with
                              # `addions ... 0` -- neutralise and stop -- so none
@@ -331,6 +361,24 @@ md:
   # it decides nothing, but if the pattern holds the bar is cutting into real
   # candidates and should be revisited once more 100 ns rows exist.
   sweep_survivor_rmsd_nm: 0.35
+  # THE OPTIMAL BAR for a finished 100 ns run (@tt8804, 2026-08-18). Separate
+  # from the sweep bar above, which it used to share.
+  #
+  # One number across both timescales made "optimal" unreachable by construction
+  # rather than by chemistry: a ligand explores more in 100 ns than in 8, and
+  # after 13 finished runs the tightest was 0.410 nm with a hard floor there --
+  # 0 optimal, 9 held, 4 left. 0.45 sits just above that floor, so the tier
+  # separates the shortlist from the rest instead of being empty. The 1.0 nm
+  # dissociation criterion is unchanged and still decides held vs left.
+  production_optimal_rmsd_nm: 0.45
+  # THE CLEAN-HOLD FLOOR (@tt8804, 2026-08-18). Fraction of frames within
+  # bound_rmsd_nm that a run must reach to count as held rather than
+  # unstable. "Never dissociated" alone was too generous:
+  # t4_cc678a20a3d0_m2 travelled 5.765 nm, returned under 1.0 and stayed, so
+  # it scored held while spending 23% of the run outside the pocket, ranked
+  # beside molecules that never left. 0.95 keeps the clean holds together and
+  # sends the excursions to their own band.
+  held_residence_floor: 0.95
   bound_rmsd_nm: 1.2
   replicates: 1              # >1 only where a claim rests on one trajectory
 

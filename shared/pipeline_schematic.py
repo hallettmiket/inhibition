@@ -27,6 +27,11 @@ from __future__ import annotations
 from . import run_paths as rp
 from . import target_config as tc
 
+#: Sweep length, DERIVED (@tt8804: "update the gui to say 8 ns sweep not
+#: 10"). The deck said 10 ns in six places while the sweep has run at 8 ns
+#: since D0085 -- an explainer that misstates the spec teaches the wrong run.
+_SWEEP_NS = int(round(tc.md_sweep_ps() / 1000))
+
 import collections
 import json
 import math
@@ -663,7 +668,7 @@ def _stage_survival() -> str:
 <defs><marker id="ah2" markerWidth="7" markerHeight="7" refX="6" refY="3.5"
  orient="auto"><path d="M0 0 L7 3.5 L0 7 z" fill="var(--blue)" opacity=".7"/></marker></defs>
 <text x="42" y="20" class="cap">ranked mols</text>
-<text x="232" y="20" class="cap" text-anchor="end">10 ns</text>
+<text x="232" y="20" class="cap" text-anchor="end">{_SWEEP_NS} ns</text>
 <text x="320" y="20" class="cap" text-anchor="end">100 ns</text>
 <text x="336" y="20" class="cap">outcome</text>
 <text x="232" y="33" class="cap2" text-anchor="end">attack-ready</text>
@@ -672,7 +677,7 @@ def _stage_survival() -> str:
 <line x1="14" y1="46" x2="14" y2="{cut}" stroke="var(--blue)" stroke-width="1.2"
  opacity=".65" marker-end="url(#ah2)"/>
 <text x="10" y="{(46 + cut) / 2:.0f}" class="cap2" fill="var(--blue)"
- transform="rotate(-90 10 {(46 + cut) / 2:.0f})" text-anchor="middle">10 ns sweep</text>
+ transform="rotate(-90 10 {(46 + cut) / 2:.0f})" text-anchor="middle">{_SWEEP_NS} ns sweep</text>
 <line x1="26" y1="{cut + 3}" x2="400" y2="{cut + 3}" stroke="var(--rule)"
  stroke-dasharray="3 3"/>
 {''.join(rows)}
@@ -1393,12 +1398,12 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
 <div class="step">
  <div>{_stage_survival()}
  <svg viewBox="0 0 700 196" class="tl" role="img"
-  aria-label="A 10 ns sweep with attack-ready episodes, then the 100 ns RMSD trace">
-  <text x="40" y="18" class="cap">10 ns sweep &middot; attack-ready episodes</text>
+  aria-label="A {_SWEEP_NS} ns sweep with attack-ready episodes, then the 100 ns RMSD trace">
+  <text x="40" y="18" class="cap">{_SWEEP_NS} ns sweep &middot; attack-ready episodes</text>
   <rect x="40" y="26" width="630" height="26" rx="2" fill="var(--cav-out)"/>
   {sweep}
   <line x1="40" y1="60" x2="670" y2="60" stroke="var(--rule)"/>
-  <text x="40" y="74" class="cap">0</text><text x="640" y="74" class="cap">10 ns</text>
+  <text x="40" y="74" class="cap">0</text><text x="640" y="74" class="cap">{_SWEEP_NS} ns</text>
   <!-- The RMSD caption used to sit at y=104, straight through the trace it
        labels. The band now starts below it -- baseline 176 -- so nothing drawn
        reaches the caption line. -->
@@ -1413,7 +1418,7 @@ code{{font-family:var(--mono);font-size:12.5px;background:var(--raise);
  </svg></div>
  <div><p class="n0">Step 5 &middot; sweep, then MD</p>
   <h2>Does it hold up once things move?</h2>
-  <p>A docked pose is frozen. The <strong>10 ns sweep</strong> lets it move and asks
+  <p>A docked pose is frozen. The <strong>{_SWEEP_NS} ns sweep</strong> lets it move and asks
   how much of the time it still looks ready to react. This is <em>triage</em> — it
   picks what is worth a long run.</p>
   <p>Those go to <strong>100 ns MD</strong>, which asks a different question: does

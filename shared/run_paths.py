@@ -88,6 +88,25 @@ def bpmd_topic(t: str | None = None) -> str:
     return f"bpmd_{t or topic()}"
 
 
+def controls_topic(t: str | None = None) -> str:
+    """Topic for the crystal / reactant controls.
+
+    THE LAST UNSCOPED TOPIC (@tt8804: "get rid of the yellow controls, they
+    dont belong in this version"). `mdprio_combine` read a flat
+    `crystal_controls` directory, so every run showed whatever controls any
+    previous run had left there -- including `xtal_6VAJ` and `rx_6VAJ`, built
+    against the receptor 3IKD replaced. A control is evidence about a specific
+    screen against a specific receptor; carried across runs it is decoration
+    that reads as evidence. Scoped like every other topic, so a run shows the
+    controls it produced and no others.
+    """
+    return f"crystal_controls_{t or topic()}"
+
+
+def controls_dir(t: str | None = None) -> Path:
+    return BLACKSMITH / controls_topic(t)
+
+
 def worklist_topic(t: str | None = None) -> str:
     """Topic for the sweep worklists.
 

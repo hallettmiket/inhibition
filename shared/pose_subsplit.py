@@ -46,6 +46,23 @@ DEFAULT_MAX_SUB = 5
 #: sweep.
 MIN_MODE_SIZE = 12
 
+#: Poses a SUB-cluster needs to earn its own row (@tt8804: "why would we even
+#: have a mode cap. we should just establish a min consensus score for a mode
+#: (maybe as low as 3 poses)").
+#:
+#: The right control on a split is how much evidence a sub-mode carries, not how
+#: many sub-modes came out. `max_sub` bounds the count, so once a parent holds
+#: more distinct poses than the cap the surplus is merged back into whichever
+#: cluster is nearest or largest -- widening exactly the modes the cut had just
+#: separated. A minimum size bounds the same cost without that side effect:
+#: clusters below it are folded, everything above it keeps its own row however
+#: many there are.
+#:
+#: Set `max_sub=None` to let the diameter cut govern with this as the only
+#: guard. The default stays 5 until the pairing is measured -- see
+#: exp/2_mode_homogeneity.
+MIN_SUB_SIZE = 3
+
 #: Cut diameter, Angstrom. A single representative cannot stand for poses further
 #: apart than the accuracy being claimed, and 2 A is the bar this field uses to
 #: call a docked pose correct -- the same bar the recovery numbers above are
@@ -70,8 +87,10 @@ def _pairwise_rmsd(coords: np.ndarray) -> np.ndarray:
 
 
 def subdivide(labels: np.ndarray, coords: np.ndarray,
-              max_sub: int = DEFAULT_MAX_SUB,
-              min_size: int = MIN_MODE_SIZE) -> tuple[np.ndarray, dict]:
+              max_sub: int | None = DEFAULT_MAX_SUB,
+              min_size: int = MIN_MODE_SIZE,
+              min_sub_size: int = MIN_SUB_SIZE,
+              cut_a: float = CUT_A) -> tuple[np.ndarray, dict]:
     """Split each mode into at most `max_sub` sub-modes on whole-molecule RMSD.
 
     `labels` is the first-stage mode assignment (-1 = unassigned, preserved).
@@ -108,7 +127,7 @@ def subdivide(labels: np.ndarray, coords: np.ndarray,
     for m in sorted(set(int(x) for x in labels) - {-1}):
         idx = np.flatnonzero(labels == m)
         info["modes_in"] += 1
-        if len(idx) < max(min_size, 2 * 2) or max_sub <= 1:
+        if len(idx) < max(min_size, 2 * 2) or (max_sub is not None and max_sub <= 1):
             out[idx] = _claim(m, -1); info["modes_out"] += 1
             continue
         d = _pairwise_rmsd(coords[idx])
@@ -119,16 +138,21 @@ def subdivide(labels: np.ndarray, coords: np.ndarray,
         # question that matters instead -- is anything in here further apart than
         # the accuracy we claim -- and leaves a tight mode alone. The cap then
         # bounds the cost when a mode really is that heterogeneous.
-        sub = fcluster(z, CUT_A, criterion="distance")
-        if len(np.unique(sub)) > max_sub:
+        sub = fcluster(z, cut_a, criterion="distance")
+        # THE CAP IS OPTIONAL. With max_sub set this re-cuts at k=max_sub, which
+        # discards the diameter answer and merges poses the cut separated; that
+        # is the behaviour `min_sub_size` exists to replace. With max_sub=None
+        # the cut stands and size is the only guard.
+        if max_sub is not None and len(np.unique(sub)) > max_sub:
             sub = fcluster(z, max_sub, criterion="maxclust")
         got = 0
+        keep_n = {s: int((sub == s).sum()) for s in np.unique(sub)}
+        floor = max(2, min_sub_size) if max_sub is None else 2
         for s in np.unique(sub):
             members = idx[sub == s]
-            # A sub-cluster of one pose is not a mode. Fold singletons back into
-            # the nearest surviving sub-cluster rather than giving noise a row
-            # and a sweep.
-            if len(members) < 2 and len(np.unique(sub)) > 1:
+            # A sub-cluster below the evidence floor is not a mode. Fold it back
+            # rather than giving noise its own row and its own sweep.
+            if keep_n[s] < floor and len(np.unique(sub)) > 1:
                 continue
             out[members] = _claim(m, got); got += 1
         stray = idx[out[idx] < 0]
@@ -147,5 +171,7 @@ def subdivide(labels: np.ndarray, coords: np.ndarray,
             info["parent"][only] = (int(m), -1)
             info["label"][only] = str(m)
     info["max_sub"] = max_sub
+    info["min_sub_size"] = min_sub_size
+    info["cut_a"] = cut_a
     info["min_size"] = min_size
     return out, info
