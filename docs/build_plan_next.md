@@ -623,8 +623,28 @@ counting poses. Three candidates, none measured:
    rotatable bonds has fewer ways to leave the geometry it was placed in, so
    "will it stay as shown" is partly answerable before any simulation runs.
    Unlike the population terms it is a property of the MOLECULE rather than of
-   the clustering, so §2.4a's null does not touch it. Testable immediately
-   against the 147 swept modes with no new compute.
+   the clustering, so §2.4a's null does not touch it.
+
+   **Tested, and null — but the test is weak and should not be read as a
+   refutation.** Over the 147 swept modes (119 molecules), against the 5 ns
+   attack-ready fraction:
+
+   | descriptor | ρ | p |
+   |---|---:|---:|
+   | rotatable bonds | +0.004 | 0.97 |
+   | rotatable bonds / heavy atom | −0.002 | 0.98 |
+   | ring count | −0.006 | 0.94 |
+   | fraction sp3 | −0.068 | 0.41 |
+   | heavy atoms | −0.016 | 0.85 |
+   | TPSA | −0.072 | 0.39 |
+   | clogP | +0.029 | 0.73 |
+
+   **The predictor barely varies: rotatable bonds run 2–8, median 4.** T_4 is one
+   core with R-group substitution, so the library is chemically homogeneous and
+   there is not enough spread in rigidity to detect an effect that exists. This
+   is range restriction, the same limitation #71 records for enrichment against
+   outcome. The hypothesis needs a library that varies — it has not been tested
+   here, only failed to be visible.
 
 ### 2.4d Granularity: is the pose space finite, and does HDBSCAN bound it? — **PREDICTION, recorded before the measurement**
 
