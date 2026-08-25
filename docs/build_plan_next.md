@@ -205,9 +205,74 @@ it means *the current pose clouds are not a safe baseline to compare the
 PoseBusters gate against*: §1.10's criterion 4 must be measured on a re-screen
 with the fix in, not against what is on disk today.
 
-### 1.7 Result of the attack-ready cross-tabulation — **PENDING**
+### 1.7 Result of the attack-ready cross-tabulation — **MEASURED**
 
-*To be filled in.*
+**The risk in §1.6 does not exist. PoseBusters protects the poses we want.**
+
+5,834 poses across 13 molecules (5 refused by the join guard, §1.6a), each pose
+carrying the screen's own `viable` flag:
+
+| | PoseBusters pass |
+|---|---:|
+| attack-ready (viable) | **98.57%** (n = 1,819) |
+| not attack-ready | **92.80%** (n = 4,015) |
+| odds ratio | **5.35** in favour of viable poses |
+| Fisher exact | **p = 1.9 × 10⁻²³** |
+
+The clash check — the one I expected to do the damage — fails **0.93%** of
+attack-ready poses against **6.48%** of the rest. It rejects seven times more of
+what we do not want.
+
+**Why the §1.6 arithmetic was right and the conclusion was wrong.** The 2.625 Å
+clash threshold sits *below* our 2.8 Å window, so it bites the poses that are
+**too close** — the ones our own criterion already rejects for being inside a
+formed bond rather than approaching one:
+
+| reactive C to SG | poses | PB pass | clash fails |
+|---|---:|---:|---:|
+| **< 2.8 Å** (below our window) | 42 | **45.2%** | **54.8%** |
+| 2.8–3.2 Å (window floor) | 580 | 89.5% | 10.0% |
+| 3.2–3.6 Å | 1,872 | 96.2% | 3.5% |
+| 3.6–4.2 Å | 1,267 | 96.5% | 2.6% |
+| 4.2–6 Å | 835 | 92.6% | 6.4% |
+| > 6 Å | 1,238 | 95.7% | 3.6% |
+
+PoseBusters and the near-attack criterion **agree**, independently, about which
+poses are physically real. That is a small mutual validation of both and worth
+recording as such.
+
+Residual: the 2.8–3.2 Å band loses 10%, which is the one place the two rules
+genuinely overlap. 58 poses of 580 in this sample.
+
+### 1.7a But it does not change the answer — **criterion 4 fires**
+
+Per-mode `viable_fraction` recomputed with the failing poses removed, over the
+75 modes holding ≥ 12 poses:
+
+| | |
+|---|---:|
+| median change in `viable_fraction` | **+0.00 pp** |
+| mean change | +0.67 pp |
+| largest change | 5.03 pp |
+| rank correlation, before vs after | **ρ = 0.9989** |
+| modes whose rank moves at all | 19 of 75 (median move **0** places, max 5) |
+| top-10 overlap | **10 / 10** |
+| top-25 overlap | **25 / 25** |
+
+**§1.10's criterion 4 is met: the gate does not change what the pipeline
+recommends.** ρ = 0.9989 is above the ≳ 0.99 threshold written down before the
+measurement.
+
+**Sample limitation, stated plainly.** These 13 molecules were chosen as *those
+with the most viable poses* — the best-behaved end of the library — because that
+is where the §1.6 risk would show most sharply. It is the right sample for the
+question it was built to answer and the **wrong** sample for estimating a
+library-wide effect. The §1.3 pass rate (90.6%, random across families) is the
+unbiased number; 94.6% here reflects the selection. A library-wide rerank
+comparison belongs in the re-screen, not here.
+
+Two of 75 modes fell below the 12-pose estimability gate after filtering. Under
+a true quota that cannot happen, since the run tops up to 500 *valid* poses.
 
 Decision rule, **set before the number is known**:
 
@@ -297,6 +362,39 @@ already pass, the rejects are concentrated in a check that may be firing on the
 poses we want, and mode assignment is a clustering over hundreds of poses that
 is unlikely to move much when 9% are removed. We should measure it explicitly
 rather than assume the gate helped because it sounds like it should.
+
+---
+
+## 1.11 Recommendation — **DRAFT, for @tt8804**
+
+**Adopt it — but for the second reason, not the first, and record that it does
+not change the ranking.**
+
+The case *against* the stated rationale: it was proposed to improve pose
+quality, and measured, it does not improve the answer. ρ = 0.9989, top-25
+unchanged. Spending **+10.4% GPU** to buy an identical shortlist is not a good
+trade on its own.
+
+The case *for* adopting anyway, three reasons that survive §1.7a:
+
+1. **The equal denominator is a real methodological fix.** Molecules are
+   currently ranked against each other on 418–486 poses with nothing recording
+   it, and `viable_fraction` is a proportion. The quota fixes that. *Note this
+   benefit comes from the QUOTA, not from PoseBusters* — quota-ing on raw pose
+   count would deliver it for zero CPU. If GPU is tight, that is the cheap
+   version of this change.
+2. **It is a guard that can fail.** Twenty of the 22 checks certify the
+   conformer generator and currently pass 100%. They would fire if ligand prep
+   regressed — which is exactly the class of silent defect this project keeps
+   finding. Cheap standing insurance at ~20 CPU-h per screen.
+3. **It is the field's standard, and #66 needs cheap credibility.** "All poses
+   PoseBusters-validated" pre-empts a reviewer question. And the measurement
+   itself is reportable: **9.4% of raw AutoDock poses on this target are
+   physically invalid**, and they are disproportionately the non-reactive ones.
+
+**What must go in the release notes, or this becomes a claim we cannot support:**
+that the gate was adopted for validity and reproducibility, **not** because it
+improved the ranking — because it measurably did not.
 
 ---
 
