@@ -18,11 +18,17 @@ RESOLUTION IS THE VARIABLE, and that is the point. HDBSCAN has no length scale
 set states the scale, which means the reproducibility/count trade-off becomes
 something you choose rather than something you inherit.
 
-CAVEAT ON THE GREEDY START. Farthest-point traversal is deterministic AFTER the
-first centre, and the first is taken as index 0 -- an arbitrary pose. A different
-start yields a set of similar size but not identical membership, so the recovery
-rates below are a lower bound on what a start-invariant construction would give.
-Worth fixing (start from the medoid) before this is used to choose anything.
+THE START IS THE MEDOID, NOT INDEX 0. Farthest-point traversal is deterministic
+after its first centre, so the first choice decides the whole set. Taking index 0
+made the construction depend on the order AutoDock happened to write its poses --
+a positional choice, which is this project's defining defect shape. The medoid
+(the pose minimising total distance to the rest) is a property of the CLOUD, so
+two independent dockings of the same molecule start from the same place in the
+pocket rather than from whichever pose was written first.
+
+`--start first` keeps the old behaviour, because the difference between them is
+itself a measurement: it says how much of the reproducibility was an artefact of
+write order.
 """
 
 from __future__ import annotations
@@ -54,11 +60,20 @@ def load(topic: str, cand: str) -> np.ndarray:
     return np.array([m.GetConformer().GetPositions()[h] for m in ms])
 
 
-def cover_set(c: np.ndarray, r: float) -> np.ndarray:
+def medoid(c: np.ndarray) -> int:
+    """The pose with the smallest total distance to every other pose."""
+    n = len(c)
+    tot = np.zeros(n)
+    for i in range(n):
+        tot += np.sqrt(((c - c[i]) ** 2).sum(axis=2).mean(axis=1))
+    return int(np.argmin(tot))
+
+
+def cover_set(c: np.ndarray, r: float, start: str = "medoid") -> np.ndarray:
     """Greedy farthest-point centres at radius r (the representatives)."""
     n = len(c)
     dmin = np.full(n, np.inf)
-    sel, nxt = [], 0
+    sel, nxt = [], (medoid(c) if start == "medoid" else 0)
     while True:
         d = np.sqrt(((c - c[nxt]) ** 2).sum(axis=2).mean(axis=1))
         dmin = np.minimum(dmin, d)
@@ -78,6 +93,9 @@ def main() -> None:
     ap.add_argument("--candidate", default="t4_716800c125a7")
     ap.add_argument("--replicates", type=int, default=5)
     ap.add_argument("--radii", default="")
+    ap.add_argument("--start", choices=("medoid", "first"), default="medoid",
+                    help="first centre: the cloud's medoid (order-independent) "
+                         "or pose 0 (whatever AutoDock wrote first)")
     ap.add_argument("--csv", default="")
     a = ap.parse_args()
 
@@ -86,7 +104,8 @@ def main() -> None:
              else [2.0, tol, 5.0])
     rows = []
     for r in radii:
-        sets = {i: cover_set(load(f"election_{a.candidate}_r{i}", a.candidate), r)
+        sets = {i: cover_set(load(f"election_{a.candidate}_r{i}", a.candidate),
+                             r, a.start)
                 for i in range(1, a.replicates + 1)}
         fr = []
         for i, j in itertools.combinations(range(1, a.replicates + 1), 2):

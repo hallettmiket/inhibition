@@ -862,12 +862,24 @@ reproducible".** It is that **reproducibility becomes a dial**. Resolution,
 count and reproducibility move together and explicitly; under HDBSCAN they move
 together and silently.
 
-**⚠ Caveat that must be fixed before this chooses anything.** Greedy
-farthest-point is deterministic only *after* the first centre, and the
-implementation starts at index 0 — an arbitrary pose. A different start gives a
-similar-sized but not identical set, so these recovery rates are a **lower
-bound** on a start-invariant construction. Starting from the medoid would remove
-the arbitrariness; it has not been done.
+**The arbitrary-start caveat is resolved, and it resolved by not mattering.**
+Greedy farthest-point is deterministic only after its first centre, and the
+implementation took index 0 — whatever AutoDock wrote first, which is a
+positional choice and this project's defining defect shape. Restarting from the
+**medoid** (a property of the cloud, so two independent dockings begin at the
+same place in the pocket) changes almost nothing:
+
+| radius | start = index 0 | start = medoid |
+|---|---:|---:|
+| 2.0 Å | 69.5% | 68.2% |
+| 3.5 Å | 83.4% | 82.6% |
+| 5.0 Å | 93.8% | 92.9% |
+
+Within noise, and marginally *lower*. So the recovery rates above are **not** a
+lower bound depressed by write order — **the limit is intrinsic to the cloud and
+the resolution.** The medoid start is kept as the default regardless, because
+depending on file order is not a property worth having even when it costs
+nothing; `--start first` reproduces the old behaviour.
 
 ### 2.5 Still open
 
