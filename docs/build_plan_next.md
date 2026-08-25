@@ -567,6 +567,56 @@ That is a bigger change than swapping the clusterer, and it is the honest
 consequence of the measurement rather than a preference. **Open: what selects
 the covering set, if not a score over populations.**
 
+### 2.4c The gate is not what stops singletons — the SCORE is — **MEASURED**
+
+`exp/10_gate_vs_all`, bdhi only, 312 molecules (62 skipped for the cloud/table
+mismatch of §1.6a). Same HDBSCAN grouping and the same scores on both sides;
+**only the gate differs.**
+
+| | modes | scorable | score ≥ 4.0 |
+|---|---:|---:|---:|
+| gated (≥ 12 poses) | **639** | 444 | **137** |
+| all groups, singletons kept | **55,816** | 31,055 | **2,767** |
+
+Dropping the gate multiplies the candidate count **87×** — and adds **zero**
+singletons above the floor. All 2,767 that clear it are multi-pose groups.
+
+**Why, and this is the finding.** A singleton has 0 or 1 poses in the distance
+window. With 0 it is unscorable. With 1, the conditional proportion is 0/1 or
+1/1, and after empirical-Bayes shrinkage that is **exactly two numbers**:
+
+| `conditional_eb` | singletons |
+|---|---:|
+| 2.8505 (in window, not viable) | 14,844 |
+| 3.9642 (in window, viable) | 4,929 |
+| NaN (never entered the window) | 18,350 |
+
+**Two distinct values across 19,773 scorable singletons.** One of them — 2.8505
+— is shared by 50.1% of *all* scorable groups. That is the flat step across the
+right-hand panel: not a property of the molecules, the score's floor of
+resolution.
+
+So the answer to §2.4b's open question is that **`conditional_eb` cannot select
+a covering set, by construction**. It is a shrunken proportion, and a proportion
+estimated from one observation carries no information to order on. The 12-pose
+gate is not the obstacle; removing it changes nothing because the score was
+never able to rank these groups in the first place.
+
+**What that leaves.** If clustering is de-duplication and the population score
+is dead (§2.4a), the selection rule has to come from something other than
+counting poses. Three candidates, none measured:
+
+1. **Geometry directly** — rank a representative on its own approach distance
+   and angle, with no population term at all. Every pose has these; a singleton
+   is as measurable as a 200-pose group.
+2. **Coverage** — choose representatives to span the cloud (a facility-location
+   or max-min-distance pick) and spend the budget on breadth rather than depth.
+   Selection stops being a score at all.
+3. **Energy** — the one per-pose quantity we have and currently do not rank on,
+   deliberately (#23/#30 found it uninformative for mode choice). Worth
+   re-testing under tight grouping, since that finding has the same
+   loose-clustering caveat §2.4a just cleared for consensus.
+
 ### 2.5 Still open
 
 - **Scaling.** No HDBSCAN saturation run exists — `exp/5` covered `shipped` and
