@@ -721,6 +721,82 @@ statement is *"we have covered the accessible space at r A with 95%
 confidence"* — necessary, not sufficient, and notably stronger than anything the
 pipeline claims today.
 
+### 2.4f Saturation: measured, and the prediction was half right — **D0090**
+
+`exp/5`, 6,000 poses docked (3 × 2,000, distinct seeds), **5,390 PoseBusters-valid**
+(89.8% — a third independent confirmation of the ~90% rate in §1.3), ladder to
+5,390.
+
+| metric | exponent *b* in *a·n^b* | R² |
+|---|---:|---:|
+| HDBSCAN modes | **0.977** | 0.999 |
+| modes + singletons | **1.025** | 1.000 |
+| covering number @ 1.0 Å | 0.879 | 0.998 |
+| covering number @ 1.5 Å | 0.753 | 0.995 |
+| covering number @ 2.0 Å | **0.628** | 0.992 |
+
+| poses | modes | modes+singletons | cover @ 2.0 Å |
+|---:|---:|---:|---:|
+| 500 | 58 | 237 | 275 |
+| 2,000 | 237 | 985 | 634 |
+| 5,390 | 657 | 2,794 | 1,035 |
+
+**§2.4d's prediction was half right.** HDBSCAN grows linearly — b = 0.977, and a
+linear fit at R² 1.000 against 0.816 logarithmic — confirming it has no length
+scale and does not compensate for granularity. **But the covering number does not
+plateau either.** It is sublinear, yet a power law with a positive exponent has no
+asymptote: at 2 Å, doubling the poses still returns ~1.5× the distinct places.
+
+**So §2.4e's 95% depth does not exist.** Log growth would have yielded one;
+n^0.63 does not. The honest replacement names the resolution as a choice: *"at
+2 Å and 500 runs we hold 275 distinct placements; doubling the depth adds ~50%
+more."* Diminishing returns, not completeness.
+
+**And de-duplication is weaker than the reframe assumed.** At production depth,
+500 poses need **275** representatives at 2 Å — 45% collapse — and at 1 Å,
+**97% of poses are their own representative**. Clustering is not mostly removing
+repeats.
+
+### 2.4g Why it does not saturate: the cloud fits inside the score's error bar — **D0090**
+
+@tt8804: *"I don't understand how so many different poses can be such low
+energy??"* **They are not low energy. They are indistinguishable.**
+
+| | |
+|---|---:|
+| energy span within one molecule's cloud | **3.96 kcal/mol** (median) |
+| poses within 0.5 kcal/mol of that molecule's best | 3% |
+| within 1.0 | 15% |
+| within 2.0 | **63%** |
+| within 3.0 | **95%** |
+
+An empirical docking score carries ~2–3 kcal/mol of error, and this project
+already treats that as disqualifying — `state_of_the_project` §4 rejects
+alchemical FEP partly for a blinded **2.44 kcal/mol RMSE**, and AutoDock's
+function is not better than FEP. **63% of a molecule's poses sit within the
+tool's own uncertainty of the best one.**
+
+Two corollaries, measured:
+
+* **Energy does not predict attack geometry**: ρ = **−0.093** over 236,313
+  poses; viable poses average −5.76 against −5.51, a **0.25 kcal/mol** gap.
+* **Distinct places are not energetically distinct**: ten HDBSCAN modes of
+  `t4_716800c125a7` span **1.7 kcal/mol** in median energy.
+
+**This explains the non-saturation.** A search saturates when the landscape has
+basins to fall into. A flat landscape has none, so every run ends somewhere
+slightly new and the count grows with the looking. It also kills candidate 3 in
+§2.4c before it was tested: energy cannot select a covering set either.
+
+**⚠ The flatness may be partly self-inflicted, and it is testable.** The screen
+docks into a *reactive* receptor whose van der Waals parameters were deliberately
+softened (`R_EQ_12 = 3.2`, `EPS_12 = 1.0`) so the warhead can approach Cys113 —
+which flattens the landscape near the warhead by construction. **Dock the same
+molecule into the plain 3IKD and compare the spread and the exponent.** If the
+plain receptor saturates, this is a property of our setup rather than of the
+pocket. That check should happen before any of §2.4f/§2.4g is treated as settled,
+and it costs 9 seconds of docking plus a PoseBusters pass.
+
 ### 2.5 Still open
 
 - **Scaling.** No HDBSCAN saturation run exists — `exp/5` covered `shipped` and
