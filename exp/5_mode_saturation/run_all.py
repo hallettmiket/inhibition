@@ -60,8 +60,81 @@ log = logging.getLogger("saturation")
 DEFAULT_LADDER = "50,100,200,500,1000,2000,5000,10000,20000,50000,100000"
 
 
-def deep_dock(cand, nrun: int, gpu: str, seed: int | None):
-    """One dock at `nrun`, returning (features, heavy coords) for EVERY pose.
+def covering_number(coords, r: float) -> int:
+    """Fewest poses such that every pose is within `r` A of one of them.
+
+    GREEDY FARTHEST-POINT, the standard 2-approximation: start anywhere,
+    repeatedly add the pose furthest from everything chosen so far, stop when
+    nothing is further than `r`.
+
+    WHY THIS AND NOT A CLUSTER COUNT (@tt8804). A cluster count moves for two
+    opposing reasons as the cloud densifies: under-sampled regions consolidate
+    from several singletons into one group (count falls), while genuinely new
+    regions appear for the first time (count rises). Those cancel to an unknown
+    degree, so a flat curve would not prove saturation.
+
+    A covering number is DENSITY-INDEPENDENT by construction. It does not care
+    how many times a spot was hit, only whether the spot is covered -- which is
+    exactly the de-duplication question: the smallest set of poses that
+    represents everything found. It plateaus if the reachable space is bounded
+    and climbs forever if it is not.
+
+    Computed incrementally (O(n) per centre, no n x n matrix), so it is usable
+    at depths where the pairwise matrix would not fit.
+    """
+    n = len(coords)
+    if n == 0:
+        return 0
+    dmin = np.full(n, np.inf)
+    chosen, nxt = 0, 0
+    while True:
+        d = np.sqrt(((coords - coords[nxt]) ** 2).sum(axis=2).mean(axis=1))
+        dmin = np.minimum(dmin, d)
+        chosen += 1
+        far = int(np.argmax(dmin))
+        if dmin[far] <= r or chosen >= n:
+            return chosen
+        nxt = far
+
+
+def pb_valid(mols) -> "np.ndarray":
+    """Boolean mask over the concatenated cloud: does each pose pass PoseBusters?
+
+    Run on the SAME rebuilt conformers the clustering sees, not on a re-read
+    file, so a pose cannot be valid in one step and absent in the next.
+    """
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from rdkit import Chem
+    from posebusters import PoseBusters
+    from shared import run_paths as _rp
+    pb = PoseBusters(config="dock")
+    rec = _rp.receptor_prep()
+    out = []
+    td = _P(_tf.mkdtemp(prefix="pb_"))
+    for j, (mol, _m) in enumerate(mols):
+        f = td / f"c{j}.sdf"
+        w = Chem.SDWriter(str(f))
+        for cid in range(mol.GetNumConformers()):
+            w.write(mol, confId=cid)
+        w.close()
+        df = pb.bust([f], None, rec)
+        cols = [c for c in df.columns if df[c].dtype == bool]
+        out.append(df[cols].all(axis=1).to_numpy())
+        log.info("  PoseBusters call %d/%d: %d/%d valid",
+                 j + 1, len(mols), int(out[-1].sum()), len(out[-1]))
+    return np.concatenate(out)
+
+
+def deep_dock(cand, nrun: int, gpu: str, seed: int | None, calls: int = 1):
+    """`calls` docks at `nrun` each, returning (features, heavy coords, mols).
+
+    SEVERAL CALLS, BECAUSE ONE CANNOT GO DEEP ENOUGH. Measured on this build,
+    `--nrun 5000` corrupts its own stack AND STILL WRITES A .dlg, and 10000
+    exits 0 with no output (D0088). So depth past ~2,000 has to come from
+    repeated calls, each with its OWN seed -- reusing one seed returns the
+    identical cloud and would show a saturation curve that is an artefact of
+    asking the same question twice.
 
     Not the screen's `--all-poses` file: that one drops DBSCAN noise, and a
     saturation curve needs the raw cloud -- the poses that fail to join a mode
@@ -76,15 +149,20 @@ def deep_dock(cand, nrun: int, gpu: str, seed: int | None):
     ligs = list(ns.prepare_ligand(cand, work / "lig.pdbqt"))
     if not ligs:
         raise RuntimeError(f"{cand.ident}: ligand preparation produced nothing")
-    log.info("docking %s at nrun=%d (this is the expensive step)", cand.ident, nrun)
-    dlg = ns.dock(ligs[0], rec_dir, work / "c0", nrun, gpu, seed=seed)
-    mol, match = ns.rebuild_and_match(dlg, cand)
-    feat = pmod.features(mol, match)
-    heavy = np.array([
-        np.array([mol.GetConformer(c).GetPositions()[a.GetIdx()]
-                  for a in mol.GetAtoms() if a.GetAtomicNum() > 1])
-        for c in range(mol.GetNumConformers())])
-    return feat, heavy
+    feats, heavies, mols = [], [], []
+    for i in range(calls):
+        sd = None if seed is None else int(seed) + 1000 * i
+        log.info("docking %s at nrun=%d, call %d/%d (seed %s)",
+                 cand.ident, nrun, i + 1, calls, sd)
+        dlg = ns.dock(ligs[0], rec_dir, work / f"c{i}", nrun, gpu, seed=sd)
+        mol, match = ns.rebuild_and_match(dlg, cand)
+        feats.append(pmod.features(mol, match))
+        heavies.append(np.array([
+            np.array([mol.GetConformer(c).GetPositions()[a.GetIdx()]
+                      for a in mol.GetAtoms() if a.GetAtomicNum() > 1])
+            for c in range(mol.GetNumConformers())]))
+        mols.append((mol, match))
+    return (np.concatenate(feats), np.concatenate(heavies), mols)
 
 
 #: Stage 2 builds a FULL pairwise RMSD matrix per stage-1 mode, so its cost and
@@ -127,6 +205,25 @@ def modes_at(feat, heavy, k: int, rng, recipe: str = "shipped",
     if biggest > STAGE2_MAX_MODE_POSES:
         return {"poses": k, "stage1": n_stage1, "modes": float("nan"),
                 "assigned_frac": assigned / k, "largest": biggest, "capped": True}
+    if recipe == "hdbscan":
+        # ONE STEP, on pose similarity alone (D0088). `min_cluster_size` is
+        # ABSOLUTE, unlike the shipped rule's 5%-of-sample threshold, so the bar
+        # does not rise with depth -- which is the whole reason the shipped
+        # curve is flat and says nothing about saturation.
+        from shared import pose_cluster as pcl
+        lab2 = pcl.cluster(heavy[idx])
+        real = [int((lab2 == c).sum()) for c in sorted(set(lab2) - {-1})]
+        n_noise = int((lab2 == -1).sum())
+        cov = {f"cover_{r}a": covering_number(heavy[idx], r)
+               for r in (1.0, 1.5, 2.0)}
+        return {"poses": k, "stage1": len(real),
+                "modes": len(real), **cov,
+                # SINGLETONS COUNTED SEPARATELY (@tt8804): a noise pose is a
+                # group of one, so "unique poses" is groups + singletons.
+                "modes_with_singletons": len(real) + n_noise,
+                "noise_frac": n_noise / k,
+                "assigned_frac": 1.0 - n_noise / k,
+                "largest": max(real) if real else 0, "capped": False}
     kw = (dict(max_sub=None, min_sub_size=3, cut_a=1.0) if recipe == "fine"
           else {})
     sub, _ = psub.subdivide(lab, heavy[idx], **kw)
@@ -144,7 +241,15 @@ def main() -> int:
     ap.add_argument("--ladder", default=DEFAULT_LADDER)
     ap.add_argument("--reps", type=int, default=3)
     ap.add_argument("--gpu", default="0")
-    ap.add_argument("--recipe", choices=("shipped", "fine"), default="shipped",
+    ap.add_argument("--calls", type=int, default=1,
+                    help="repeat the dock this many times with distinct seeds; "
+                         "depth past ~2,000 poses needs more than one call")
+    ap.add_argument("--persist", action="store_true",
+                    help="write the deep cloud, so covers can be recomputed "
+                         "without paying for the dock again")
+    ap.add_argument("--posebusters", action="store_true",
+                    help="keep only PoseBusters-valid poses before clustering")
+    ap.add_argument("--recipe", choices=("shipped", "fine", "hdbscan"), default="shipped",
                     help="shipped caps modes at max_sub per stage-1 mode; "
                          "fine is the uncapped 0.1 nm split")
     ap.add_argument("--eps", type=float, default=pmod.DEFAULT_EPS,
@@ -160,7 +265,24 @@ def main() -> int:
     cands = {c.ident: c for c in nr.load_candidates()}
     if args.candidate not in cands:
         raise SystemExit(f"{args.candidate} not in the candidate table")
-    feat, heavy = deep_dock(cands[args.candidate], args.nrun, args.gpu, args.seed)
+    feat, heavy, mols = deep_dock(cands[args.candidate], args.nrun, args.gpu,
+                                  args.seed, args.calls)
+    if args.persist:
+        from shared import outputs as _so
+        from rdkit import Chem as _C
+        tp = _so.Topic("blacksmith", f"deep_cloud_{args.candidate}")
+        f = tp.write("cloud", ".sdf")
+        w = _C.SDWriter(str(f))
+        for mol, _m in mols:
+            for cid in range(mol.GetNumConformers()):
+                w.write(mol, confId=cid)
+        w.close()
+        log.info("persisted %d poses -> %s", len(feat), f)
+    if args.posebusters:
+        keep = pb_valid(mols)
+        log.info("PoseBusters: %d of %d poses valid (%.1f%%)",
+                 int(keep.sum()), len(keep), 100 * keep.mean())
+        feat, heavy = feat[keep], heavy[keep]
     n = len(feat)
     log.info("cloud: %d poses", n)
 

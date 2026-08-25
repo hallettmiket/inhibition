@@ -616,6 +616,90 @@ counting poses. Three candidates, none measured:
    deliberately (#23/#30 found it uninformative for mode choice). Worth
    re-testing under tight grouping, since that finding has the same
    loose-clustering caveat §2.4a just cleared for consensus.
+4. **Cheap intrinsic chemistry, and rigidity first** (@tt8804, raised in earlier
+   issues and again here). Rotatable-bond count, ring fraction, heavy-atom
+   count — free to compute, defined for every molecule, and **rigidity is a
+   direct mechanistic proxy for the thing the sweep measures**: a pose with few
+   rotatable bonds has fewer ways to leave the geometry it was placed in, so
+   "will it stay as shown" is partly answerable before any simulation runs.
+   Unlike the population terms it is a property of the MOLECULE rather than of
+   the clustering, so §2.4a's null does not touch it. Testable immediately
+   against the 147 swept modes with no new compute.
+
+### 2.4d Granularity: is the pose space finite, and does HDBSCAN bound it? — **PREDICTION, recorded before the measurement**
+
+@tt8804: *"given that our search area is bound by posebusters, is there still
+infinite granularity within that area and does hdbscan compensate for infinite
+granularity"* — and, on the objective: *"at the end of the day we just need to
+catch the real pose with confidence."*
+
+**Granularity is infinite, and that is a property of the space.** A pose is a
+point in a continuous space — six rigid-body degrees of freedom plus torsions.
+PoseBusters bounds the *volume*; within that volume there is always a pose
+0.01 A from any pose already held. "How many distinct poses exist" therefore has
+no physical answer, only an answer relative to a stated **resolution**.
+
+**HDBSCAN does not supply one.** Its only size control is `min_cluster_size = 3`,
+an absolute COUNT, not a distance. As a bounded volume densifies, local density
+variations resolve at ever finer scales and it keeps subdividing; in the limit it
+can return n/3 clusters. Nothing in it says *stop at 1.5 A*.
+
+| method | length scale | count as density → ∞ |
+|---|---|---|
+| DBSCAN at fixed `eps` | yes | bounded |
+| complete linkage at fixed cut | yes | bounded |
+| **HDBSCAN** | **none** | **unbounded** |
+| covering number at radius r | yes | bounded |
+
+**This cuts against D0088, and the same property is responsible for both.**
+HDBSCAN was adopted because it never produces a bag (widest mode 3.91 A against
+the shipped rule's 9.30) — and it never produces one *because* it subdivides
+until density says stop rather than until distance says stop. A virtue at 500
+poses; potentially pathological at 50,000.
+
+**Recorded before the numbers** (`exp/5` at 6,000 PoseBusters-filtered poses,
+ladder to 5,000, both metrics):
+
+* HDBSCAN cluster count **grows roughly linearly in n**, no plateau.
+* Covering number at fixed r **plateaus** — bounded volume at fixed resolution
+  has a finite answer, and deeper sampling only re-covers it.
+
+If both plateau, the prediction is wrong and HDBSCAN is self-limiting on real
+clouds, which is worth knowing. If HDBSCAN climbs while the cover flattens, then
+**the covering number is the instrument for counting and HDBSCAN is not** —
+though it may remain fine for *choosing* representatives.
+
+### 2.4e What the count is actually for — **@tt8804's reframe of the objective**
+
+> *"we just need to catch the real pose with confidence"* … *"if the counts
+> taper off and are related logarithmically then we can find a 95% confidence
+> spec and that's good enough for us"*
+
+This makes the count instrumental rather than interesting. The quantity we care
+about is **P(the cloud holds a pose within r A of the real one)**, and the
+project already reasons this way one stage earlier: `docking.n_runs: 500` is
+justified in config as *"500 runs give >= 95% probability of sampling at least
+one pose within 2 A of the true one, provided the per-run hit rate exceeds
+0.597%"*.
+
+**Log growth is sufficient — a true plateau is not required.** If the covering
+number is a + b·ln(N), it never flattens, but the marginal new coverage per added
+pose falls as 1/N, so there is a finite depth at which 95% of the covering set
+attainable at infinite depth is already held. That depth is a measured answer to
+"how deep should we dock", replacing a justification that currently asserts a
+sampling property it does not measure.
+
+The spec would read: **cover the PoseBusters-allowed volume at resolution r,
+with 95% confidence, at depth N** — and N becomes `docking.n_runs`.
+
+**THE LIMIT OF THE CLAIM, and it must travel with it.** Coverage saturation says
+we have covered *what docking can reach*, not what is real. If the true pose sits
+where docking never samples, depth does not help — and two reasons that is live
+here are already recorded: the receptor is rigid where the real complex would
+relax (§2.1), and the scoring function steers the search. So the defensible
+statement is *"we have covered the accessible space at r A with 95%
+confidence"* — necessary, not sufficient, and notably stronger than anything the
+pipeline claims today.
 
 ### 2.5 Still open
 
