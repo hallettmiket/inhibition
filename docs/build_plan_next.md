@@ -16,8 +16,8 @@ it to, and why.*
 | step | change under discussion | section | state |
 |---|---|---|---|
 | 1. Generate | — | — | not discussed |
-| **2. Dock** | **add PoseBusters as a validity gate; quota on valid poses** | **§1** | **DRAFT** |
-| 3. Group into modes | — | — | not discussed |
+| **2. Dock** | **add PoseBusters as a validity gate; quota on valid poses** | **§1** | **measured — D0089** |
+| **3. Group into modes** | **replace the two-stage splitter — D0086, D0088** | **§2** | **in discussion** |
 | 4. Score (near-attack) | — | — | not discussed |
 | 5. Rank | — | — | not discussed |
 | 6. Shortlist | — | — | not discussed |
@@ -40,7 +40,7 @@ running anything.
 
 ---
 
-## 1. Docking — PoseBusters as a validity gate — **DRAFT**
+## 1. Docking — PoseBusters as a validity gate — **DRAFT** · recorded as **D0089**
 
 ### 1.1 What we do now
 
