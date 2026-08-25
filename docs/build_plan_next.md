@@ -835,6 +835,40 @@ while at 3.5 Å it takes ~10× the poses to double. **And a covering set IS the
 it carries an explicit length scale where HDBSCAN carries none, and singletons
 stop being a special case — a pose alone in its ball is a ball with one member.
 
+### 2.4i Is the covering set reproducible? — **MEASURED**
+
+If a covering set is to replace mode clustering, it must survive the test the
+incumbent already passed (§2.3). Same five independent dockings,
+`exp/8/cover_reproducibility.py`:
+
+| method | centres / replicate | pairwise recovery | in **all 5** |
+|---|---:|---:|---:|
+| HDBSCAN modes | 54–63 | **88.6%** | 41/59 (69%) |
+| cover @ 2.0 Å | 88–97 | 69.5% | 37/92 (40%) |
+| **cover @ 3.5 Å** (MD tolerance) | **34–43** | **83.4%** | **25/37 (68%)** |
+| cover @ 5.0 Å | 12–16 | **93.8%** | 12/15 (80%) |
+
+**HDBSCAN is not magically more reproducible.** Its 88.6% sits between the
+3.5 Å and 5.0 Å covers — it is operating at *some* effective resolution and
+delivering the reproducibility that resolution buys. It just does not let you
+choose which.
+
+At the pipeline's own tolerance the cover matches HDBSCAN's core-set fraction
+(68% vs 69%) with **34–43 centres instead of 54–63**, and at 5 Å it beats it
+outright on both measures with a quarter of the representatives.
+
+**That is the argument for the covering approach, and it is not "it is more
+reproducible".** It is that **reproducibility becomes a dial**. Resolution,
+count and reproducibility move together and explicitly; under HDBSCAN they move
+together and silently.
+
+**⚠ Caveat that must be fixed before this chooses anything.** Greedy
+farthest-point is deterministic only *after* the first centre, and the
+implementation starts at index 0 — an arbitrary pose. A different start gives a
+similar-sized but not identical set, so these recovery rates are a **lower
+bound** on a start-invariant construction. Starting from the medoid would remove
+the arbitrariness; it has not been done.
+
 ### 2.5 Still open
 
 - **Scaling.** No HDBSCAN saturation run exists — `exp/5` covered `shipped` and
