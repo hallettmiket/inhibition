@@ -26,6 +26,9 @@ evidence:
   - 'at production depth 500 poses need 275 representatives at 2.0 A; de-duplication is 45%, and at 1.0 A it is 3%'
   - 'HDBSCAN noise fraction RISES with depth, 33% -> 40%, where filling in known regions would make it fall'
   - 'docking cost measured at 3 x 2,000 runs in 32 seconds, so depth is not budget-limited'
+  - 'THE REACTIVE RECEPTOR IS NOT THE CAUSE (exp/12, 7 molecules, 2,000 runs each, both arms): the PLAIN receptor is FLATTER. Mean reactive-minus-plain energy span +1.89 kcal/mol and within-2-kcal fraction -0.307, consistent in 7 of 7'
+  - 'plain-receptor clouds put 25-75% of poses within 2 kcal/mol of the best (mean 53%) against 3.5-42% for the reactive arm'
+  - 'saturation is unchanged by the receptor: b at 3.5 A is 0.28-0.45 in both arms, mean reactive-minus-plain +0.072'
 runbook: null
 ---
 
@@ -113,18 +116,37 @@ in known regions it would fall.
   linearly forever. Any bounded count needs an explicit resolution, which is a
   decision we make rather than one the data yields.
 
+## The reactive receptor was checked, and it is NOT the cause — `exp/12`
+
+The obvious objection was that we soften the van der Waals parameters
+(`R_EQ_12 = 3.2`, `EPS_12 = 1.0`) so the warhead can approach Cys113, which
+flattens the landscape near the warhead by construction. Seven molecules were
+docked at 2,000 runs into **both** the reactive receptor and the plain 3IKD.
+
+**The plain receptor is flatter, in 7 of 7.**
+
+| | reactive − plain (mean) | reading |
+|---|---:|---|
+| energy span across the cloud | **+1.89 kcal/mol** | reactive spans MORE |
+| fraction within 2 kcal/mol of best | **−0.307** | reactive discriminates MORE |
+| saturation exponent b at 3.5 Å | +0.072 | essentially unchanged |
+
+On the plain receptor, **25–75% of poses (mean 53%) sit within 2 kcal/mol of the
+best**, against 3.5–42% for the reactive arm. Stock AutoDock on this pocket is
+*less* discriminating than our modified setup, not more.
+
+So the flatness is a property of the scoring function on this pocket, and the
+reactive parameterisation mildly improves it. **The finding stands and is
+strengthened.** Saturation is untouched: b sits at 0.28–0.45 in both arms.
+
+Stated as the experiment states it: this compares the reactive SETUP against the
+plain one, and the reactive arm also carries reactive atom typing and a flexible
+sidechain. It supports *"our reactive setup is not what flattens the
+landscape"*, not a claim about the softened vdW term in isolation.
+
 ## What must be checked before this hardens
 
-**The flatness may be partly self-inflicted, and that is testable.** The screen
-docks into a *reactive* receptor whose van der Waals parameters were softened on
-purpose (`R_EQ_12 = 3.2`, `EPS_12 = 1.0`) so the warhead can approach Cys113.
-Softening the potential flattens the landscape near the warhead by construction.
-**Dock the same molecule into the plain 3IKD and compare the energy spread and
-the saturation exponent.** If the plain receptor's cloud saturates, the
-non-saturation is a property of our reactive setup rather than of the pocket, and
-that changes what to do about it.
-
-**Also one molecule.** Everything above is `t4_716800c125a7`, which has four
+**One molecule for the saturation curve.** Everything above is `t4_716800c125a7`, which has four
 rotatable bonds. A more rigid ligand should saturate faster. The deep cloud is
 persisted and docking is 9 seconds per 2,000 runs, so two or three more
 molecules is cheap and should precede any general claim.

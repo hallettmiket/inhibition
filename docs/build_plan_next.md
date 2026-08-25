@@ -788,14 +788,52 @@ basins to fall into. A flat landscape has none, so every run ends somewhere
 slightly new and the count grows with the looking. It also kills candidate 3 in
 §2.4c before it was tested: energy cannot select a covering set either.
 
-**⚠ The flatness may be partly self-inflicted, and it is testable.** The screen
-docks into a *reactive* receptor whose van der Waals parameters were deliberately
-softened (`R_EQ_12 = 3.2`, `EPS_12 = 1.0`) so the warhead can approach Cys113 —
-which flattens the landscape near the warhead by construction. **Dock the same
-molecule into the plain 3IKD and compare the spread and the exponent.** If the
-plain receptor saturates, this is a property of our setup rather than of the
-pocket. That check should happen before any of §2.4f/§2.4g is treated as settled,
-and it costs 9 seconds of docking plus a PoseBusters pass.
+**Checked, and the reactive receptor is NOT the cause** (`exp/12`, 7 molecules,
+2,000 runs into each of the reactive and the plain 3IKD). The objection was that
+our softened van der Waals parameters (`R_EQ_12 = 3.2`, `EPS_12 = 1.0`) flatten
+the landscape by construction. **The plain receptor is flatter, in 7 of 7:**
+
+| | reactive − plain (mean) | reading |
+|---|---:|---|
+| energy span across the cloud | **+1.89 kcal/mol** | reactive spans MORE |
+| fraction within 2 kcal/mol of best | **−0.307** | reactive discriminates MORE |
+| saturation exponent b @ 3.5 Å | +0.072 | essentially unchanged |
+
+On the plain receptor **25–75% of poses (mean 53%)** lie within 2 kcal/mol of
+the best, against 3.5–42% on the reactive one. Stock AutoDock on this pocket is
+*less* discriminating than our modified setup. **§2.4g stands and is
+strengthened**, and saturation is untouched — b is 0.28–0.45 in both arms.
+
+(The experiment compares the reactive SETUP against the plain one; the reactive
+arm also carries reactive typing and a flexible sidechain. It supports "our setup
+is not what flattens the landscape", not a claim about the vdW term alone.)
+
+### 2.4h The resolution is already chosen by the pipeline — **@tt8804**
+
+> *"we already tolerate 0.35 RMSD, we just need to decide how the molecule should
+> fit in different regions of the cloud."*
+
+`md.sweep_survivor_rmsd_nm = 0.35` nm — **3.5 Å of ligand RMSD still counts as
+"held"** at the next stage. Two docked poses closer than that are within the
+tolerance of the very thing that will judge them, so resolving finer is resolving
+distinctions the pipeline then discards. HDBSCAN's median mode is ~1.5 Å wide:
+**it works four times finer than the tolerance downstream applies.**
+
+At the pipeline's own tolerance the numbers become tractable, and the exponent
+falls sharply with resolution:
+
+| resolution | exponent b | centres for 6,000 poses | centres at 500 |
+|---|---:|---:|---:|
+| 1.0 Å | 0.885 | 3,632 (61%) | 454 |
+| 2.0 Å | 0.649 | 1,104 (18%) | 275 |
+| **3.5 Å** (MD tolerance) | **0.417** | **254 (4%)** | **96** |
+| 5.0 Å | 0.257 | 56 (1%) | 32 |
+
+Still no asymptote, but at 1 Å the count doubles with every doubling of poses,
+while at 3.5 Å it takes ~10× the poses to double. **And a covering set IS the
+"partition the volume" proposal**: the greedy centres are the representatives,
+it carries an explicit length scale where HDBSCAN carries none, and singletons
+stop being a special case — a pose alone in its ball is a ball with one member.
 
 ### 2.5 Still open
 
