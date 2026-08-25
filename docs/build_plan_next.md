@@ -398,7 +398,125 @@ improved the ranking — because it measurably did not.
 
 ---
 
-## 2-9. Remaining steps — **not yet discussed**
+## 2. Pose splitting — replace the two-stage splitter — **DRAFT**
+
+Recorded position: **D0086** (two proposed fixes measured and rejected) and
+**D0088** (modes come from pose similarity alone, HDBSCAN) — the latter still
+`proposed`. This section adds what @tt8804 asked for on 2026-08-17:
+reproducibility, and whether the noise matters.
+
+### 2.1 There is no answer key for this state, and that decides the method
+
+@tt8804: *"sulf is not relevant here. it is already bound in an induced fit. we
+are trying to model a transient pose here that is pre-covalent and a naive
+protein."*
+
+Sulfopin's crystal is the **covalent adduct** in an **induced-fit** pocket. We
+model a **transient pre-covalent** encounter against a **naive** receptor —
+the wrong state on both axes. And a transient complex is transient, which is why
+it is not in the PDB. **No experimental ground truth exists for what we are
+clustering.**
+
+Two consequences:
+
+1. D0088's "the pose we know is right" **overstates what those three references
+   are**. `exp/4_election`'s `REFERENCES` table holds three T_4 candidates —
+   never synthesised, never assayed — whose poses our own docking produced, our
+   own ranking elected, and our own 100 ns MD did not dislodge. The code is
+   honest (*"a mode a run elected AND a trajectory confirmed"*); the prose is
+   not. They are the best available reference **because nothing better exists**,
+   not because they are known-correct.
+2. **Accuracy is unavailable, so the case must rest on internal consistency** —
+   width, purity, reproducibility, scaling. Those need no answer key, and they
+   are most of what D0088 already measured.
+
+### 2.2 The argument D0088 should lead with
+
+The purity test labels each pose by whether it reaches attack geometry, then
+asks whether a mode's poses agree — a mode at 0.4 is two populations under one
+label.
+
+**The shipped rule clusters on reactive-atom position and warhead direction,
+which ARE the distance and angle terms of that label.** It groups along the
+exact axes the purity test measures, so it should score artificially well. It
+has every advantage on this metric.
+
+It still loses: widest mode 9.30 Å against 3.91, largest 137 poses against 14,
+p90 width 7.86 Å against 2.52. **A rule that cheated on the metric and still
+came last** is a far harder result to argue with than a single MD-confirmed
+pose landing in a big group.
+
+### 2.3 Reproducibility — **MEASURED** (`exp/8_hdbscan_reproducibility`)
+
+@tt8804: *"is it reproducable. lets check the reproducability first."*
+
+A mode that does not survive an independent draw of the pose cloud is not a
+binding mode; it is a partition of one sample. Five independent 500-run dockings
+of `t4_716800c125a7`, distinct seeds, each clustered on its own; modes matched
+between replicates by medoid heavy-atom RMSD ≤ 2.0 Å — the same in-place metric
+the clustering itself uses.
+
+| | modes per replicate | noise | largest mode | pairwise recovery | in ALL 5 |
+|---|---|---:|---:|---:|---:|
+| **HDBSCAN** | 54–63 | 26–33% | **11–20** | **88.6%** (79.7–94.7) | **41 of 59 (69%)** |
+| shipped | 2–4 | 0% | **266–349** | 65.8% (25.0–100) | **1 of 3 (33%)** |
+
+**HDBSCAN is markedly the more reproducible rule**, on both measures.
+
+Two things about the shipped row deserve their own sentence:
+
+* **Its largest mode holds 266–349 of ~400 poses** — 65–86% of the entire cloud
+  in one "binding mode". That is not a mode; it is the cloud with a label.
+* **Its mode count swings 2 → 4 across replicates**, a 2× change in how many
+  ways the molecule is said to bind, from re-running the same docking. Only one
+  of its three modes survives all five draws.
+
+@tt8804's proposed proxy — *"as long as HDBSCAN scales logarithmically with
+poses we could consider it reproducible, since we generate about the same number
+of poses"* — is sound reasoning, and this measures the thing directly rather
+than through the proxy. Stable count is **necessary** for reproducibility, not
+sufficient: the same *number* of modes could be different modes each time, which
+is close to what the shipped rule does. **Scaling still matters for a different
+reason** and is §2.5.
+
+### 2.4 The noise is a fringe, and it is mildly protective — **MEASURED**
+
+The open worry in D0088 was that 29% of poses become noise, and that a rare
+transient pose might be exactly what lives there. Measured across the same five
+replicates, against the screen's own `viable` flag:
+
+| | |
+|---|---:|
+| overall noise rate | 28.2% |
+| **P(noise \| attack-ready)** | **23.5%** |
+| **P(noise \| not attack-ready)** | **29.3%** |
+| risk ratio | **0.80** |
+
+**An attack-ready pose is *less* likely to be discarded as noise than an
+ordinary one.** The noise is a sparse fringe, not where the good poses hide.
+
+Caveat worth carrying: the per-replicate spread is wide — 13.7% of viable poses
+were noise in r5 against 38.0% in r2. The mean is reassuring; the variance is
+not yet explained, and on a single molecule it should not be over-read.
+
+### 2.5 Still open
+
+- **Scaling.** No HDBSCAN saturation run exists — `exp/5` covered `shipped` and
+  a `fine` recipe only. It matters because `consensus = mode_size / n_poses`: if
+  mode count climbs with depth, the denominator moves under every per-mode
+  score. Needs a deep cloud, which is not on disk (deepest persisted is 439
+  poses) and would need docking.
+- **One molecule.** Everything in §2.3 and §2.4 is `t4_716800c125a7`. D0088's
+  quality figures cover three. Neither is a library.
+- **What replaces `consensus`.** At 54–63 modes over ~400 poses, a mode holds
+  ~2% of the cloud. `consensus` and the 12-pose estimability gate were both
+  sized against 2–5 modes per molecule; under HDBSCAN nearly every mode fails
+  both. **This is the real cost of adopting D0088, and it is not the clustering
+  — it is everything downstream of it.**
+
+---
+
+## 3-9. Remaining steps — **not yet discussed**
 
 Placeholders, so the order of work is visible. Each gets its own section, with
 the same structure: what we do now, what changes, what it costs, what would make
