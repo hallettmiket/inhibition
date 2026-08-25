@@ -499,6 +499,74 @@ Caveat worth carrying: the per-replicate spread is wide — 13.7% of viable pose
 were noise in r5 against 38.0% in r2. The mean is reassuring; the variance is
 not yet explained, and on a single molecule it should not be over-read.
 
+### 2.4a Frequency does not predict outcome, at any clustering tightness — **MEASURED**
+
+@tt8804: *"I feel like a pose that shows up many times is more likely to be the
+real pose but I guess not."*
+
+It is the standard intuition and it is what `consensus` encodes. The project had
+measured against it twice — **D0071** (neither ranking metric predicts pose
+stability) and **D0073** (consensus *depletes* validated mechanisms) — but both
+under the **shipped** clustering, where a mode routinely holds 65–86% of the
+cloud. A group that large has a consensus near 1 whatever the molecule does, so
+those tests may have been measuring the clustering rather than the intuition.
+
+`exp/9_consensus_vs_outcome` re-asks it under tight clustering. For each of the
+147 swept modes, the pose actually simulated is located inside an HDBSCAN
+re-clustering of its own cloud, and that group's size is correlated against what
+the trajectory then did.
+
+| predictor | vs 5 ns attack-ready fraction (n = 147) | vs 100 ns max ligand RMSD (n = 15) |
+|---|---:|---:|
+| consensus, shipped clustering | ρ = +0.102 (p = 0.22) | ρ = +0.320 (p = 0.25) |
+| consensus, HDBSCAN (tight) | **ρ = +0.012** (p = 0.89) | ρ = +0.121 (p = 0.67) |
+| group size, HDBSCAN (tight) | **ρ = −0.004** (p = 0.96) | ρ = +0.130 (p = 0.65) |
+
+**Null everywhere, and tighter clustering makes it *more* null, not less.** The
+median group holding a simulated pose was 74 poses under the shipped rule and
+**6** under HDBSCAN — a 12× change in what "shows up many times" means, with no
+change in the (absent) relationship to outcome.
+
+At n = 147 this has ~80% power to detect ρ = 0.2, so what is ruled out is
+anything beyond a weak effect. Note also the sign against 100 ns RMSD is
+*positive* — higher consensus, more drift — though far from significant.
+
+**So D0071 and D0073 were not artefacts of loose clustering.** How often docking
+returns to a pose carries no information about whether that pose survives
+dynamics, and no amount of tightening the clusters creates any.
+
+### 2.4b Consequence: clustering is de-duplication, not ontology — **@tt8804's reframe**
+
+> *"we should just treat the 'noise' as singleton poses and reframe clustering as
+> a cost saving mechanism to collapse the number of poses."*
+
+This follows directly from §2.4a, and it resolves the noise question by
+dissolving it:
+
+* A pose HDBSCAN calls noise is a **group of one**, not a pose that failed to
+  exist. `exp/9` already scores it that way — `tight_size = 1` for noise — and
+  under that reading "how many poses agree with this one" stays defined for
+  every pose in the cloud.
+* If group size predicts nothing (§2.4a), then a mode is **not** a claim about
+  how the molecule binds. It is a statement that these N poses are close enough
+  that simulating all N would be buying the same answer N times.
+* Clustering's job is therefore to **choose what to simulate under a budget**,
+  and the property that matters is *coverage* — does the set of representatives
+  span the cloud? — not *population*.
+
+**What this changes downstream, and it is most of the cost of D0088:**
+
+| | under "modes are real" | under "clustering is de-duplication" |
+|---|---|---|
+| `consensus` = mode_size / n_poses | a score term | **has no meaning as a score** — §2.4a |
+| the 12-pose rank gate (D0084) | estimability of a proportion | **wrong question**; a singleton is a legitimate candidate |
+| `viable_fraction` per mode | a property of a binding mode | a property of a *cluster*, i.e. of the clustering |
+| what to simulate | the highest-scoring modes | a **covering set** of the cloud, budget-sized |
+
+That is a bigger change than swapping the clusterer, and it is the honest
+consequence of the measurement rather than a preference. **Open: what selects
+the covering set, if not a score over populations.**
+
 ### 2.5 Still open
 
 - **Scaling.** No HDBSCAN saturation run exists — `exp/5` covered `shipped` and
