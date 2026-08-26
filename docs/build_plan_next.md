@@ -933,6 +933,46 @@ score's error) and with `exp/12` (the plain receptor is flatter still).
 **Fifth independent confirmation of the PoseBusters rate**: 87.0–94.4%, mean
 **89.4%** across these ten.
 
+### 2.4k The volume partition is refuted — **D0091**
+
+@tt8804 proposed partitioning the pose-occupied volume at 3 Å instead of
+clustering by similarity. I measured it, reported that it held, and an
+adversarial audit demolished it. All three load-bearing findings verified
+independently:
+
+**The cloud fills the box.** Heavy-atom extent **25.48 × 25.42 × 25.16 Å** in a
+26 Å cube — 97–98% of every axis. AutoDock hard-clips to the grid, so the volume
+question had one possible answer before any pose was docked. Catalogue entry #12
+in a new coordinate system: the **search box** standing in for the **receptor
+cavity**. PoseBusters, credited with the bounding, removes ~10%; the box removes
+the rest.
+
+**The partition rebuilds the bag.** 49 cells, largest holds **1,758 of 6,000
+poses**, median **6.08 Å** and max **9.13 Å** RMSD inside a cell **3 Å** wide.
+D0088 condemned the shipped rule at 137 poses spanning 9.3 Å — this is 13× the
+membership at the same width. Unfixable by tuning: two poses can share a centroid
+and be 180° flips, so a partition of ℝ³ cannot bound a distance in configuration
+space.
+
+**The exponent contrast dissolves.** One OLS slope was fitted across a curved
+log-log plot, and every rung was a subsample of one pooled cloud rather than an
+independent docking. That bias inflates the volume ladder's low rungs ~19% while
+leaving the covering number untouched (177 vs 177) — it **manufactured** the
+contrast. Corrected: volume **b ≈ 0.32**, cover **b ≈ 0.325**.
+
+**Two numbers in §2.4 were wrong and are corrected here.** "14% of the box" used
+point occupancy (verified 14.4%), the column `exp/13`'s own docstring disowns;
+sphere occupancy is ~34%. "1.71× poses → 1.029× cells" was one draw; over 20 the
+mean is 1.102×.
+
+**What survives:** at 6,000 poses the cloud has swept ~a third of its own box and
+is still adding territory at b ≈ 0.32 by every metric. Diminishing returns, not a
+bound.
+
+**The one informative experiment:** re-dock at 1.5× and 2× box. If the envelope
+expands proportionally the bound was always the box; if not, the intuition was
+right and I tested it in a way that could not show it.
+
 ### 2.5 Still open
 
 - **Scaling.** No HDBSCAN saturation run exists — `exp/5` covered `shipped` and
