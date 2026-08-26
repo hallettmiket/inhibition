@@ -881,6 +881,58 @@ the resolution.** The medoid start is kept as the default regardless, because
 depending on file order is not a property worth having even when it costs
 nothing; `--start first` reproduces the old behaviour.
 
+### 2.4j Does chemistry predict saturation? No — and there is no cutoff to place — **MEASURED**
+
+`exp/11`, 10 molecules stratified on rigidity and size, 2,000 runs each,
+PoseBusters-filtered, covering number fitted at the pipeline's 3.5 Å tolerance.
+
+| ident | rotb | heavy | fsp3 | PB % | **b** | centres@500 |
+|---|---:|---:|---:|---:|---:|---:|
+| t4_98951476e4f8 | 2 | 22 | 0.38 | 88.7 | 0.368 | 73 |
+| t4_e6cf2d8e26d2 | 2 | 24 | 0.50 | 91.7 | 0.385 | 66 |
+| t4_b2b9dab376eb | 3 | 19 | 0.60 | 87.0 | 0.438 | 58 |
+| t4_61d3ee480cc3 | 3 | 24 | 0.59 | 88.3 | 0.384 | 46 |
+| t4_7625f3e0d7f3 | 4 | 21 | 0.54 | 94.4 | 0.396 | 74 |
+| t4_df8e56d56792 | 4 | 27 | 0.45 | 87.2 | 0.479 | 86 |
+| t4_04fb46a6929a | 5 | 22 | 0.57 | 92.0 | 0.452 | 64 |
+| t4_45aa6c98bf0e | 5 | 28 | 0.50 | 87.3 | 0.429 | 110 |
+| t4_f0b05f412e7f | **6** | 23 | 0.56 | 89.2 | **0.431** | 74 |
+| t4_d6cd64168a1c | **8** | 29 | 0.67 | 88.2 | **0.431** | 99 |
+
+**Nothing predicts it.** Across 14 tests, **zero** reach p < 0.05 — against 0.7
+expected by chance alone. Rotatable bonds come closest at ρ = +0.55, p = 0.102.
+
+**And the interim signals did not survive the extremes**, which is the reason to
+have run all ten:
+
+| | at n = 8 | at n = 10 |
+|---|---|---|
+| b vs rotatable bonds | +0.683, p = 0.062 | **+0.546, p = 0.102** |
+| centres@500 vs fsp3 | −0.719, **p = 0.045** | **−0.293, p = 0.412** |
+
+The two most flexible molecules — **6 and 8 rotatable bonds** — both returned
+**b = 0.431**, dead on the median of 0.430. If flexibility drove saturation they
+should have been the worst; they were average. The apparent trend at n = 8 was
+the middle of the range doing the work.
+
+**The practical answer, which stands regardless of significance: b spans
+0.368–0.479 across a 4× range in flexibility.** Every molecule sits in a narrow
+band around 0.43. There is no subpopulation that saturates and another that does
+not, so **there is no cutoff to place** — a rigidity filter would exclude
+molecules at b = 0.45 to keep ones at b = 0.39, discarding real chemistry to buy
+essentially nothing.
+
+**The bias trap this experiment was written to avoid did not need to be sprung.**
+§2.4c's worry was that b would track rigidity and tempt a rotatable-bond filter
+that bought a saturating search by discarding flexible chemistry. It does not
+track it, so the question does not arise — and the honest reading is that
+**non-saturation is a property of the pocket and the scoring function, not of the
+ligands.** That is consistent with §2.4g (the landscape is flat to within the
+score's error) and with `exp/12` (the plain receptor is flatter still).
+
+**Fifth independent confirmation of the PoseBusters rate**: 87.0–94.4%, mean
+**89.4%** across these ten.
+
 ### 2.5 Still open
 
 - **Scaling.** No HDBSCAN saturation run exists — `exp/5` covered `shipped` and
