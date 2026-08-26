@@ -90,11 +90,21 @@ def receptor_coords(names: list) -> list:
     return out
 
 
-def load_cloud(ident: str):
+def raw_cloud_path(ident: str):
+    """Newest RAW cloud for `ident`, or None. D0093's unfiltered counterpart."""
+    fs = sorted(glob.glob(str(rp.BLACKSMITH / f"raw_cloud_{ident}/cloud_*.sdf")),
+                key=os.path.getmtime)
+    return Path(fs[-1]) if fs else None
+
+
+def load_cloud(ident: str, raw: bool = False):
     from rdkit import Chem, RDLogger
     RDLogger.DisableLog("rdApp.*")
-    f = rp.allposes_dir() / f"{ident}.sdf"
-    if not f.is_file():
+    # THE SOURCE IS NAMED, NOT DEFAULTED. `<topic>_allposes` holds only poses
+    # whose DBSCAN label survived (D0093), so measuring a replacement for DBSCAN
+    # on it answers an easier question than the one asked.
+    f = raw_cloud_path(ident) if raw else (rp.allposes_dir() / f"{ident}.sdf")
+    if f is None or not f.is_file():
         return None, None
     ms = [m for m in Chem.SDMolSupplier(str(f), removeHs=False, sanitize=True)
           if m is not None]
@@ -120,6 +130,9 @@ def main() -> None:
     ap.add_argument("--n-molecules", type=int, default=20)
     ap.add_argument("--residues", type=int, default=15)
     ap.add_argument("--conformers", type=int, default=50)
+    ap.add_argument("--raw", action="store_true",
+                    help="read RAW clouds (scripts/persist_raw_clouds.py) instead "
+                         "of the DBSCAN-filtered `_allposes` files -- D0093")
     ap.add_argument("--seed", type=int, default=7)
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -133,14 +146,21 @@ def main() -> None:
                               f"rank_v2/rank_v2_T4_{rp.topic()}_conditional_eb_*.csv")),
                 key=os.path.getmtime)
     rk = pd.read_csv(fs[-1])
+    # THE DRAW IS MADE OVER THE SAME POOL EITHER WAY, so a raw run and a filtered
+    # run compare the same molecules; only then is the filter isolated.
     mols = [m for m in rk.parent_ident.dropna().unique()
             if (rp.allposes_dir() / f"{m}.sdf").is_file()]
     rng = np.random.default_rng(a.seed)
     mols = list(rng.choice(mols, size=min(a.n_molecules, len(mols)), replace=False))
+    if a.raw:
+        have = [m for m in mols if raw_cloud_path(m) is not None]
+        log.info("RAW mode: %d of %d sampled molecules have a raw cloud",
+                 len(have), len(mols))
+        mols = have
 
     rows, gr = [], []
     for n, ident in enumerate(mols, 1):
-        xyz, meta = load_cloud(ident)
+        xyz, meta = load_cloud(ident, a.raw)
         if xyz is None:
             continue
         tmpl, hv = meta
@@ -177,12 +197,14 @@ def main() -> None:
                  n, len(mols), ident, len(xyz), len(sizes), sizes.max(), tol, max(mx))
 
     d = pd.DataFrame(rows); g = pd.DataFrame(gr)
-    t = sout.Topic("blacksmith", "contact_clustering")
+    t = sout.Topic("blacksmith",
+                   "contact_clustering_raw" if a.raw else "contact_clustering")
     d.to_csv(t.write("per_molecule", ".csv"), index=False)
     g.to_csv(t.write("per_group", ".csv"), index=False)
 
     print("\n" + "=" * 78)
-    print("  CONTACT-SPACE GROUPING — do a group's poses resemble each other?")
+    print("  CONTACT-SPACE GROUPING — do a group's poses resemble each other?"
+          + ("   [RAW CLOUDS]" if a.raw else "   [DBSCAN-filtered clouds, D0093]"))
     print("=" * 78)
     print(f"\n  molecules: {len(d)}   poses: {int(d.poses.sum()):,}   "
           f"landmarks: {len(names)}")

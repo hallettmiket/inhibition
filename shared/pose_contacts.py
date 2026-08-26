@@ -13,12 +13,22 @@ than in the box's coordinates -- so it is invariant to any rigid motion of the
 complex, and orientation is carried implicitly: flip the molecule and a
 different atom is the one near a given residue.
 
-THE SCALE IS THE MOLECULE'S OWN. Each atom's contribution is weighted by the
-inverse of its predicted fluctuation (`exp/15`: an aligned conformer ensemble
-ranks per-atom flexibility at rho = 0.657 over 147 molecules, 100% positive,
-though 2.21x high in absolute scale, so the cut is calibrated). A pose differing
-only in a wagging tail is the same pose, because the tail wags anyway; the same
-deviation in a rigid core is a different pose.
+THE ATOM WEIGHTS ARE THE MOLECULE'S OWN; THE TOLERANCE, AS SHIPPED, IS NOT.
+The distinction is D0094 and it was got wrong here first. Each atom's
+contribution is weighted by the inverse of its predicted fluctuation, and that is
+validated: `exp/15` ranks per-atom flexibility WITHIN a molecule at rho = 0.657
+over 147 modes, 100% positive. A pose differing only in a wagging tail is the
+same pose, because the tail wags anyway; the same deviation in a rigid core is a
+different pose.
+
+The TOLERANCE asks a different question -- how one molecule's scale compares to
+another's -- and the ensemble does not answer it. ACROSS molecules the same
+prediction correlates with measurement at rho = +0.112, CI [-0.06, +0.27],
+crossing zero; the prediction varies at CV 0.15 where the truth varies at 0.45.
+Dividing it by 2.21 does not beat writing one number down for every molecule
+(Wilcoxon p = 0.515). Rotatable-bond count does, at rho = +0.523 -- see
+`tolerance_from_descriptors`, which is measured but NOT adopted, because adopting
+it re-groups every cloud and invalidates the measurements made under this one.
 
 COMPLETE LINKAGE, BECAUSE IT IS THE ONLY ONE THAT GUARANTEES THE THING WE NEED.
 Group distance is defined by the FARTHEST pair, so cutting the tree at `tol`
@@ -37,7 +47,9 @@ import numpy as np
 
 #: Beyond this, "far" is "far": an uncapped tail lets one remote residue dominate.
 CAP_A = 10.0
-#: Predicted RMSF runs 2.21x the value MD measures (exp/15, n=147). Applied so
+#: Predicted RMSF runs 2.21x the value MD measures (exp/15, n=147; 95% CI
+#: [1.95, 2.51] over a cluster bootstrap by ident, and per-molecule ratios span
+#: 0.90-6.80 with only 35% inside +-25% of it -- D0094). Applied so
 #: the tolerance is expressed on the scale the trajectories actually show.
 RMSF_CALIBRATION = 2.21
 #: No atom weight may exceed this multiple of the median, or one near-rigid atom
@@ -193,3 +205,42 @@ def within_group_max(D: np.ndarray, labels: np.ndarray) -> float:
         if len(idx) > 1:
             worst = max(worst, float(D[np.ix_(idx, idx)].max()))
     return worst
+
+
+#: Out-of-sample coefficients for log(RMSF) ~ a + b*rotatable_bonds, from
+#: 20x5-fold grouped CV over 119 molecules (exp/18). PROPOSED, NOT ADOPTED.
+DESCRIPTOR_TOLERANCE = {"intercept": None, "rotb": None}
+
+
+def tolerance_from_descriptors(mol, ensemble_rmsf=None, coeffs=None) -> float:
+    """A tolerance from rotatable-bond count, refitted rather than hardcoded.
+
+    MEASURED AND NOT ADOPTED. `exp/18/tolerance_model.py` scores it out of sample
+    at 26.2% median relative error against the shipped 32.2% and a flat
+    constant's 33.1%, and 24.9% when the ensemble is carried alongside -- which is
+    the measurement's OWN reproducibility (same molecule, different trajectory,
+    CV 0.24), so it is at the ceiling this data can support. Adopting it re-groups
+    every cloud, so it stays proposed until the re-screen (#79) that D0092's
+    conclusions would otherwise have to be re-derived against.
+
+    THE COEFFICIENTS ARE NOT BAKED IN. `DESCRIPTOR_TOLERANCE` is deliberately
+    None: a fitted constant pinned in source is exactly the stale-pin family this
+    project has hit five times (catalogue disguise #3), and this one would go
+    stale the moment the training set grows. The caller passes coefficients from
+    the fit artefact, or this raises.
+    """
+    c = coeffs or DESCRIPTOR_TOLERANCE
+    if c.get("intercept") is None or c.get("rotb") is None:
+        raise ValueError(
+            "tolerance_from_descriptors needs fitted coefficients; run "
+            "exp/18_rmsf_calibration/tolerance_model.py and pass its fit. They "
+            "are not pinned here on purpose (D0094).")
+    from rdkit.Chem import rdMolDescriptors
+    n_rot = rdMolDescriptors.CalcNumRotatableBonds(mol)
+    v = float(np.exp(c["intercept"] + c["rotb"] * n_rot))
+    if c.get("ens") is not None:
+        if ensemble_rmsf is None:
+            raise ValueError("these coefficients use the ensemble term; pass it")
+        v = float(np.exp(c["intercept"] + c["rotb"] * n_rot
+                         + c["ens"] * float(np.median(ensemble_rmsf))))
+    return v

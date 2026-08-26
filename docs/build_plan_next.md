@@ -1115,3 +1115,104 @@ numbers need re-running on raw clouds before they are cited.
   persistence within one cloud is established, agreement between clouds is not.
 * Extent, dimension and persistence are **one molecule**; only the exponent is
   replicated (12 molecules, ≤450 poses each).
+
+---
+
+## 2.6 Finalising the build: the three tests it had not passed (exp/18, exp/19)
+
+*2026-08-26. @tt8804: "if we are callibrating to one experiental constant you
+better make sure we ran a large enough and robust experiment" and "finalize this
+build with these tests".*
+
+### 2.6a The calibration constant does not survive the audit — [D0094](../decisions/D0094-the-tolerance-was-never-per-molecule-rotatable-bonds-should-set-it.md)
+
+`RMSF_CALIBRATION = 2.21` came from one line in exp/15's summary block —
+`pred_med.median() / meas_med.median()` — with no interval and no stratification.
+Audited over 147 modes from 119 molecules, cluster-bootstrapped by ident:
+
+* **95% CI [1.95, 2.51]**, per-molecule ratios spanning **0.90–6.80**, only 35%
+  of molecules within ±25% of the constant.
+
+That alone would not condemn it. This does:
+
+| correlation | value | what it validates |
+|---|---|---|
+| within a molecule, across atoms | ρ = **+0.657** | the per-atom **weights** — fine |
+| across molecules, absolute scale | ρ = **+0.112**, CI [−0.06, +0.27] | the **tolerance** — crosses zero |
+
+The prediction varies at CV 0.15 between molecules; the truth varies at CV 0.45.
+So `median(rmsf)/2.21` is one number plus noise, and **it does not beat writing
+one number down** — 31.2% median error against a flat constant's 33.8%,
+Wilcoxon p = 0.515.
+
+**Rotatable-bond count does**, out of sample (20×5-fold CV grouped by ident):
+
+| model | out-of-sample error |
+|---|---:|
+| rotatable bonds + ensemble | **24.9%** |
+| rotatable bonds | 26.2% |
+| ensemble / k (shipped) | 32.2% |
+| flat constant (the floor) | 33.1% |
+
+The measurement's own reproducibility is CV 0.24 — so 24.9% is *at the ceiling*
+this data supports.
+
+**The predictor is not broken.** 50 conformers sits within 1.4–2.1% of 100 and
+200, seed-to-seed 3.5%. It measures the wrong quantity for this purpose,
+precisely and repeatably, which is why nothing looked wrong and why more
+conformers would not have helped.
+
+`tolerance_from_descriptors` is built and **not adopted** — adopting it re-groups
+every cloud. Its coefficients are deliberately not pinned in source.
+
+### 2.6b Contact groups reproduce across independent dockings — [D0095](../decisions/D0095-contact-groups-reproduce-across-independent-dockings-and-survive-the-raw-cloud.md)
+
+The test that killed HDBSCAN. Five independent 500-run dockings:
+
+| | pairwise | in all five |
+|---|---|---|
+| groups of ≥5 poses | **98.5%** | **31 of 34 (91%)** |
+| including singletons | 79.0% | 59% |
+
+against HDBSCAN's **1 of 3** modes surviving an independent draw (D0088, #78).
+Counts per replicate 112/112/115/118/109.
+
+The DBSCAN baseline was **refused rather than reported**: it returned one mode per
+replicate and "reproduced" at 100%, which is what a degenerate rule does. It is
+circular besides — those clouds were already DBSCAN-cleaned.
+
+### 2.6c D0093's filter does not invalidate exp/16
+
+Twenty molecules re-docked raw (`scripts/persist_raw_clouds.py`), exp/16 run on
+both, same draw:
+
+| | raw | filtered |
+|---|---:|---:|
+| poses | 10,000 | 8,376 |
+| groups per molecule | 217 | 174 |
+| median within-group RMSD | 1.12 Å | 1.08 Å |
+| 90th percentile | 1.63 Å | 1.62 Å |
+| worst group anywhere | **3.76 Å** | 2.71 Å |
+
+Quality is unchanged; the count rises 25% because the removed poses become
+singletons. **One number is genuinely worse on raw data** — the worst group
+widens past the 3.5 Å sweep bar, which is exactly where a filter that removes
+outliers would flatter the method.
+
+### 2.6d A guard paid for in the running
+
+`persist_raw_clouds.py` failed all 20 molecules on `No module named 'gemmi'`,
+printed "0 ok, 20 failed", **exited 0**, and the chained exp/16 then ran against
+zero raw clouds and also reported success — in six seconds. It now raises, naming
+the environment it needs, and the chain aborts below a minimum count.
+
+### 2.6e Where the build stands
+
+Adopt-ready, with the tolerance flagged:
+
+* groups are tight (1.12 Å median on raw clouds) where both predecessors made bags;
+* they reproduce across independent dockings (91% of ≥5-pose groups in all five);
+* they never move under deeper sampling (100%, D0092);
+* the count does not saturate and **must never be reported as a mode count**;
+* **the tolerance that sets all of this is a near-constant**, and the fix is
+  measured but not adopted (D0094).

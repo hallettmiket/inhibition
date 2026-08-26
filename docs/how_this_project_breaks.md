@@ -1,6 +1,6 @@
 # How this project breaks
 
-*Written 2026-07-31, at handover. Last updated 2026-08-26 (catalogue now 26
+*Written 2026-07-31, at handover. Last updated 2026-08-26 (catalogue now 27
 entries). Read this before the README.*
 
 Every substantive bug found in this project has been the same bug.
@@ -52,6 +52,7 @@ test, because the code was doing exactly what it was written to do.**
 | 24 | `protonate()` protonated **one site**, then tested `charge == want` | Protons accumulated across sites, in basicity order, until the recorded charge is reached | It could only ever build a ±1 species, so every dication was stamped `docked_species_ok = False` and dropped — all 60 of D4's failures, **all BDHI**, zero acrylamide. Both BDHI arms would have entered the screen 15% short against a full acrylamide arm, and the only symptom would have been BDHI underperforming |
 | 25 | The GUI read **flat** run directories (`attack_sweep/`, `md_residence/`) | Directories scoped to `run.topic`, as docking and ranking already were | Bumping the topic emptied one page of three; the other two kept showing 554 sweep rows and 647 residence rows from four superseded screens *under the new run's title*. The report server had the same defect, serving the old directory from a literal path |
 | 26 | The directory named `<topic>_allposes` | The RAW cloud; it holds only poses whose DBSCAN label is in `mode_ids`, so 21% is absent | Five independent 500-run dockings returned 109-118 contact-space groups where subsamples of the raw 6,000-pose cloud returned 241-254. The box was suspected first and ruled out (both paths share one cached receptor). Centroid extent 19.19 A raw against 7.1 A filtered gave it away: **every candidate replacement for DBSCAN had been measured on clouds DBSCAN already cleaned**. `exp/5`'s docstring had said so for weeks, and travelled with nothing |
+| 27 | rho = 0.657, the WITHIN-molecule atom ranking, as licence for the tolerance | The ACROSS-molecule absolute scale, never measured -- rho = +0.112, CI [-0.06, +0.27], crossing zero | @tt8804 asked whether the experiment behind the one calibration constant was big enough. It was 147 modes, but of the wrong quantity: the predictor varies at CV 0.15 between molecules where the truth varies at 0.45, and `median(rmsf)/2.21` does not beat writing ONE number down for every molecule (Wilcoxon p = 0.515). Nothing was broken -- exp/15 is careful work reporting an honest number, for a different question |
 
 ---
 
@@ -115,8 +116,11 @@ cannot finish says so at launch rather than at the deadline.
 The check exists. It runs. It just doesn't cover the case, or it runs too late,
 or it cannot fail.
 
-Instances **11, 12, 13, 14, 16, 17, 20** — the largest group, and growing
-fastest. **#14** is the sharpest: `rank_validated` was computed as `verdict not
+Instances **11, 12, 13, 14, 16, 17, 20, 27** — the largest group, and growing
+fastest. **#27** is the subtlest: the validation RAN, honestly, and reported a
+real number -- for a different question than the one its result was used to
+settle. A validation is scoped to the quantity it measured, and "the predictor
+is validated" names a tool rather than a claim. **#14** is the sharpest: `rank_validated` was computed as `verdict not
 in (UNDERPOWERED, UNGATED, FAIL)`, a DENYLIST, so when the gate produced a
 verdict nobody had anticipated (`WEAK`) the ranking validated itself by
 default. **#17** is #11 again in new clothing — a flag computed and never read.
