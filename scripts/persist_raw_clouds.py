@@ -21,6 +21,20 @@ THE SAME MOLECULES exp/16 SAMPLED, by reproducing its selection rather than
 drawing fresh ones. A re-measurement on a different sample would confound the
 filter with the draw, and the whole point is to isolate one of them.
 
+ENERGIES ARE WRITTEN WITH THE GEOMETRY. The first version of this script wrote
+coordinates and nothing else, exactly as `nac_screen_v2` does, so every cloud on
+disk was a set of poses with no way to tell the best-scoring from the 500th. Every
+clustering experiment then treated them alike, and so did the pose viewer -- which
+is how @tt8804 came to be looking at a 2.6%-tail pose (88th energy percentile)
+drawn identically to the best one, and reasonably asked how that could be the
+lowest energy. It was not. Nothing said so.
+
+The pairing is SOLVED rather than assumed (`exp/21`): pose records and conformers
+are matched by an order-invariant signature under a Hungarian assignment, which
+must come back as the identity at ~0 A. AutoDock reports a cluster ranking beside
+the run order, so "the order" is genuinely ambiguous and pairing by position is
+the shape this project fails on.
+
 DOCKING IS STOCHASTIC AND SEEDED. `docking.seed` is set (#77), so a re-dock of the
 same molecule is reproducible; but a cloud persisted here is NOT the cloud the
 existing scores were computed from, and must not be shown beside them (#44). It
@@ -74,7 +88,13 @@ def main() -> None:
     ap.add_argument("--n-runs", type=int, default=0, help="default: docking.n_runs")
     ap.add_argument("--gpu", default="0")
     ap.add_argument("--seed", type=int, default=7)
-    ap.add_argument("--skip-existing", action="store_true", default=True)
+    # `--skip-existing` WAS store_true WITH default=True, so it was always on and
+    # there was no way to turn it off -- a flag that cannot change anything. When
+    # the writer started emitting energies, every already-persisted cloud was
+    # silently skipped and stayed energy-less, which is the exact staleness this
+    # script exists to remove.
+    ap.add_argument("--force", action="store_true",
+                    help="re-dock and re-persist even if a cloud already exists")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s",
                         datefmt="%H:%M:%S")
@@ -93,12 +113,19 @@ def main() -> None:
 
     rec_dir = ns.build_reactive_receptor(ns.RX_RECEPTOR)
     from rdkit import Chem
+    import importlib.util as _u
+    _sp = _u.spec_from_file_location(
+        "e21", REPO / "exp" / "21_pose_generation_audit" / "run_all.py")
+    _e21 = _u.module_from_spec(_sp)
+    sys.modules["e21"] = _e21
+    _sp.loader.exec_module(_e21)
+    _rec, _sg = _e21.receptor_atoms()
 
     done: list = []
     failed: list = []
     for i, ident in enumerate(want, 1):
         outdir = rp.BLACKSMITH / f"raw_cloud_{ident}"
-        if a.skip_existing and list(outdir.glob("cloud_*.sdf")):
+        if not a.force and list(outdir.glob("cloud_*.sdf")):
             log.info("[%2d/%d] %s already persisted", i, len(want), ident)
             done.append(ident)
             continue
@@ -112,12 +139,14 @@ def main() -> None:
             n_conf = mol.GetNumConformers()
             if n_conf < n_runs * 0.5:
                 raise RuntimeError(f"only {n_conf} of {n_runs} poses came back")
+            energies = _e21.energies_aligned(dlg, mol, _sg)
             tp = sout.Topic("blacksmith", f"raw_cloud_{ident}")
             f = tp.write("cloud", ".sdf")
             w = Chem.SDWriter(str(f))
             for cid in range(n_conf):
                 # NO FILTER OF ANY KIND between the dock and this write.
                 mol.SetProp("pose_index", str(cid))
+                mol.SetProp("free_energy_kcal", f"{float(energies[cid]):.4f}")
                 w.write(mol, confId=cid)
             w.close()
             log.info("[%2d/%d] %s: %d poses -> %s", i, len(want), ident, n_conf, f.name)

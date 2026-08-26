@@ -1216,3 +1216,85 @@ Adopt-ready, with the tolerance flagged:
 * the count does not saturate and **must never be reported as a mode count**;
 * **the tolerance that sets all of this is a near-constant**, and the fix is
   measured but not adopted (D0094).
+
+---
+
+## 2.7 The pose-generation audit (exp/20, exp/21) — and the correction it forces
+
+*2026-08-26. @tt8804, in the viewer: "there are literally poses outside of the
+pocket, how is that possibly the lowest energy. do a full audit of our pose
+generation step."*
+
+Full record in [D0096](../decisions/D0096-pose-generation-is-sound-the-clustering-was-measured-without-the-scores.md).
+
+### 2.7a Docking is sound — those poses are not low-energy
+
+| energy decile | receptor contacts | % of ligand uncontacted |
+|---|---:|---:|
+| best 10% | 55 | 4% |
+| worst 10% | 40 | 18% |
+
+ρ(exposure, energy) = **+0.446**, ρ(contacts, energy) = **−0.590**, monotone
+across all ten deciles. The exposed poses are 2.6% of the cloud, sit at the
+**88th energy percentile**, and **zero** are in the best decile. PoseBusters
+passes 99.2%. Nothing is outside the receptor: 0% of 4,000 poses have under 10
+contacts or sit beyond 15 Å of Cys113.
+
+### 2.7b The real defect: the clouds carried no scores
+
+`nac_screen_v2` and `persist_raw_clouds` wrote coordinates only. So **exp/16,
+exp/17, exp/19 and exp/20 all weighted the best pose and the 500th equally**, and
+so did the viewer — which is why a 2.6%-tail pose was on screen looking like a
+result.
+
+Re-persisted with energies and re-run:
+
+| kept by energy | poses | groups | top-1 share | effective # poses |
+|---|---:|---:|---:|---:|
+| 100% | 500 | 218 | 2.8% | 133 |
+| 25% | 125 | 41 | 10.4% | 23 |
+| 10% | 50 | 17 | 20.0% | 9 |
+
+**Against a size-matched random control** — the check that makes this a finding
+rather than the arithmetic of a smaller sample:
+
+| kept | best | random, same n | ratio |
+|---|---:|---:|---:|
+| 25% | 10.4% | 4.0% | **2.60×** |
+| 10% | 20.0% | 6.0% | **3.33×** |
+
+21 of 21 molecules, Wilcoxon **p = 5.9e-05**. **Low-energy poses genuinely agree
+with each other** — a positive result about the scoring function, and this project
+has not had many.
+
+### 2.7c What has to be re-read
+
+* **exp/20's "no consensus pose anywhere" is too strong.** Over the whole cloud
+  the top group holds 1.4–7.2%; within the best 10% by energy it holds 20%, with
+  an effective pose count of 9.
+* **exp/17's exponent softens**: b = +0.767 all poses vs **+0.566** within the
+  best 25%. The count still climbs — D0092 stands — but part of the climb was tail.
+* **exp/16's group quality is unaffected** — complete linkage bounds within-group
+  distance whichever poses enter.
+
+### 2.7d Fixes shipped
+
+* `persist_raw_clouds.py` writes `free_energy_kcal`, with the pose↔energy pairing
+  **solved** by an order-invariant signature under Hungarian assignment, required
+  to return the identity at ~0 Å. Two earlier versions of that guard were wrong
+  (flexres contamination, then atom-order) and both refused to run rather than
+  guessing.
+* The viewer shows energies, filters to the best N%, reports each group's best
+  energy, **defaults the pocket surface ON** (per `pose3d.py`'s founding note),
+  and warns on energy-less clouds.
+* `--skip-existing` was `store_true` with `default=True` — a flag that could not
+  be turned off, which silently kept every existing cloud energy-less after the
+  writer changed. Now `--force`.
+
+### 2.7e Still open
+
+* **`nac_screen_v2` should persist energies too** — this fixed the audit path,
+  not the production screen.
+* Re-run exp/16/17/19/20 headline numbers on energy-filtered clouds and restate
+  them with the filter named.
+* The MD-validated-pose test and the SIFt baseline, both still unrun.

@@ -18,10 +18,22 @@ holds only poses whose DBSCAN label survived, so ~21% of it is missing (D0093).
 Opening a viewer named "all poses" onto a filtered file is how that defect stayed
 invisible, so the source is named on screen and the filtered one is labelled.
 
-THE RECEPTOR IS ALWAYS DRAWN. A ligand rendered alone is a conformer, not a pose
-(pose3d.py's founding note, issue #1). Every question a group raises -- do these
-occupy the same subpocket, is this one flipped -- is a question about the ligand
-relative to the protein.
+THE RECEPTOR IS ALWAYS DRAWN, AS A SURFACE. A ligand rendered alone is a
+conformer, not a pose (pose3d.py's founding note, issue #1) -- and a CARTOON is
+barely better. pose3d.py says so in as many words: "a spectrum cartoon tells a
+reader where the chain runs; it does not tell them where the ligand IS". The
+first version of this page defaulted to cartoon with the surface OFF, and
+@tt8804 reported poses "literally outside of the pocket". They are not; Pin1's
+catalytic site is a shallow surface groove and a ribbon cannot show that. The
+surface is now on by default.
+
+ENERGY IS SHOWN, BECAUSE THE ABSENCE OF IT WAS THE REAL DEFECT. The clouds this
+page was written against carried no energies at all, so the best-scoring pose and
+the 500th were drawn identically. Audited (exp/21): poses with >30% of their atoms
+uncontacted are real but rare (2.6%) and sit at the 88th ENERGY PERCENTILE, with
+zero of them in the best decile -- the scoring function ranks them correctly and
+the viewer simply never said so. A pose set displayed without its scores invites
+exactly the conclusion it produced.
 """
 
 from __future__ import annotations
@@ -79,10 +91,18 @@ def clouds() -> list[tuple[str, str, Path]]:
     presented as available is the seed_status confusion in a new place.
     """
     out = []
+    # RAW CLOUDS FIRST: these are the only ones carrying energies, and a page
+    # that opens by default on an energy-less cloud is the defect this page had.
+    for d in sorted(rp.BLACKSMITH.glob("raw_cloud_*")):
+        fs = sorted(d.glob("cloud_*.sdf"), key=os.path.getmtime)
+        if fs and os.access(fs[-1], os.R_OK):
+            ident = d.name[len("raw_cloud_"):]
+            out.append((f"RAW + energies — {ident}", ident, fs[-1]))
     for d in sorted(rp.BLACKSMITH.glob("deep_cloud_*")):
         for f in sorted(d.glob("cloud_*.sdf")):
             if os.access(f, os.R_OK):
-                out.append((f"RAW deep cloud — {d.name[11:]}", d.name[11:], f))
+                out.append((f"RAW deep cloud, no energies — {d.name[11:]}",
+                            d.name[11:], f))
     ap = rp.allposes_dir()
     if ap.is_dir():
         for f in sorted(ap.glob("*.sdf")):
@@ -107,7 +127,12 @@ def load_cloud(path_str: str, mtime: float):
     hv = [a.GetIdx() for a in ms[0].GetAtoms() if a.GetAtomicNum() > 1]
     xyz = np.array([m.GetConformer().GetPositions()[hv] for m in ms])
     sym = [ms[0].GetAtomWithIdx(i).GetSymbol() for i in hv]
-    return xyz, sym, ms[0]
+    # NaN, not a default. A cloud written before energies were persisted has no
+    # score, and inventing one (0.0, or the median) would put a number on screen
+    # that no docking produced.
+    en = np.array([float(m.GetProp("free_energy_kcal"))
+                   if m.HasProp("free_energy_kcal") else np.nan for m in ms])
+    return xyz, sym, ms[0], en
 
 
 @st.cache_data(show_spinner=False)
@@ -118,20 +143,28 @@ def residue_landmarks(n_res: int):
 
 @st.cache_data(show_spinner=False)
 def rmsf_for(path_str: str, mtime: float, n_conf: int, seed: int):
-    xyz, sym, tmpl = load_cloud(path_str, mtime)
+    xyz, sym, tmpl, _en = load_cloud(path_str, mtime)
     hv = [a.GetIdx() for a in tmpl.GetAtoms() if a.GetAtomicNum() > 1]
     return _RMSF.predict_rmsf(tmpl, hv, n_conf, seed)
 
 
 @st.cache_data(show_spinner=False)
 def grouping(path_str: str, mtime: float, n_res: int, tol: float,
-             n_conf: int, seed: int, max_poses: int):
+             n_conf: int, seed: int, max_poses: int, keep_frac: float = 1.0):
     """Labels, medoid index per group, and a per-group summary table."""
-    xyz, sym, _ = load_cloud(path_str, mtime)
+    xyz, sym, _t, en = load_cloud(path_str, mtime)
+    # ENERGY FILTER FIRST, so the grouping describes the poses on screen.
+    if keep_frac < 1.0 and np.isfinite(en).any():
+        k = max(2, int(round(len(xyz) * keep_frac)))
+        best = np.argsort(np.where(np.isfinite(en), en, np.inf))[:k]
+        best.sort()
+        xyz, en = xyz[best], en[best]
+    else:
+        best = np.arange(len(xyz))
     if len(xyz) > max_poses:
         idx = np.random.default_rng(seed).choice(len(xyz), max_poses, replace=False)
         idx.sort()
-        xyz = xyz[idx]
+        xyz, en = xyz[idx], en[idx]
     else:
         idx = np.arange(len(xyz))
     _, res = residue_landmarks(n_res)
@@ -155,10 +188,11 @@ def grouping(path_str: str, mtime: float, n_res: int, tol: float,
         else:
             cm = cx = 0.0
         rows.append(dict(group=k, poses=len(mem),
+                         best_energy=float(np.nanmin(en[mem])) if np.isfinite(en[mem]).any() else np.nan,
                          contact_width=float(sub.max()),
                          rmsd_median=cm, rmsd_max=cx))
     t = pd.DataFrame(rows).sort_values("poses", ascending=False).reset_index(drop=True)
-    return xyz, sym, lab, np.array(med), t, idx
+    return xyz, sym, lab, np.array(med), t, idx, en
 
 
 # --------------------------------------------------------------------------- #
@@ -214,6 +248,9 @@ def main() -> None:
         labels = [c[0] for c in cs]
         pick = st.selectbox("pose cloud", range(len(cs)), format_func=lambda i: labels[i])
         label, ident, path = cs[pick]
+        if "no energies" in label:
+            st.warning("This cloud has no per-pose energies. Prefer a "
+                       "**RAW + energies** entry so the score filter works.")
         if label.startswith("mode-assigned"):
             st.warning("This file holds only poses whose DBSCAN label survived — "
                        "~21% of the cloud is absent (D0093). Prefer a RAW cloud.")
@@ -227,16 +264,39 @@ def main() -> None:
         auto = float(np.median(rmsf) / pc.RMSF_CALIBRATION)
         use_auto = st.checkbox(f"tolerance from predicted RMSF ({auto:.2f} Å)", True)
         tol = auto if use_auto else st.slider("tolerance (Å)", 0.3, 3.5, auto, 0.05)
+        st.caption("The tolerance is NOT meaningfully per-molecule — the ensemble "
+                   "ranks atoms within a molecule, not molecules against each "
+                   "other (D0094).")
+
+        st.header("Energy")
+        _x, _s, _t2, _en_probe = load_cloud(str(path), mtime)
+        has_energy = bool(np.isfinite(_en_probe).any())
+        if has_energy:
+            keep_pct = st.select_slider(
+                "keep the best N% by docking energy",
+                [10, 25, 50, 75, 100], value=100,
+                help="Poses far down the energy list are real docking output but "
+                     "are NOT what the score favours. exp/21: poses with >30% of "
+                     "atoms uncontacted sit at the 88th energy percentile.")
+            keep_frac = keep_pct / 100.0
+        else:
+            keep_frac = 1.0
+            st.warning("This cloud carries **no energies** — it was written before "
+                       "`persist_raw_clouds.py` recorded them. Every pose is drawn "
+                       "identically regardless of score. Re-persist it with "
+                       "`--force` to filter here.")
 
         st.header("Display")
         style = st.radio("ligand style", ["line", "stick"], horizontal=True)
-        surface = st.checkbox("pocket surface", False)
+        # ON BY DEFAULT. A ribbon cannot show a shallow surface groove, and the
+        # first version of this page defaulted it off -- see the module docstring.
+        surface = st.checkbox("pocket surface (shows where the pocket IS)", True)
         opacity = st.slider("surface opacity", 0.1, 1.0, 0.65, 0.05) if surface else 0.65
         height = st.slider("viewer height (px)", 400, 1100, 700, 50)
 
     with st.spinner("grouping poses…"):
-        xyz, sym, lab, med, table, _ = grouping(
-            str(path), mtime, n_res, tol, 50, 7, max_poses)
+        xyz, sym, lab, med, table, _, energy = grouping(
+            str(path), mtime, n_res, tol, 50, 7, max_poses, keep_frac)
 
     n_g = len(table)
     c1, c2, c3, c4 = st.columns(4)
@@ -244,6 +304,12 @@ def main() -> None:
     c2.metric("groups", f"{n_g:,}")
     c3.metric("largest group", f"{int(table.poses.max()):,}")
     c4.metric("tolerance", f"{tol:.2f} Å")
+    if np.isfinite(energy).any():
+        st.caption(
+            f"**Docking energy** best {np.nanmin(energy):.2f}, median "
+            f"{np.nanmedian(energy):.2f}, worst {np.nanmax(energy):.2f} kcal/mol"
+            + (f" · showing the best {keep_pct}%" if keep_frac < 1 else "")
+            + f" · {np.isfinite(energy).mean() * 100:.0f}% of poses scored.")
     st.caption(
         f"`{ident}` · {label} · {n_res} landmark residues · "
         f"{int((table.poses == 1).sum())} singleton groups "
@@ -271,6 +337,7 @@ def main() -> None:
                 lambda r: [f"background-color: {r.colour}33"] * len(r), axis=1),
             column_config={
                 "group": "group", "poses": "poses",
+                "best_energy": st.column_config.NumberColumn("best kcal", format="%.2f"),
                 "contact_width": st.column_config.NumberColumn("contact Å", format="%.2f"),
                 "rmsd_median": st.column_config.NumberColumn("RMSD med", format="%.2f"),
                 "rmsd_max": st.column_config.NumberColumn("RMSD max", format="%.2f"),
@@ -311,7 +378,8 @@ def main() -> None:
             for _, r in sub.iterrows():
                 st.markdown(
                     f"<span style='color:{colour_of.get(r.group, GREY)};font-size:20px'>&#9632;</span> "
-                    f"**#{int(r.group)}** — {int(r.poses)} poses · contact width "
+                    f"**#{int(r.group)}** — {int(r.poses)} poses · best "
+                    f"{r.best_energy:.2f} kcal/mol · contact width "
                     f"{r.contact_width:.2f} Å (≤ {tol:.2f}) · Cartesian RMSD "
                     f"median {r.rmsd_median:.2f} Å, max {r.rmsd_max:.2f} Å",
                     unsafe_allow_html=True)

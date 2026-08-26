@@ -1,6 +1,6 @@
 # How this project breaks
 
-*Written 2026-07-31, at handover. Last updated 2026-08-26 (catalogue now 27
+*Written 2026-07-31, at handover. Last updated 2026-08-26 (catalogue now 28
 entries). Read this before the README.*
 
 Every substantive bug found in this project has been the same bug.
@@ -53,6 +53,7 @@ test, because the code was doing exactly what it was written to do.**
 | 25 | The GUI read **flat** run directories (`attack_sweep/`, `md_residence/`) | Directories scoped to `run.topic`, as docking and ranking already were | Bumping the topic emptied one page of three; the other two kept showing 554 sweep rows and 647 residence rows from four superseded screens *under the new run's title*. The report server had the same defect, serving the old directory from a literal path |
 | 26 | The directory named `<topic>_allposes` | The RAW cloud; it holds only poses whose DBSCAN label is in `mode_ids`, so 21% is absent | Five independent 500-run dockings returned 109-118 contact-space groups where subsamples of the raw 6,000-pose cloud returned 241-254. The box was suspected first and ruled out (both paths share one cached receptor). Centroid extent 19.19 A raw against 7.1 A filtered gave it away: **every candidate replacement for DBSCAN had been measured on clouds DBSCAN already cleaned**. `exp/5`'s docstring had said so for weeks, and travelled with nothing |
 | 27 | rho = 0.657, the WITHIN-molecule atom ranking, as licence for the tolerance | The ACROSS-molecule absolute scale, never measured -- rho = +0.112, CI [-0.06, +0.27], crossing zero | @tt8804 asked whether the experiment behind the one calibration constant was big enough. It was 147 modes, but of the wrong quantity: the predictor varies at CV 0.15 between molecules where the truth varies at 0.45, and `median(rmsf)/2.21` does not beat writing ONE number down for every molecule (Wilcoxon p = 0.515). Nothing was broken -- exp/15 is careful work reporting an honest number, for a different question |
+| 28 | A pose cloud analysed and DISPLAYED with no scores attached | The poses paired with the energies that ranked them | @tt8804 saw poses "literally outside of the pocket" in the viewer and asked how they could be lowest-energy. They are not -- 2.6% of the cloud, 88th energy percentile, zero in the best decile, and the scorer ranks them correctly (rho = +0.446 with exposure). But `nac_screen_v2` and `persist_raw_clouds` wrote coordinates with NO energies, so exp/16, 17, 19 and 20 all weighted the best pose and the 500th equally. Filtering to the best 25% concentrates 2.60x more than a RANDOM 25% of the same cloud (21 of 21 molecules, p = 6e-05) -- signal that four experiments had been averaging away |
 
 ---
 
@@ -116,7 +117,7 @@ cannot finish says so at launch rather than at the deadline.
 The check exists. It runs. It just doesn't cover the case, or it runs too late,
 or it cannot fail.
 
-Instances **11, 12, 13, 14, 16, 17, 20, 27** — the largest group, and growing
+Instances **11, 12, 13, 14, 16, 17, 20, 27, 28** — the largest group, and growing
 fastest. **#27** is the subtlest: the validation RAN, honestly, and reported a
 real number -- for a different question than the one its result was used to
 settle. A validation is scoped to the quantity it measured, and "the predictor
@@ -135,6 +136,14 @@ Plus two of my own tests during this session:
   reintroduced regression.
 * The version-pin test flagged four "offenders" that were all **docstrings**.
   Fixing the prose was right; so was narrowing the test to executable code.
+
+**#28** is the one where nothing was wrong with any number: the poses were real,
+the geometry was fine, PoseBusters passed them, and the statistics were correct
+over exactly the set they were given. The analysis answered "what does the whole
+cloud look like" while every reader took it as "what does the docking think" --
+and those differ by the 75% of poses the score rejects. A measurement is scoped
+to the population it ran on, and a pose set displayed without its scores states
+the wrong population silently.
 
 **Defence:** for every guard, ask *what would make this pass when it should
 fail?* If the answer is "the thing it inspects being absent," assert the thing
