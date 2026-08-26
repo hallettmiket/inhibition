@@ -158,3 +158,74 @@ def mode_angle_score(labels: np.ndarray, angle_deg: np.ndarray,
             quality *= (float(m.sum()) / n_tot) ** consensus_w
         out[c] = quality
     return out
+
+
+def _renumber(lab: np.ndarray) -> np.ndarray:
+    """Largest group becomes 0, next 1, ...; -1 stays noise.
+
+    Ids that follow scan order make two runs of one molecule disagree about
+    which group is "mode 0" for no reason a reader can see.
+    """
+    order = [c for c, _ in sorted(
+        ((c, int((lab == c).sum())) for c in set(int(x) for x in lab) - {-1}),
+        key=lambda kv: -kv[1])]
+    remap = {c: i for i, c in enumerate(order)}
+    return np.array([remap.get(int(x), -1) for x in lab], dtype=int)
+
+
+def cluster_coords(coords: np.ndarray,
+                   min_cluster_size: int = MIN_CLUSTER_SIZE,
+                   min_samples: int | None = MIN_SAMPLES,
+                   selection: str = SELECTION) -> np.ndarray:
+    """HDBSCAN on the raw coordinates: (n_poses, n_atoms, 3) -> label per pose.
+
+    @tt8804: *"use HDBSCAN on only the molecules dimensions in 3d space
+    (3 x atoms dimensions) so that we generate clusters that are essentially the
+    same poses being recreated."*
+
+    Each pose is ONE POINT in 3N-dimensional space -- x1,y1,z1,x2,y2,z2,... for
+    every heavy atom, in the receptor's frame, with no superposition and nothing
+    about the anchor. Two poses are near each other exactly when every atom of
+    one sits near the same atom of the other, which is what "the same pose being
+    recreated" means. HDBSCAN then keeps the groups that persist across
+    densities and labels the rest noise, so a pose that belongs to no repeated
+    arrangement is an ORPHAN rather than being forced into the nearest mode.
+
+    SAME PARTITION AS `cluster()`, AND NOT BY COINCIDENCE. Euclidean distance in
+    3N space is `sqrt(n_atoms)` times the un-superposed RMSD `cluster()` feeds in
+    precomputed -- one constant factor for a given molecule. HDBSCAN's hierarchy,
+    its mutual-reachability graph and its excess-of-mass / leaf selection are all
+    invariant to a global rescale of the distances (nothing here sets
+    `cluster_selection_epsilon`, which is the one parameter that would not be),
+    so the labels are identical. `tests/test_pose_cluster_coords.py` asserts it
+    on random clouds rather than leaving it as an argument.
+
+    THE DIFFERENCE IS COST, NOT ANSWER. `cluster()` materialises an
+    (n_poses x n_poses) matrix built in Python over every atom; this hands
+    sklearn the (n_poses x 3*n_atoms) array and lets it index. On a 500-pose,
+    50-heavy-atom cloud that is ~1,500 floats per pose against a 250,000-cell
+    matrix, and it is what makes a 561-molecule library tractable in one pass.
+
+    UNITS. Distances here are Angstrom-of-whole-molecule-displacement, NOT RMSD:
+    a group whose Euclidean diameter is `d` has RMSD diameter `d / sqrt(n_atoms)`.
+    `min_cluster_size` is a COUNT, so it is unaffected -- but anything that reads
+    a distance out of this space has to divide, and `exp/7_coord_modes` reports
+    widths in RMSD for exactly that reason.
+    """
+    from sklearn.cluster import HDBSCAN
+
+    n = len(coords)
+    if n == 0:
+        return np.empty(0, dtype=int)
+    if n < max(2, min_cluster_size):
+        return np.full(n, -1, dtype=int)
+    x = np.asarray(coords, dtype=float).reshape(n, -1)
+    lab = HDBSCAN(min_cluster_size=int(min_cluster_size),
+                  min_samples=(int(min_samples) if min_samples else None),
+                  metric="euclidean",
+                  # Explicit because sklearn 1.10 flips the default and warns
+                  # until it does. `x` is this function's own reshape, so a copy
+                  # costs nothing and no caller's array can be mutated.
+                  copy=True,
+                  cluster_selection_method=selection).fit_predict(x)
+    return _renumber(lab)

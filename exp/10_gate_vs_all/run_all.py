@@ -148,54 +148,77 @@ def main() -> None:
     colour = {c: SERIES[i] for i, c in enumerate(classes)}
     floor = float(tc.sweep_budget_floor())
 
-    fig, axes = plt.subplots(1, 2, figsize=(13.4, 6.0), sharey=True,
-                             facecolor=SURFACE)
-    for ax, (name, v) in zip(axes, views.items()):
-        ax.set_facecolor(SURFACE)
-        ax.grid(True, color=GRID, linewidth=0.8, zorder=0)
-        for s in ("top", "right"):
-            ax.spines[s].set_visible(False)
-        for s in ("left", "bottom"):
-            ax.spines[s].set_color(RULE)
-        ax.tick_params(colors=INK_2, labelsize=9)
-        for c in classes:
-            g = v[(v.warhead_class == c) & v.conditional_eb.notna()] \
-                .sort_values("class_rank")
-            ax.plot(g.class_rank, g.conditional_eb, color=colour[c],
-                    linewidth=2.0, solid_capstyle="round", zorder=3, label=c)
-        n_over = int((v.conditional_eb >= floor).sum())
-        ax.set_title(f"{name}\n{len(v):,} modes   ·   {n_over:,} score >= {floor:g}",
-                     color=INK, fontsize=11, loc="left", pad=8)
-        ax.set_xlabel("rank within warhead class", color=INK_2, fontsize=10)
-        ax.axhline(floor, color=MUTED, linewidth=1.3, linestyle=(0, (5, 3)), zorder=2)
-    axes[0].set_ylabel("conditional_eb", color=INK_2, fontsize=10)
-    axes[0].legend(frameon=False, fontsize=9, labelcolor=INK_2, loc="upper right")
-    axes[1].annotate(f"budget_floor = {floor:g}", (axes[1].get_xlim()[1], floor),
-                     color=MUTED, fontsize=9, va="bottom", ha="right",
-                     xytext=(-4, 3), textcoords="offset points")
+    # TWO ROWS. The top is the whole curve; the bottom is the SAME data clipped
+    # to y >= floor, which is the only part the sweep ever sees (@tt8804). The
+    # bottom row's x is clipped too -- on the full rank axis the survivors are a
+    # sliver at the left edge and the shape that matters is unreadable.
+    fig, axes = plt.subplots(2, 2, figsize=(13.4, 9.6), facecolor=SURFACE)
+    for row in (0, 1):
+        for col, (name, v) in enumerate(views.items()):
+            ax = axes[row][col]
+            ax.set_facecolor(SURFACE)
+            ax.grid(True, color=GRID, linewidth=0.8, zorder=0)
+            for sp in ("top", "right"):
+                ax.spines[sp].set_visible(False)
+            for sp in ("left", "bottom"):
+                ax.spines[sp].set_color(RULE)
+            ax.tick_params(colors=INK_2, labelsize=9)
+            xmax = 0
+            for c in classes:
+                g = v[(v.warhead_class == c) & v.conditional_eb.notna()] \
+                    .sort_values("class_rank")
+                ax.plot(g.class_rank, g.conditional_eb, color=colour[c],
+                        linewidth=2.0, solid_capstyle="round", zorder=3, label=c)
+                over = g[g.conditional_eb >= floor]
+                if len(over):
+                    xmax = max(xmax, float(over.class_rank.max()))
+            ax.axhline(floor, color=MUTED, linewidth=1.3,
+                       linestyle=(0, (5, 3)), zorder=2)
+            if row == 0:
+                n_over = int((v.conditional_eb >= floor).sum())
+                ax.set_title(f"{name}\n{len(v):,} modes   ·   "
+                             f"{n_over:,} score >= {floor:g}",
+                             color=INK, fontsize=11, loc="left", pad=8)
+            else:
+                ax.set_ylim(floor, None)
+                ax.set_xlim(0, (xmax * 1.06) if xmax else 1)
+                per = {c: int(((v.warhead_class == c)
+                               & (v.conditional_eb >= floor)).sum())
+                       for c in classes}
+                ax.set_title("above the floor only   ·   "
+                             + ",  ".join(f"{c} {n:,}" for c, n in per.items()),
+                             color=INK, fontsize=10.5, loc="left", pad=8)
+                ax.set_xlabel("rank within warhead class", color=INK_2, fontsize=10)
+            if col == 0:
+                ax.set_ylabel("conditional_eb", color=INK_2, fontsize=10)
+    axes[0][0].legend(frameon=False, fontsize=9, labelcolor=INK_2, loc="upper right")
+    axes[0][1].annotate(f"budget_floor = {floor:g}",
+                        (axes[0][1].get_xlim()[1], floor), color=MUTED,
+                        fontsize=9, va="bottom", ha="right",
+                        xytext=(-4, 3), textcoords="offset points")
 
     grow = len(views["all groups (singletons kept)"]) / max(1, len(list(views.values())[0]))
     fig.suptitle("The 12-pose gate, and without it — bdhi only", color=INK,
-                 fontsize=13.5, x=0.035, ha="left", y=0.975)
+                 fontsize=13.5, x=0.035, ha="left", y=0.985)
     n_single_over = int(d[d.is_singleton].conditional_eb.ge(floor).sum())
-    fig.text(0.035, 0.925,
+    fig.text(0.035, 0.949,
              f"Same HDBSCAN grouping and the same scores on both sides; only the gate "
              f"differs.  Dropping it multiplies the candidate count by {grow:.1f}× "
              f"and adds {n_single_over} singletons above the floor.",
              color=MUTED, fontsize=9.5, ha="left")
     sv = d[d.is_singleton].conditional_eb.dropna()
-    fig.text(0.035, 0.032,
+    fig.text(0.035, 0.030,
              f"{d.parent_ident.nunique()} bdhi molecules, {skipped} skipped for a "
              f"cloud/table length mismatch. Singletons are "
              f"{d.is_singleton.mean()*100:.0f}% of all groups.",
              color=MUTED, fontsize=8.5, ha="left")
-    fig.text(0.035, 0.013,
+    fig.text(0.035, 0.011,
              f"The flat step on the right is the score's floor of resolution: a "
              f"singleton has 0 or 1 poses in the window, so conditional_eb takes only "
-             f"{sv.nunique()} distinct values across all {len(sv):,} scorable "
-             f"singletons — they cannot be ranked against each other at all.",
+             f"{sv.nunique()} distinct values across {len(sv):,} scorable singletons.",
              color=MUTED, fontsize=8.5, ha="left")
-    fig.subplots_adjust(top=0.845, bottom=0.165, left=0.058, right=0.985, wspace=0.06)
+    fig.subplots_adjust(top=0.895, bottom=0.105, left=0.058, right=0.985,
+                        wspace=0.13, hspace=0.30)
     dest = t.write("gate_vs_all", ".png")
     fig.savefig(dest, dpi=170, facecolor=SURFACE)
 

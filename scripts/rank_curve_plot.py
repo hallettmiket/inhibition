@@ -21,8 +21,10 @@ between 0.5 and 9 at adjacent ranks, and would imply the floor cuts a PREFIX of
 the ranked list. It does not: it cuts a scattered subset. A rolling median is
 drawn over the points so the trend is still readable.
 
-LOG X. The decay is in the first ~50 ranks and the tail runs to 774. On a linear
-axis the part being asked about occupies 6% of the width.
+LINEAR X BY DEFAULT (@tt8804). `--xscale log` is kept because the decay is in the
+first ~50 ranks and the tail runs to 774, so a linear axis gives the part being
+asked about ~6% of the width -- but linear is what the eye reads as "how many
+modes", and that is the question the floor is answering.
 
 Colours are the first three categorical slots of the reference palette, in fixed
 order by class name -- never cycled, and never reassigned when a filter changes
@@ -67,6 +69,12 @@ def load() -> pd.DataFrame:
 
 
 def main() -> None:
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    ap.add_argument("--xscale", choices=("linear", "log"), default="linear")
+    ap.add_argument("--xmax", type=int, default=0,
+                    help="clip the rank axis; 0 = the full class")
+    args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     import matplotlib
     matplotlib.use("Agg")
@@ -110,7 +118,8 @@ def main() -> None:
                 # all three converge toward 0 and end-labels overprinted.
                 # STAGGERED along x, because two of the three run within
                 # 0.4 units of each other and labels at one x overprinted.
-                at = [7, 20, 55][classes.index(c)]
+                at = ([7, 20, 55] if args.xscale == "log"
+                      else [90, 200, 330])[classes.index(c)]
                 at = min(at, len(g))
                 x0, y0 = g.class_rank.iloc[at - 1], g[col].iloc[at - 1]
                 ax.plot([x0], [y0], "o", color=colour[c], markersize=5, zorder=5)
@@ -120,14 +129,21 @@ def main() -> None:
             if col == "enrichment":
                 cross[c] = int((g[col] >= floor).sum())
         ax.set_title(title, color=INK, fontsize=11, loc="left", pad=8)
-        ax.set_xscale("log")
-        ax.set_xlim(1, d.class_rank.max() * 2.3)
+        ax.set_xscale(args.xscale)
+        hi = args.xmax if args.xmax else int(d.class_rank.max())
+        ax.set_xlim(1, hi * (2.3 if args.xscale == "log" else 1.10))
 
     ax = axes[1]
     ax.axhline(floor, color=MUTED, linewidth=1.4, linestyle=(0, (5, 3)), zorder=2)
-    ax.annotate(f"sweep budget_floor = {floor:g}", (1.05, floor), color=MUTED,
-                fontsize=9, va="bottom", ha="left")
-    ax.set_xlabel("rank within warhead class  (log scale)", color=INK_2, fontsize=10)
+    # Right-hand end: the left edge is where every series is still high and the
+    # label sat on top of the bdhi_c5 line.
+    ax.annotate(f"sweep budget_floor = {floor:g}",
+                (ax.get_xlim()[1], floor), color=MUTED, fontsize=9,
+                va="bottom", ha="right", xytext=(-4, 3),
+                textcoords="offset points")
+    ax.set_xlabel("rank within warhead class"
+                  + ("  (log scale)" if args.xscale == "log" else ""),
+                  color=INK_2, fontsize=10)
 
     axes[0].legend(frameon=False, fontsize=9, labelcolor=INK_2, loc="upper right")
 
@@ -143,13 +159,12 @@ def main() -> None:
              color=MUTED, fontsize=8.5, ha="left")
     fig.text(0.045, 0.012,
              "Lower panel: each point is one mode, the line a 25-mode rolling median. "
-             "Enrichment is NOT monotonic in rank \u2014 the floor cuts a scattered "
-             "subset, not a prefix.",
+             "Enrichment is NOT monotonic in rank.",
              color=MUTED, fontsize=8.5, ha="left")
     fig.subplots_adjust(top=0.895, bottom=0.105, left=0.075, right=0.965)
 
     t = sout.Topic("blacksmith", f"rank_curve_{topic}")
-    dest = t.write("rank_curve", ".png")
+    dest = t.write(f"rank_curve_{args.xscale}", ".png")
     fig.savefig(dest, dpi=170, facecolor=SURFACE)
     print(f"\n  wrote {dest}")
     for c in classes:

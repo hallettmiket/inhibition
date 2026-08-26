@@ -1,6 +1,6 @@
 # How this project breaks
 
-*Written 2026-07-31, at handover. Last updated 2026-08-17 (catalogue now 25
+*Written 2026-07-31, at handover. Last updated 2026-08-26 (catalogue now 26
 entries). Read this before the README.*
 
 Every substantive bug found in this project has been the same bug.
@@ -51,6 +51,7 @@ test, because the code was doing exactly what it was written to do.**
 | 23 | `sweep_assets.rep_dir()` matched the **molecule** | `(molecule, pose_rank)` — the runner writes one directory per swept mode | Every mode of a multi-mode molecule was drawn from whichever sibling sorted first. 114 of 168 modes had the wrong trajectory in their plot and movie, median disagreement 0.478 nm. The rail's number was right beside a plot from another pose; @tt8804 read the two together and asked why they differed |
 | 24 | `protonate()` protonated **one site**, then tested `charge == want` | Protons accumulated across sites, in basicity order, until the recorded charge is reached | It could only ever build a ±1 species, so every dication was stamped `docked_species_ok = False` and dropped — all 60 of D4's failures, **all BDHI**, zero acrylamide. Both BDHI arms would have entered the screen 15% short against a full acrylamide arm, and the only symptom would have been BDHI underperforming |
 | 25 | The GUI read **flat** run directories (`attack_sweep/`, `md_residence/`) | Directories scoped to `run.topic`, as docking and ranking already were | Bumping the topic emptied one page of three; the other two kept showing 554 sweep rows and 647 residence rows from four superseded screens *under the new run's title*. The report server had the same defect, serving the old directory from a literal path |
+| 26 | The directory named `<topic>_allposes` | The RAW cloud; it holds only poses whose DBSCAN label is in `mode_ids`, so 21% is absent | Five independent 500-run dockings returned 109-118 contact-space groups where subsamples of the raw 6,000-pose cloud returned 241-254. The box was suspected first and ruled out (both paths share one cached receptor). Centroid extent 19.19 A raw against 7.1 A filtered gave it away: **every candidate replacement for DBSCAN had been measured on clouds DBSCAN already cleaned**. `exp/5`'s docstring had said so for weeks, and travelled with nothing |
 
 ---
 
@@ -60,7 +61,7 @@ test, because the code was doing exactly what it was written to do.**
 
 Two columns exist. Both are populated. Both are plausible. The code names one.
 
-Instances **1, 4, 10, 21**. The tell: a column name that *describes* what you
+Instances **1, 4, 10, 21, 26**. The tell: a column name that *describes* what you
 want rather than being derived from the thing that defines it. `shortlist`
 sounds like the shortlist. `cnn_affinity` sounds like an affinity.
 `warhead_class` sounds like a class. `adduct_attachment_smarts` sounds like the

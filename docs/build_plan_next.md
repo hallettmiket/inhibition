@@ -1011,3 +1011,107 @@ us reject it.
 **Reproduce:** the sampling scripts are in the session scratchpad and should be
 promoted to `exp/` before this document is used to justify a decision. A
 measurement that cannot be re-run is a claim, not a result.
+
+---
+
+## 2.5 Does the group count taper? (exp/17)
+
+*2026-08-26. @tt8804: "lets see the groups as a function of poses generated like
+before. if it tapers off we just accept the huge number and go to ranking" and
+"also can we check if this residue contact space grows with poses".*
+
+Full record in [D0092](../decisions/D0092-contact-space-is-fixed-the-group-count-climbs-because-6000-poses-undersample-it.md).
+
+### 2.5a The answer to the first question is no
+
+Ladder on the raw 6,000-pose cloud, tolerance held fixed at the molecule's own
+0.73 Å:
+
+```
+    poses   groups   per 1k new   largest   singletons
+      100     79.2                    4.2        80%
+      500    285.0        429.3       9.4        57%
+    1,000    464.2        327.2      13.8        47%
+    3,000    948.7        200.0      27.7        33%
+    6,000  1,438.0        140.5      37.0        26%
+```
+
+`b = +0.693`, and the species-accumulation fit implies no finite plateau. The
+marginal rate is falling — 429 new groups per 1,000 poses at n=500, 140 at
+n=6,000 — but it is falling toward a ceiling we never reach. Replicated across 12
+production molecules: median `b = +0.668`, range +0.589 to +0.780, none above 0.9.
+
+**And loosening the tolerance is not a way out.** It buys a lower count by
+rebuilding the bag:
+
+| tolerance | groups at n=6,000 | largest group |
+|---:|---:|---:|
+| 0.73 Å (RMSF) | 1,438 | 37 |
+| 1.50 Å | 209 | 194 |
+| 2.00 Å | 64 | 433 |
+| 3.00 Å | 9 | 2,004 |
+| 3.50 Å (the sweep bar) | 3 | 3,147 |
+
+There is no tolerance at which the count saturates *and* the groups stay tight.
+
+### 2.5b The answer to the second question is what rescues it
+
+The **space** does not grow. Diameter exponent `+0.019`, mean pairwise separation
+exponent `+0.001`; 60× more poses widened the diameter by 1.10× — and the maximum
+of a larger sample is larger by construction, so that is an upper bound on the
+effect. The 99th percentile of pairwise distance is 3.11 Å at every depth from 500
+to 6,000.
+
+So the climb is **undersampling of a fixed region**, not expansion of the region.
+That distinction is the whole decision: expansion would mean the pose set is an
+artefact of runtime, undersampling means the region is a property of the molecule.
+
+Two supporting numbers:
+
+* **Effective dimension 3.54** out of 420 coordinates offered (28 atoms × 15
+  residues), from `N(ε) ~ ε^−d`. That is the right order for rigid-body placement,
+  and is the evidence the metric tracks pose rather than noise. Still rising with
+  n, so it is a floor.
+* **Groups never move.** 100% of n=500 groups have an n=6,000 counterpart inside
+  the tolerance, median displacement 0.254 Å against 0.73 Å, over 5 draws and
+  1,460 shallow groups — and 100% for non-singletons and for groups of ≥5 alone.
+  Growth is entirely tail: 26% of deep groups are singletons, 61% hold ≤3 poses,
+  while 65% of the cloud lives in the 431 groups of ≥5.
+
+This is exactly the property D0088's rule lacked, and for a nameable reason: an
+absolute, molecule-owned tolerance makes group identity a property of the region,
+while HDBSCAN's density criterion makes it a property of the draw.
+
+### 2.5c What it decides
+
+Proceed to ranking, under two conditions:
+
+1. **Artefacts say *groups*, never *modes*,** and never report the count as a
+   property of the molecule. It is a monotone function of docking depth with no
+   plateau; reporting it as a mode count invites precisely the reading D0088 found
+   in the shipped pipeline.
+2. **Rankings are compared at fixed docking depth,** because the group population
+   is depth-dependent even though each group is not.
+
+### 2.5d The defect this turned up — read before citing exp/14–16
+
+[D0093](../decisions/D0093-the-file-named-allposes-is-not-all-poses-it-is-dbscan-cleaned.md),
+catalogue entry #26. `<topic>_allposes/` is **not** all poses:
+[`nac_screen_v2.py:501`](../scripts/nac_screen_v2.py#L501) writes only poses whose
+DBSCAN label is in `mode_ids`, so 21% of every production cloud — the scattered
+poses — is missing. exp/14, exp/15 and exp/16 all read that path, which means
+**every candidate replacement for DBSCAN so far has been measured on clouds
+DBSCAN had already cleaned.** At n≈400 the raw cloud gives 241–254 groups where
+the filtered clouds give 109–118.
+
+exp/17's conclusions are unaffected — it reads the raw 6,000-pose cloud
+throughout, which is why the discrepancy was visible at all. exp/16's headline
+numbers need re-running on raw clouds before they are cited.
+
+### 2.5e Still open
+
+* Re-run exp/14–16 on raw clouds (D0093).
+* Reproducibility of contact groups across the five independent dockings —
+  persistence within one cloud is established, agreement between clouds is not.
+* Extent, dimension and persistence are **one molecule**; only the exponent is
+  replicated (12 molecules, ≤450 poses each).
