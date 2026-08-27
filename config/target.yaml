@@ -92,6 +92,38 @@ docking:
   seed: 42
 
 splitting:
+  # WHICH SPLITTER RUNS. Named here rather than defaulted in code, because two
+  # rules that both produce integer labels are indistinguishable downstream and
+  # the whole pipeline would happily consume either.
+  #
+  #   warhead_dbscan   the shipped two-stage rule (stage1 + stage2 below).
+  #                    D0088: it clusters on the reactive atom's position and
+  #                    warhead direction, then grades each group by how often it
+  #                    reaches attack geometry -- which IS position and
+  #                    direction. It forms groups along the axis it grades them
+  #                    on, and the median mode spans 3.51 A.
+  #   contact_linkage  shared/pose_contacts.split_poses. Complete linkage over
+  #                    weighted residue-contact distance, bounding within-group
+  #                    distance structurally. Measured: median within-group RMSD
+  #                    1.12 A against 9.3 A bags, 91% of >=5-pose groups found in
+  #                    all five independent dockings, 100% persistence under 12x
+  #                    deeper sampling (D0092, D0095).
+  #
+  # STILL warhead_dbscan, deliberately. Every frame, ranking, sweep result and
+  # 100 ns run on disk was produced under it; switching the default re-groups
+  # every cloud and makes them incomparable in a way nothing in the artefacts
+  # would announce. The switch happens WITH the re-screen (#79), not before it.
+  method: warhead_dbscan
+
+  contact_linkage:
+    landmarks: 15            # exp/14's greedy non-redundant pick, top 15 = 90%
+                             # of contact-matrix variance; order identical across
+                             # five independent dockings (Spearman 1.000)
+    tolerance: null          # null = the molecule's predicted RMSF / 2.21.
+                             # D0094: that constant is near-constant across
+                             # molecules and does not beat a flat number
+                             # (p = 0.515). Set a float here to pin one instead.
+
   # Stage 1: mechanistically meaningful modes. Clustered on the reactive atom's
   # position and the direction the warhead points -- never on energy, never on
   # the NAC geometry that is later scored.

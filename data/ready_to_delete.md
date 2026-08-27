@@ -64,3 +64,7 @@ append-only tree grows, so this file is how it gets pruned safely.
 Nothing under `/data/lab_vm/immutable/inhibition/` is ever listed here. That
 tree is read-only source (6VAJ, model weights, fragment DBs, decoys) and is not
 retired by this process.
+
+| `shared/pose_cluster.py` | `shared/pose_contacts.py` | 2026-08-27 | HDBSCAN over heavy-atom RMSD, proposed in D0090 and never adopted. **No production caller** — only `exp/4,5,6,7,8,9,10` and their tests, which are the record of why: it discards 29% of a cloud as noise, lost the MD-validated pose in 3 of 30 replicates, kept 1 of 3 modes across an independent draw (#78), and its cluster count grows linearly with sampling because HDBSCAN has no length scale. Superseded by contact-space complete linkage, which bounds within-group distance structurally (D0092, D0095). | not yet — those experiments still import it; delete when they are archived |
+
+| `append_only/.../nac_split_smoke/`, `nac_split_smoke_dbscan/` | — | 2026-08-27 | Two one-molecule, 200-run smoke topics written to prove `splitting.method` dispatches to both splitters end to end (D0097). Not a screen; nothing downstream reads them. | yes — no manifest references them |

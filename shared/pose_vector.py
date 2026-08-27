@@ -57,6 +57,26 @@ STAYS there -- that is what BPMD is for (#14) -- and nothing about affinity.
 Per #13, no score derived from this may label anything downstream until it has
 been scored on D0046's 80 redock cases against crystal ground truth. Top-1 is
 22.5% and best-of-9 is 55%; those are the numbers to beat and the ceiling.
+
+STATUS: LIVE, FOR A DIFFERENT JOB THAN IT LOOKS LIKE. This is easily confused
+with `shared/pose_contacts`, which also describes a pose by what it touches and
+was written three weeks later without discovering this module. They are not
+duplicates and must not be merged:
+
+  * this reduces a pose to ONE NUMBER PER RESIDUE, which discards orientation --
+    a flipped pose touching the same residues is identical here. `pose_contacts`
+    keeps one number per (atom, residue), which is what makes a flip visible.
+  * this uses SINGLE linkage, deliberately, and says complete linkage would
+    "split them on the widest pair". `pose_contacts` uses COMPLETE linkage,
+    deliberately, because single linkage chains and that is D0088's defect.
+    BOTH ARE RIGHT FOR THEIR OWN n: over ~9 Vina modes already spread by a
+    minimum-RMSD floor chaining cannot run away; over 500 poses filling a
+    continuous cloud it is exactly what happens.
+  * this is sized for ~9 modes (an O(n^3) Python loop) and is for SCORING a pose
+    against a reference profile, not for splitting a cloud.
+
+Use this for `reference_profile` / `fit_score`. Use `pose_contacts` for
+splitting. See docs/pose_frameworks.md.
 """
 
 from __future__ import annotations

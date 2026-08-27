@@ -105,6 +105,12 @@ right*, and add a guard that can actually fail.
   docking is stochastic with no fixed seed, so a re-dock gives a different cloud
   and showing it beside the existing numbers puts structures on screen that the
   scores were not computed from.
+- **Five modules in this repo group poses**, and which one runs is named in
+  `config/target.yaml: splitting.method`, never in code. Read
+  [`docs/pose_frameworks.md`](docs/pose_frameworks.md) before adding a sixth —
+  `pose_contacts` was written without discovering that `pose_vector` already
+  described a pose by what it touches, and their linkage rationales contradict
+  each other in the source (both correctly, for different n). D0097.
 - **Environments live outside the repo**, under `/data/lab_vm/envs/dwi_*`.
   Clone-and-run will not work without them. The shared CPU workhorse is
   `/data/lab_vm/envs/dwi_cheminf`.

@@ -35,6 +35,16 @@ this project has to say where it came from. `eps` does not set the number of
 modes -- that is measured -- but it does set what counts as "the same place",
 so it is calibrated against crystal ground truth and reported with its
 stability, never chosen for appearance.
+
+STATUS: LIVE, and the incumbent -- `config/target.yaml: splitting.method` is
+`warhead_dbscan`, which is this module plus `pose_subsplit`. It carries a known
+defect (D0088): it clusters on the reactive atom's POSITION and the direction its
+warhead faces, then each group is graded by how often it reaches attack geometry
+-- which is position and direction. It forms groups along the axis it grades them
+on. The median mode spans 3.51 A and 42% hold two populations under one label.
+`shared/pose_contacts.split_poses` is the built replacement; the switch waits on
+the re-screen (#79). Five modules in this repo group poses -- see
+docs/pose_frameworks.md before adding a sixth.
 """
 
 from __future__ import annotations

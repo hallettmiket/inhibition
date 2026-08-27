@@ -34,6 +34,14 @@ it, so a tight group inside a diffuse halo survives as its own group rather than
 being absorbed, and nothing has to be retuned when sampling depth changes. The
 halo is labelled noise (-1), which is the honest answer for a pose that belongs
 to no repeated arrangement.
+
+STATUS: SUPERSEDED. NO PRODUCTION CALLER -- only exp/4,5,6,7,8,9,10 and their
+tests, which are the record of why it was not adopted: it discards 29% of a cloud
+as noise, lost the MD-validated pose in 3 of 30 replicates, kept 1 of 3 modes
+across an independent draw (#78), and its cluster count grows linearly with
+sampling because HDBSCAN has no length scale (D0090). Replaced by
+`shared/pose_contacts`. Listed in data/ready_to_delete.md; delete when those
+experiments are archived. Do not wire this into anything new.
 """
 
 from __future__ import annotations

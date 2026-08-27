@@ -31,6 +31,9 @@ it. A library screened with sub-splitting is NOT score-comparable with one
 screened without it. That is why this is a parameter with an explicit default
 rather than a silent change, and why the sub-split count is recorded on every
 row.
+
+STATUS: LIVE, as stage 2 of `splitting.method: warhead_dbscan`. Not used by
+`contact_linkage`, which is a single stage. See docs/pose_frameworks.md.
 """
 
 from __future__ import annotations

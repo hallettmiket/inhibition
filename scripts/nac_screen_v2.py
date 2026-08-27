@@ -274,7 +274,8 @@ def _cfg(key: str, default):
 def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         do_gnina: bool, all_poses: bool = False,
         sub_split: int = psub.DEFAULT_MAX_SUB,
-        seed: int | None = None) -> tuple[pd.DataFrame, list[dict]]:
+        seed: int | None = None,
+        split_method: str | None = None) -> tuple[pd.DataFrame, list[dict]]:
     """Dock one candidate; return (per-pose rows, ONE AGGREGATE ROW PER MODE).
 
     2.2.0 (@tt8804): a binding mode is a candidate, not a property of one. The
@@ -321,7 +322,33 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         # rank indistinguishable from uniform) and never on the NAC geometry
         # itself, which is the score.
         feat = pmod.features(mol, match)
-        labels = pmod.split(feat)
+        method = split_method or _cfg("splitting.method", "warhead_dbscan")
+        if method == "contact_linkage":
+            # ONE CALL REPLACES BOTH STAGES. `split_poses` bounds within-group
+            # distance structurally, returns no noise label, and never touches
+            # the attack geometry that stage 4 scores (D0088, D0092, D0095).
+            from shared import pose_contacts as pcon
+            labels, sub_info = pcon.split_poses(
+                mol,
+                landmarks=int(_cfg("splitting.contact_linkage.landmarks",
+                                   pcon.DEFAULT_LANDMARKS)),
+                tolerance=_cfg("splitting.contact_linkage.tolerance", None),
+                seed=seed if seed is not None else 7)
+            log.info("  contact split: %d poses -> %d groups, largest %d, "
+                     "tolerance %.2f A (worst within-group %.3f A)",
+                     sub_info["n_poses"], sub_info["modes_out"],
+                     sub_info["largest"], sub_info["tolerance_a"],
+                     sub_info["worst_within_group_a"])
+        elif method == "warhead_dbscan":
+            labels = pmod.split(feat)
+            sub_info = None                       # filled by the stage-2 block
+        else:
+            # AN ALLOWLIST, NOT A FALLBACK. A typo must not silently select the
+            # shipped rule and produce a run whose artefacts name a method it did
+            # not use -- that is #14's denylist defect in a new place.
+            raise ValueError(
+                f"splitting.method = {method!r} is not a splitter. "
+                "Known: warhead_dbscan, contact_linkage.")
 
         # ---- SECOND STAGE: subdivide each mode on whole-molecule geometry ----
         # The first stage is blind to everything but the warhead, by design, so a
@@ -335,7 +362,9 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         # Sub-modes are renumbered as ORDINARY modes, so rank_v2, the sweep, the
         # GUI and mode_key all keep working unchanged -- the abstraction gets
         # finer, nothing else changes shape.
-        if sub_split and sub_split > 1:
+        if method == "contact_linkage":
+            pass                                  # one stage; already split
+        elif sub_split and sub_split > 1:
             coords = np.array([mol.GetConformer(i).GetPositions()
                                for i in range(mol.GetNumConformers())])
             heavy = [a.GetIdx() for a in mol.GetAtoms() if a.GetAtomicNum() > 1]
@@ -377,9 +406,16 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         # STAMPED ON EVERY ROW. `consensus` depends on how finely modes were
         # split, so a row that does not say which setting produced it cannot be
         # compared with one that used another.
-        _sub_stamp = {"sub_split": int(sub_split or 1),
+        # THE FRAME RECORDS WHICH SPLITTER MADE IT. Two rules both emit integer
+        # labels, so a frame that does not name its method is indistinguishable
+        # from one made the other way -- and every mode count, enrichment and
+        # rank in it means something different depending on the answer.
+        _sub_stamp = {"split_method": method,
+                      "sub_split": int(sub_split or 1) if method == "warhead_dbscan" else 1,
                       "sub_modes_in": sub_info.get("modes_in"),
-                      "sub_modes_out": sub_info.get("modes_out")}
+                      "sub_modes_out": sub_info.get("modes_out"),
+                      "split_tolerance_a": sub_info.get("tolerance_a"),
+                      "split_landmarks": sub_info.get("landmarks")}
         _parent = sub_info.get("parent", {})
         _label = sub_info.get("label", {})
         for k in mode_ids:
@@ -562,6 +598,12 @@ def main() -> None:
     ap.add_argument("--chunk", type=int, default=100)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--no-gnina", action="store_true")
+    ap.add_argument("--split-method", default=None,
+                    choices=("warhead_dbscan", "contact_linkage"),
+                    help="override splitting.method for this run. An ALLOWLIST: "
+                         "an unknown value is refused by argparse rather than "
+                         "falling through to the shipped rule, which would "
+                         "produce artefacts naming a method they did not use.")
     # WRITE EVERY POSE, not just each mode's representative (#41). Off by default
     # because it is ~500x the SDF volume across the full library; on for the
     # targeted runs that back the GUI's pose viewer.
@@ -671,7 +713,8 @@ def main() -> None:
     for i, c in enumerate(cands, 1):
         rows, aggs = one(c, rec_dir, Path(plain_rec), args.nrun, args.gpu,
                          not args.no_gnina, all_poses=args.all_poses,
-                         sub_split=args.sub_split, seed=_seed_for(args))
+                         sub_split=args.sub_split, seed=_seed_for(args),
+                         split_method=args.split_method)
         # `one` returns ONE ROW PER MODE now, so a molecule contributes several
         # candidates. `done` still counts MOLECULES -- resume and progress are
         # per-molecule, and counting modes would make the chunk size depend on
