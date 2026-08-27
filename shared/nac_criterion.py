@@ -384,6 +384,15 @@ def anchor_quality(distance: float, angle: float, mechanism: str) -> float:
       perpendicular    0 deg off the sp2 plane normal
     Distance ideal is the middle of the near-attack window.
     """
+    # AN UNMAPPED MECHANISM RAISES, it does not score 0. Returning 0.0 for a
+    # name nobody registered is a plausible value from a wrong input: every pose
+    # of the affected molecule ranks last, no exception is raised, and the
+    # symptom is a warhead class that simply never appears near the top. The
+    # same rule `canonical_class()` follows -- returning an unmapped value
+    # unchanged is how it becomes its own category.
+    if mechanism not in MECHANISMS:
+        raise ValueError(
+            f"unknown mechanism {mechanism!r}; known: {sorted(MECHANISMS)}")
     if distance != distance or angle != angle:
         return float("nan")
     lo, hi = NAC_DIST_MIN, NAC_DIST_MAX
