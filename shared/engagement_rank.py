@@ -187,3 +187,71 @@ def rank_ligands(modes: pd.DataFrame, how: str = "mean",
     # docking depth (D0092), so a mean over it is comparable only at fixed depth
     # and a reader has to be able to see the n that produced it.
     return g.sort_values("ligand_engagement", ascending=False).reset_index(drop=True)
+
+
+def summarise_anchor(anchor, statistic: str | None = None) -> float:
+    """One engagement number from an array of per-pose anchor qualities.
+
+    The screen's entry point: it already holds `anchor` for every pose of a
+    group, so it needs the summary and not the whole `mode_engagement` frame.
+    Shares `_summarise` with that function rather than reimplementing it -- two
+    definitions of "this group's engagement" is exactly the drift this project
+    keeps paying for.
+    """
+    import numpy as _np
+    a = _np.asarray(anchor, dtype=float)
+    return _summarise(a, statistic or "representative")
+
+
+def anchor_spread(anchor) -> float:
+    """Range of per-pose engagement inside one group, on the same 0-1 scale.
+
+    Reported beside every engagement score. A group spanning most of the scale
+    is a mixture and its summary means nothing; 93% of the shipped splitter's
+    modes were in that state.
+    """
+    import numpy as _np
+    a = _np.asarray(anchor, dtype=float)
+    a = a[_np.isfinite(a)]
+    return float(a.max() - a.min()) if a.size else float("nan")
+
+
+# --------------------------------------------------------------------------- #
+#  Which metrics are frequencies, and therefore need a population gate
+# --------------------------------------------------------------------------- #
+#: A FREQUENCY metric estimates "how often does this group reach attack
+#: geometry", so it is unestimable on a handful of poses and needs a population
+#: floor. A POSE-PROPERTY metric asks "how good is the geometry", which one pose
+#: answers as well as fifty.
+#:
+#: AN ALLOWLIST OF FREQUENCIES, not a denylist of the others. A metric nobody
+#: registered is treated as a frequency and KEEPS the gate, because the failure
+#: of guessing wrong in that direction is a smaller shortlist, while guessing
+#: wrong the other way silently publishes ranks computed from three poses.
+#: #14 is the record of a denylist admitting a value nobody anticipated.
+FREQUENCY_METRICS = frozenset({
+    "enrichment", "enrichment_joint", "enrichment_conditional",
+    "conditional_eb", "conditional_lcb", "conditional_x_consensus",
+    "viable_fraction", "consensus", "weighted_score",
+})
+
+#: Metrics that are a property of geometry rather than of a count.
+POSE_PROPERTY_METRICS = frozenset({
+    "engagement", "engagement_best", "anchor_quality_max",
+    "anchor_quality_mean", "anchor_quality_p90",
+})
+
+
+def needs_population_gate(metric: str) -> bool:
+    """Does ranking on `metric` require the pose-count gate?
+
+    The gate is a property of the METRIC, not of the pipeline. Applying a
+    frequency's estimability threshold to a geometry score is what would have
+    made the nac_v6 re-screen useless: under contact grouping only 2.8% of
+    groups hold 12 poses, against 66.7% under the rule the floor was calibrated
+    on, so a 12-pose gate would have discarded 97% of the run's own output while
+    reporting a full-looking shortlist.
+    """
+    if metric in POSE_PROPERTY_METRICS:
+        return False
+    return True

@@ -474,9 +474,24 @@ def filter_and_rank(df: pd.DataFrame, score: str, cons: str,
     and admits everything, so the gate is the whole of the selection there; it
     is left in place because per-MOLECULE topics still use it.
     """
-    if gate not in ("mode_poses", "consensus_fraction"):
+    if gate not in ("mode_poses", "consensus_fraction", "none"):
         raise ValueError(f"unknown rank gate {gate!r}")
+
+    # THE GATE IS A PROPERTY OF THE METRIC (D0098). A population floor exists
+    # because a FREQUENCY over three poses is unestimable; an engagement score is
+    # a property of one pose's geometry and is as estimable in a group of one as
+    # in a group of fifty. Under contact grouping only 2.8% of groups hold 12
+    # poses against 66.7% under the rule the floor was calibrated on, so
+    # inheriting it here would discard 97% of a run's output while still printing
+    # a full-looking shortlist.
+    from shared import engagement_rank as _er
+    if gate != "none" and not _er.needs_population_gate(score):
+        log.info("score %r is a pose property, not a frequency; the %s gate does "
+                 "not apply and is not being enforced (D0098)", score, gate)
+        gate = "none"
+
     col = None
+    min_poses = np.nan
     if gate == "mode_poses":
         col = tc.rank_gate_parameter()
         min_poses = tc.rank_min_mode_poses()
@@ -493,13 +508,32 @@ def filter_and_rank(df: pd.DataFrame, score: str, cons: str,
     for cls, g in df.groupby("warhead_class"):
         g = g.copy()
         c = g[cons]
-        k = max(1, int(round(len(g) * quota)))
-        cut = c.nlargest(k).min() if c.notna().any() else np.nan
+        # THE QUOTA IS A FREQUENCY RULE TOO. It keeps the top `quota` fraction by
+        # CONSENSUS -- mode population over cloud size -- so leaving it in place
+        # under a geometry score would reinstate through the back door exactly
+        # the population filter the gate above just declined to apply.
+        if gate == "none":
+            cut = -np.inf
+        else:
+            k = max(1, int(round(len(g) * quota)))
+            cut = c.nlargest(k).min() if c.notna().any() else np.nan
         g["consensus_cut"] = cut
-        admits = (g[col] >= min_poses) if gate == "mode_poses" else (c >= floor)
+        if gate == "mode_poses":
+            admits = g[col] >= min_poses
+        elif gate == "consensus_fraction":
+            admits = c >= floor
+        else:                                   # "none" -- see the note above
+            admits = pd.Series(True, index=g.index)
         g["rank_gate"] = gate
-        g["rank_gate_min"] = min_poses if gate == "mode_poses" else floor
-        g["passes"] = (c >= cut) & admits
+        g["rank_gate_min"] = (min_poses if gate == "mode_poses"
+                              else floor if gate == "consensus_fraction" else np.nan)
+        # UNDER `none` THE CONSENSUS QUOTA IS NOT APPLIED AT ALL, rather than
+        # applied with a permissive cut. `consensus_gnina` is null whenever
+        # gnina did not run -- which is every nac_v6 shard -- and `NaN >= -inf`
+        # is False, so a cut of -inf still rejected all 93 groups while the log
+        # said the gate was not being enforced. A filter that cannot be
+        # satisfied is not a permissive filter.
+        g["passes"] = admits if gate == "none" else ((c >= cut) & admits)
         s = g[g.passes].copy()
         s["class_rank"] = s[score].rank(ascending=False, method="min")
         g = g.merge(s[["ident", "class_rank"]], on="ident", how="left")
@@ -513,12 +547,16 @@ def main() -> None:
                     choices=("weighted_score", "enrichment_conditional",
                              "enrichment_joint", "topn_viable_frac",
                              "conditional_x_consensus", "conditional_lcb",
-                             "conditional_eb"))
+                             "conditional_eb",
+                             # D0098: the only score measured to predict the MD
+                             # outcome (rho = +0.652 for the simulated pose's
+                             # geometry, against -0.015 for conditional_eb).
+                             "engagement", "engagement_best"))
     ap.add_argument("--consensus", default="consensus_gnina",
                     choices=("consensus_gnina", "consensus_autodock"))
     ap.add_argument("--quota", type=float, default=DEFAULT_QUOTA)
     ap.add_argument("--gate", default="mode_poses",
-                    choices=("mode_poses", "consensus_fraction"),
+                    choices=("mode_poses", "consensus_fraction", "none"),
                     help="which modes may hold a rank (#65). `mode_poses` is "
                          "the measured estimability rule from config; "
                          "`consensus_fraction` is the original `consensus >= "

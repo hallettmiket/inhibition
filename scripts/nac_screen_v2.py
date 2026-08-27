@@ -84,6 +84,7 @@ from shared import outputs as sout                # noqa: E402
 from shared import covalent_protocol as cp        # noqa: E402
 from shared import receptors as R                 # noqa: E402
 from shared import pose_modes as pmod             # noqa: E402
+from shared import engagement_rank as _eng        # noqa: E402
 import nac_screen as ns
 from shared import pose_subsplit as psub                           # noqa: E402
 from shared import run_paths as rp        # noqa: E402
@@ -196,7 +197,8 @@ def topic_paths(topic: str) -> tuple:
 
 
 def write_sdf(mol, order: list[int], dest: Path,
-              modes: list[int] | None = None) -> int:
+              modes: list[int] | None = None,
+              energies=None) -> int:
     """Write the top-`order` conformers to one SDF, stamping `pose_rank`.
 
     The rank is written as a PROPERTY, not left to file position, because
@@ -219,6 +221,15 @@ def write_sdf(mol, order: list[int], dest: Path,
         # everywhere else; write it down.
         mol.SetProp("pose_idx", str(int(i)))
         mol.SetProp("energy_rank", str(rank))
+        # THE SCORE TRAVELS WITH THE POSE (D0096). Written here because the
+        # alternative -- a pose set on disk with no energies -- meant exp/16,
+        # 17, 19 and 20 all weighted the best pose and the 500th equally, and
+        # the viewer drew an 88th-percentile pose identically to the best one.
+        # A pose set displayed without its scores states the wrong population
+        # silently. Indexed by CONFORMER ID, the same key `pose_idx` carries,
+        # never by enumeration position.
+        if energies is not None:
+            mol.SetProp("free_energy_kcal", f"{float(energies[int(i)]):.4f}")
         # The mode this pose represents, so a downstream reader selects by
         # IDENTITY rather than by file position -- the same rule pose_rank
         # already follows for bpmd_run.
@@ -260,6 +271,20 @@ def _seed_for(args) -> int | None:
     if v is None or int(v) < 0:
         return None
     return int(v)
+
+
+def _eng_stat() -> str:
+    """Which summary of per-pose engagement the frame carries.
+
+    Read from config rather than fixed, and STAMPED on every row beside the
+    value -- two statistics produce differently-ordered tables, so a row that
+    does not name its own is not comparable with one that used another.
+    """
+    v = str(_cfg("ranking.engagement_statistic", "representative"))
+    if v not in _eng.STATISTICS:
+        raise ValueError(f"ranking.engagement_statistic = {v!r} is unknown; "
+                         f"known: {_eng.STATISTICS}")
+    return v
 
 
 def _cfg(key: str, default):
@@ -440,6 +465,25 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
                 "enrichment": (float(viable[sel].mean()) /
                                nac.isotropic_null(cand.mechanism)) if sel.any() else 0.0,
                 "isotropic_null": nac.isotropic_null(cand.mechanism),
+                # ENGAGEMENT -- the geometry score the ranking now orders on
+                # (D0098). Computed HERE because this is where the per-pose
+                # distance and angle live; recomputing it in rank_v2 from the
+                # aggregate is impossible, and recomputing it from the per-pose
+                # table would be a second definition free to drift.
+                #
+                # `engagement_spread` travels with it, always. A group whose
+                # poses disagree has no summary worth ranking, and under the
+                # shipped splitter 93% of modes spanned more than half this
+                # scale -- which is why every mode-level aggregate predicted the
+                # MD outcome at rho ~ 0.11 while one real pose predicted it at
+                # +0.652. A reader has to be able to see which kind of group
+                # they are looking at.
+                "engagement": _eng.summarise_anchor(anchor[sel]),
+                "engagement_spread": _eng.anchor_spread(anchor[sel]),
+                "engagement_best": (float(np.nanmax(anchor[sel]))
+                                    if sel.any() and np.isfinite(anchor[sel]).any()
+                                    else np.nan),
+                "engagement_statistic": _eng_stat(),
                 "mean_energy": float(np.nanmean(en[sel])) if sel.any() else np.nan,
                 # A MAX GROWS WITH SAMPLE SIZE; A QUANTILE DOES NOT (#43).
                 #
@@ -510,7 +554,7 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         # the thing to stop doing.
         reps = representative_indices(labels, anchor, dmat, mode_ids)
         if not sdf.exists():                       # append_only: never overwrite
-            write_sdf(mol, reps, sdf, modes=mode_ids)
+            write_sdf(mol, reps, sdf, modes=mode_ids, energies=en)
 
         # EVERY POSE, not just each mode's representative (#41).
         #
@@ -537,11 +581,11 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
             order = [int(i) for i in np.argsort(labels, kind="stable")
                      if labels[i] in mode_ids]
             write_sdf(mol, order, adest,
-                      modes=[int(labels[i]) for i in order])
+                      modes=[int(labels[i]) for i in order], energies=en)
 
         if do_gnina:
             tmp = work / "modes.sdf"
-            write_sdf(mol, reps, tmp, modes=mode_ids)
+            write_sdf(mol, reps, tmp, modes=mode_ids, energies=en)
             g = gnina_scores(plain_rec, tmp, gpu)
             if len(g) != len(reps):
                 raise ValueError(f"gnina returned {len(g)} scores for {len(reps)} modes")
