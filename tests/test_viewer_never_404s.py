@@ -47,8 +47,24 @@ def _rows() -> list[tuple[str, str]]:
     return out
 
 
+def _md_results_exist() -> bool:
+    """Has any MD run produced a residence row for this topic?"""
+    import glob
+    return bool(glob.glob(str(rp.BLACKSMITH / f"md_residence_{rp.topic()}" / "*.csv")))
+
+
 def test_there_are_rows_at_all():
-    assert _rows(), "combined.html has no rail rows — the parse below is vacuous"
+    """An empty rail means one of two different things, and they must not share
+    a verdict. A FRESH TOPIC has no MD results, so `combined.html` is a stub and
+    there is nothing to check -- skip, so the tests below are not silently
+    vacuous. A topic WITH residence rows and an empty rail is a build failure.
+    nac_v6 was screened and ranked before any MD ran, which is the first case."""
+    if not _rows() and not _md_results_exist():
+        pytest.skip(f"topic {rp.topic()} has no MD results yet; combined.html is "
+                    "a stub, so the link checks below have nothing to check")
+    assert _rows(), (
+        f"combined.html has no rail rows for {rp.topic()}, which HAS md_residence "
+        "output — the builder dropped every row and the parse below is vacuous")
 
 
 def test_every_row_points_at_a_file_that_exists():

@@ -1,6 +1,6 @@
 # How this project breaks
 
-*Written 2026-07-31, at handover. Last updated 2026-08-26 (catalogue now 28
+*Written 2026-07-31, at handover. Last updated 2026-08-27 (catalogue now 31
 entries). Read this before the README.*
 
 Every substantive bug found in this project has been the same bug.
@@ -54,6 +54,9 @@ test, because the code was doing exactly what it was written to do.**
 | 26 | The directory named `<topic>_allposes` | The RAW cloud; it holds only poses whose DBSCAN label is in `mode_ids`, so 21% is absent | Five independent 500-run dockings returned 109-118 contact-space groups where subsamples of the raw 6,000-pose cloud returned 241-254. The box was suspected first and ruled out (both paths share one cached receptor). Centroid extent 19.19 A raw against 7.1 A filtered gave it away: **every candidate replacement for DBSCAN had been measured on clouds DBSCAN already cleaned**. `exp/5`'s docstring had said so for weeks, and travelled with nothing |
 | 27 | rho = 0.657, the WITHIN-molecule atom ranking, as licence for the tolerance | The ACROSS-molecule absolute scale, never measured -- rho = +0.112, CI [-0.06, +0.27], crossing zero | @tt8804 asked whether the experiment behind the one calibration constant was big enough. It was 147 modes, but of the wrong quantity: the predictor varies at CV 0.15 between molecules where the truth varies at 0.45, and `median(rmsf)/2.21` does not beat writing ONE number down for every molecule (Wilcoxon p = 0.515). Nothing was broken -- exp/15 is careful work reporting an honest number, for a different question |
 | 28 | A pose cloud analysed and DISPLAYED with no scores attached | The poses paired with the energies that ranked them | @tt8804 saw poses "literally outside of the pocket" in the viewer and asked how they could be lowest-energy. They are not -- 2.6% of the cloud, 88th energy percentile, zero in the best decile, and the scorer ranks them correctly (rho = +0.446 with exposure). But `nac_screen_v2` and `persist_raw_clouds` wrote coordinates with NO energies, so exp/16, 17, 19 and 20 all weighted the best pose and the 500th equally. Filtering to the best 25% concentrates 2.60x more than a RANDOM 25% of the same cloud (21 of 21 molecules, p = 6e-05) -- signal that four experiments had been averaging away |
+| 29 | `0.0` from `anchor_quality` for a mechanism name nobody registered | A raise -- the mechanism list is an allowlist of four | Writing a test fixture with `mechanism="sn2"` instead of `sn2_displacement`. Every pose scored 0.0, which ranks the molecule LAST in a metric where 0 is the worst LEGAL value, and nothing raised. The symptom would have been a warhead class that never appears near the top of a shortlist. Fixed by raising, the rule `canonical_class()` already follows |
+| 30 | `cut = -inf` as a way to disable a filter | Not evaluating the filter at all | The engagement gate correctly logged "the mode_poses gate does not apply and is not being enforced" and then returned 0 of 93 groups. `consensus_gnina` is null whenever gnina did not run -- every nac_v6 shard -- and `NaN >= -inf` is False. A permissive threshold on an absent column is not permissive, it is unsatisfiable, and the log said the opposite |
+| 31 | "0 of 500 poses valid" from PoseBusters | "the receptor could not be parsed" | The gate was handed `3IKD_prepared_1.pdbqt`, the receptor the docking itself consumes. PoseBusters WARNS rather than raising on a file type it cannot read, so every protein-ligand check failed for want of a receptor and the verdict was total rejection -- an infrastructure fault wearing a chemistry result's clothes. Now the suffix is checked, and a zero-valid verdict names its worst failing checks and says to suspect the receptor |
 
 ---
 
@@ -117,7 +120,7 @@ cannot finish says so at launch rather than at the deadline.
 The check exists. It runs. It just doesn't cover the case, or it runs too late,
 or it cannot fail.
 
-Instances **11, 12, 13, 14, 16, 17, 20, 27, 28** — the largest group, and growing
+Instances **11, 12, 13, 14, 16, 17, 20, 27, 28, 29, 30, 31** — the largest group, and growing
 fastest. **#27** is the subtlest: the validation RAN, honestly, and reported a
 real number -- for a different question than the one its result was used to
 settle. A validation is scoped to the quantity it measured, and "the predictor
@@ -144,6 +147,16 @@ cloud look like" while every reader took it as "what does the docking think" --
 and those differ by the 75% of poses the score rejects. A measurement is scoped
 to the population it ran on, and a pose set displayed without its scores states
 the wrong population silently.
+
+**#29, #30 and #31 are all one week's worth of the same shape**: a guard that
+reaches a verdict by a route nobody checked. #29 scores an unregistered mechanism
+0.0 rather than raising, so a typo ranks a molecule last in a metric where 0 is
+the worst LEGAL value. #30 disables a filter by setting its threshold to `-inf`,
+which is unsatisfiable rather than permissive the moment the column is NaN -- and
+the log announced the filter was off while it rejected everything. #31 reports
+"0 of 500 poses valid" when the truth is "the receptor did not load", because the
+library warns instead of raising. In all three the output is a legal value in the
+right range, produced for a reason nobody intended.
 
 **Defence:** for every guard, ask *what would make this pass when it should
 fail?* If the answer is "the thing it inspects being absent," assert the thing

@@ -102,7 +102,17 @@ def gather() -> pd.DataFrame:
     # independently. Without the same filter the view would keep showing a T_3
     # table from before the decision, beside T_4 rows ranked without it.
     want = {str(t).upper() for t in tc.get("run.tiers", default=["T3", "T4"])}
-    for tier, score in (("T4", "conditional_eb"), ("T3", "enrichment_conditional")):
+    # THE SCORE IS NAMED IN CONFIG, NOT HARDCODED HERE. It was the literal pair
+    # (T4, conditional_eb) / (T3, enrichment_conditional), so a run ranked on any
+    # other score was invisible to the whole GUI: nac_v6's 327,167 groups ranked
+    # on `engagement` produced "no ranked modes for topic nac_v6 yet -- nothing
+    # to build", which reads as "the ranking has not run" rather than "this
+    # reader is looking for a different filename". Same shape as the topic
+    # literals D0080 records.
+    _scores = tc.get("ranking.score_by_tier",
+                     default={"T4": "conditional_eb",
+                              "T3": "enrichment_conditional"})
+    for tier, score in ((t, _scores[t]) for t in ("T4", "T3") if t in _scores):
         if tier not in want:
             continue
         f = _latest(f"rank_v2/rank_v2_{tier}_{topic}_{score}_*.csv")
