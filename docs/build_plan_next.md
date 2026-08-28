@@ -1298,3 +1298,78 @@ has not had many.
 * Re-run exp/16/17/19/20 headline numbers on energy-filtered clouds and restate
   them with the filter named.
 * The MD-validated-pose test and the SIFt baseline, both still unrun.
+
+---
+
+## 2.8 nac_v6 — the re-screen, and what is running overnight
+
+*2026-08-27/28. Records D0099 (perf + PoseBusters), D0100 (1.2 ns triage).*
+
+### 2.8a The screen
+
+| | |
+|---|---|
+| molecules | **1,684** — all T_4 |
+| poses | 842,000 (500/molecule, seed 42) |
+| PoseBusters valid | **90.0%** (`dock` mode, 22 checks) |
+| groups | **327,167** (194/molecule), contact linkage |
+| median tolerance | 0.67 Å |
+| wall clock | **48 min**, 32 shards × 6 workers, 6 GPUs, **0 failures** |
+| ranking | engagement, 22 s |
+
+**The screen was 93% overhead before this run** (D0099): `isotropic_null` was
+309 s of a 333 s per-molecule budget, recomputing four constants 384 times.
+Cached, it is 7 s/molecule. AutoDock itself was never the cost — 500 runs take
+2.0 s on an idle A100.
+
+### 2.8b What the ranking says, and does not
+
+`engagement` predicts the MD outcome at ρ = +0.652 where `conditional_eb`
+managed −0.015 (D0098). But **the curve has no cliff**: rank 1 scores 0.96,
+rank 150 ≈ 0.78, rank 300 ≈ 0.76 — 0.2 of a 0–1 scale across the whole
+selectable range, with all nine warhead classes superimposed.
+
+**The cap selects; the floor does nothing.** 43,559 in-scope groups clear the
+0.05 budget floor and the 150/family cap admits 450. The lowest *selected*
+engagement is 0.760 — 15× the floor. Because the band is flat, the cap is close
+to arbitrary.
+
+### 2.8c Running overnight
+
+1.2 ns triage sweep, **300 modes = 300 molecules** (150 acrylamide + 150
+bdhi_c5, one best-engagement mode each), engagement 0.707–0.956, 5 cards
+(GPUs 0,1,2,6,7). Started 23:22, ETA **~06:40**.
+
+**1.2 ns is a triage length, not an optimum** (D0100). D0085's yield peak is
+8.3 ns, CI 4.3–9.5, so 1.2 is outside the interval that justified D0087's 5 ns.
+It is safe because truncation is one-sided — anything clearing 5 ns clears 1.2 —
+but the pass rate goes 10.7% → 36.3%, which **triples the cost of any 100 ns
+stage**. Put it back to 5 ns before running production.
+
+**GPUs were never the bottleneck here either.** Profiled mid-run: `sqm`
+(AmberTools AM1-BCC charge fitting, part of ligand parameterisation) was taking
+~102 cores, so 5 cards ran at 0.67 modes/min against 3 cards' 0.76. Adding
+GPUs made it marginally *slower*.
+
+### 2.8d The GUI
+
+Own report tree, `mdprio_reports_nac_v6`, served on **port 8950**:
+
+* `/modes.html` — 327,167 modes, 56 MB
+* `/ligands.html` — **1,684 molecules**, one row each, sortable, 564 KB
+
+The ligand page shows **both** `best` and `mean` engagement with `n_modes`
+beside the mean, because they order the library differently and the denominator
+moves with docking depth. Every leading molecule has ~200 modes and a mean near
+zero.
+
+### 2.8e What to look at first
+
+**Is the flat engagement band flat in OUTCOME too?** The sweep's
+`frac_attack_ready` against `engagement` over the 300 answers it. If flat, the
+cap is sampling rather than selecting, and a stratified sweep (0.95 → 0.60)
+would be worth more than a deeper one.
+
+Still open from earlier: exp/14–16 re-run on raw clouds; the MD-validated-pose
+test; SIFt as a baseline; the 30° off-normal window, which binds for all three
+families and is a chemistry judgement for #12.
