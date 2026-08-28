@@ -111,6 +111,25 @@ right*, and add a guard that can actually fail.
   `pose_contacts` was written without discovering that `pose_vector` already
   described a pose by what it touches, and their linkage rationales contradict
   each other in the source (both correctly, for different n). D0097.
+- **`config/target.yaml` is GLOBAL STATE that detached processes read, so check
+  for supervisors before touching `run.topic`.** Long-running loops started by
+  *other* Claude Code sessions survive that session ending, poll every few
+  minutes, and resolve their paths from `run.topic` — so bumping the topic
+  redirects work that is already in flight, and a resume check that finds an
+  empty new topic reads as "nothing done yet". Measured 2026-08-27: two
+  `overnight.sh` supervisors (14 and 9 days old, from a session in
+  `~/repos/murmurent`) were keeping the nac_v5 campaign alive and rebuilding its
+  GUI; bumping the topic made one of them immediately build an empty report tree
+  for a topic with no data. **Before changing the topic or any `sweep_rule` /
+  `splitting` key, run:**
+
+  ```bash
+  ps -eo pid,etime,cmd | grep -E '[o]vernight|[s]weep_worker|[p]ipeline.py serve|[p]romote_to'
+  ```
+
+  Stop the *supervisor* first — killing a child it watches only makes it respawn
+  within its poll interval. A dead-looking process is not proof: a
+  `promote_to_bpmd` had been resident for 10 days with zero GPU use.
 - **Environments live outside the repo**, under `/data/lab_vm/envs/dwi_*`.
   Clone-and-run will not work without them. The shared CPU workhorse is
   `/data/lab_vm/envs/dwi_cheminf`.

@@ -327,7 +327,7 @@ def tolerance_for(rmsf: np.ndarray, calibration: float = RMSF_CALIBRATION) -> fl
 def split_poses(mol, heavy_idx: list[int] | None = None, *,
                 landmarks: int = DEFAULT_LANDMARKS,
                 tolerance: float | None = None,
-                receptor_pdb=None,
+                receptor_pdb=None, conformers=None,
                 n_conf: int = 50, seed: int = 7) -> tuple:
     """Split one molecule's docked poses into groups. Returns (labels, info).
 
@@ -360,8 +360,17 @@ def split_poses(mol, heavy_idx: list[int] | None = None, *,
     n_poses = mol.GetNumConformers()
     if n_poses == 0:
         raise ValueError("molecule carries no conformers")
-    xyz = np.array([mol.GetConformer(i).GetPositions()[heavy_idx]
-                    for i in range(n_poses)])
+    # `conformers` GROUPS A SUBSET AND LABELS THE REST -1, rather than the caller
+    # deleting poses first. A pose excluded here (PoseBusters-invalid) still has
+    # a row and still reaches the persisted cloud; D0093 is the record of what a
+    # filter that DELETES costs -- 21% of every cloud gone, and four experiments
+    # measuring a population nobody chose.
+    sel = (np.arange(n_poses) if conformers is None
+           else np.asarray(conformers, dtype=int))
+    if sel.size == 0:
+        raise ValueError("no conformers selected to group")
+    xyz = np.array([mol.GetConformer(int(i)).GetPositions()[heavy_idx]
+                    for i in sel])
 
     names = landmark_residues(landmarks)
     res = receptor_landmark_coords(names, receptor_pdb)
@@ -372,9 +381,11 @@ def split_poses(mol, heavy_idx: list[int] | None = None, *,
     tol = float(tolerance) if tolerance is not None else tolerance_for(rmsf)
 
     D = pose_distances(contact_tensor(xyz, res), w)
-    labels = group(D, tol)
+    sub_labels = group(D, tol)
+    labels = np.full(n_poses, -1, dtype=int)
+    labels[sel] = sub_labels
 
-    worst = within_group_max(D, labels)
+    worst = within_group_max(D, sub_labels)
     # ASSERTED, NOT HOPED. The guarantee is the whole reason complete linkage was
     # chosen over the two rules this replaces, and a guarantee nothing checks is
     # a comment.
@@ -382,9 +393,11 @@ def split_poses(mol, heavy_idx: list[int] | None = None, *,
         raise AssertionError(
             f"complete linkage broke its own bound: {worst:.4f} > {tol:.4f}")
 
-    sizes = np.bincount(labels)
+    sizes = np.bincount(sub_labels)
     info = {
         "method": "contact_linkage",
+        "n_grouped": int(sel.size),
+        "n_excluded": int(n_poses - sel.size),
         "landmarks": landmarks,
         "landmark_residues": names,
         "tolerance_a": tol,

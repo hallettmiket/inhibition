@@ -14,6 +14,8 @@ artefact downstream.
 
 from __future__ import annotations
 
+import copy as _copy
+import functools as _functools
 from pathlib import Path
 from typing import Any
 
@@ -26,11 +28,28 @@ class ConfigError(RuntimeError):
 
 
 def load(path: Path | None = None) -> dict:
-    import yaml
+    """The target config. CACHED ON (path, mtime, size).
+
+    `_cfg` in the screen reads single keys, and each read re-parsed the whole
+    YAML: 196 loads and 8 s per molecule, profiled 2026-08-27.
+
+    KEYED ON THE FILE'S MTIME AND SIZE, not just its path. A cache on the path
+    alone would serve a stale config to a long run whose file was edited
+    mid-flight -- and two different configs used inside one run is exactly the
+    D0080 defect. Returns a DEEP COPY so a caller mutating the result cannot
+    poison every later reader.
+    """
     p = Path(path or CONFIG)
     if not p.is_file():
         raise ConfigError(f"no target config at {p}")
-    with p.open() as fh:
+    st = p.stat()
+    return _copy.deepcopy(_load_cached(str(p.resolve()), st.st_mtime_ns, st.st_size))
+
+
+@_functools.lru_cache(maxsize=8)
+def _load_cached(path_str: str, mtime_ns: int, size: int) -> dict:
+    import yaml
+    with open(path_str) as fh:
         return yaml.safe_load(fh) or {}
 
 

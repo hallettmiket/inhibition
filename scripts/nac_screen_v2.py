@@ -84,6 +84,7 @@ from shared import outputs as sout                # noqa: E402
 from shared import covalent_protocol as cp        # noqa: E402
 from shared import receptors as R                 # noqa: E402
 from shared import pose_modes as pmod             # noqa: E402
+from shared import run_paths as R_paths           # noqa: E402
 from shared import engagement_rank as _eng        # noqa: E402
 import nac_screen as ns
 from shared import pose_subsplit as psub                           # noqa: E402
@@ -296,6 +297,68 @@ def _cfg(key: str, default):
         return default
 
 
+
+def posebusters_valid(mol, receptor: Path, work: Path,
+                      config: str = "dock", max_workers: int = 8) -> np.ndarray:
+    """Boolean validity per conformer, from PoseBusters. RAISES if it cannot run.
+
+    D0089 adopted this gate and it was never built; nac_v5 shipped without it.
+    What it is for, quoting that record's own measurements rather than the hope:
+
+      * it does NOT filter out what we want. Attack-ready poses pass at 98.57%
+        against 92.80% for the rest -- odds ratio 5.35, Fisher p = 1.9e-23. Its
+        clash threshold is 0.75x the vdW sum, which for the reactive carbon
+        against Cys113 SG is 2.625 A, BELOW the near-attack window's 2.8 A
+        floor, so it rejects poses that are too CLOSE.
+      * it does NOT improve the ranking: rho = 0.9989 on per-mode
+        viable_fraction, top-25 overlap 25/25, median rank movement zero.
+
+    So the gate buys validity, reproducibility and an equal denominator across
+    molecules -- and D0089 says that qualification IS the decision.
+
+    `config="dock"` is the 22-check mode INCLUDING protein clashes, which is what
+    D0089 measured; `mol` is 12 ligand-only checks and would not see the clash
+    at all. Measured on this build: 93.0% valid in dock mode, 99.8% in mol mode.
+
+    IT RAISES RATHER THAN PASSING EVERYTHING. A gate that silently degrades to
+    "all valid" when the import fails is a guard that cannot fail -- the shape
+    this project's catalogue is mostly made of.
+    """
+    from posebusters import PoseBusters
+    from rdkit import Chem
+    # A .pdb, NOT the .pdbqt the docking consumed. PoseBusters cannot read pdbqt
+    # and warns rather than raising -- every protein-ligand check then fails for
+    # a missing receptor and the verdict is "0 of 500 valid", which reads as a
+    # chemistry result. Checked here so the failure names itself.
+    receptor = Path(receptor)
+    if receptor.suffix.lower() not in (".pdb", ".cif", ".mmcif"):
+        raise ValueError(
+            f"PoseBusters needs a .pdb receptor; got {receptor.name}. The .pdbqt "
+            "the docking used cannot be parsed and every check would fail for "
+            "want of a receptor, reporting 0% valid as though it were chemistry.")
+    tmp = work / "pb_check.sdf"
+    w = Chem.SDWriter(str(tmp))
+    for c in range(mol.GetNumConformers()):
+        w.write(mol, confId=c)
+    w.close()
+    df = PoseBusters(config=config, max_workers=max_workers).bust(
+        [tmp], None, receptor)
+    ok = df.all(axis=1).to_numpy(dtype=bool)
+    if not ok.any():
+        # DISTINGUISH THE TWO WAYS THIS REACHES ZERO. Chemistry rejecting every
+        # pose and the receptor failing to load produce the identical verdict,
+        # and the second is an infrastructure fault wearing a result's clothes.
+        per_check = (~df).sum(axis=0).sort_values(ascending=False)
+        raise ValueError(
+            f"PoseBusters rejected all {len(ok)} poses. Failing checks, worst "
+            f"first: {dict(per_check.head(4))}. If these are protein-ligand "
+            f"checks, suspect the receptor ({receptor.name}) rather than the poses.")
+    if len(ok) != mol.GetNumConformers():
+        raise ValueError(f"PoseBusters returned {len(ok)} verdicts for "
+                         f"{mol.GetNumConformers()} conformers")
+    return ok
+
+
 def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         do_gnina: bool, all_poses: bool = False,
         sub_split: int = psub.DEFAULT_MAX_SUB,
@@ -337,6 +400,30 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         # converted to a scalar index".
         en = np.asarray(en, dtype=float)
 
+        # ---- PoseBusters validity gate (D0089) ---------------------------
+        # EVERY POSE IS KEPT AND FLAGGED, never dropped from the record. D0093
+        # is what happens when a filter deletes instead of labelling: 21% of
+        # every cloud vanished and four experiments measured a population
+        # nobody had chosen. Invalid poses are excluded from GROUPING and from
+        # the aggregates, and they still appear in the per-pose table and the
+        # persisted cloud carrying `pb_valid = False`.
+        pb_cfg = _cfg("docking.posebusters.enabled", True)
+        if pb_cfg:
+            pb_valid = posebusters_valid(
+                mol, R_paths.receptor_prep(), work,
+                config=str(_cfg("docking.posebusters.config", "dock")),
+                max_workers=int(_cfg("docking.posebusters.max_workers", 8)))
+        else:
+            pb_valid = np.ones(mol.GetNumConformers(), dtype=bool)
+        agg["n_poses_docked"] = int(len(pb_valid))
+        agg["n_poses_pb_valid"] = int(pb_valid.sum())
+        agg["posebusters_config"] = (str(_cfg("docking.posebusters.config", "dock"))
+                                     if pb_cfg else "disabled")
+        if not pb_valid.any():
+            raise ValueError("PoseBusters rejected every pose")
+        log.info("  posebusters: %d of %d poses valid (%.1f%%)",
+                 int(pb_valid.sum()), len(pb_valid), pb_valid.mean() * 100)
+
         in_rng = np.array([nac.NAC_DIST_MIN <= r.distance <= nac.NAC_DIST_MAX
                            for r in res])
         viable = np.array([bool(r.viable) for r in res])
@@ -348,20 +435,25 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         # itself, which is the score.
         feat = pmod.features(mol, match)
         method = split_method or _cfg("splitting.method", "warhead_dbscan")
+        keep_idx = np.flatnonzero(pb_valid)
         if method == "contact_linkage":
             # ONE CALL REPLACES BOTH STAGES. `split_poses` bounds within-group
             # distance structurally, returns no noise label, and never touches
             # the attack geometry that stage 4 scores (D0088, D0092, D0095).
             from shared import pose_contacts as pcon
             labels, sub_info = pcon.split_poses(
-                mol,
+                mol, conformers=keep_idx,
                 landmarks=int(_cfg("splitting.contact_linkage.landmarks",
                                    pcon.DEFAULT_LANDMARKS)),
                 tolerance=_cfg("splitting.contact_linkage.tolerance", None),
                 seed=seed if seed is not None else 7)
-            log.info("  contact split: %d poses -> %d groups, largest %d, "
+            # REPORTS WHAT IT GROUPED, not what was docked. It said "500 poses"
+            # while grouping 474 -- the gate's 26 rejections were invisible in
+            # the one line a reader watches.
+            log.info("  contact split: %d of %d poses -> %d groups, largest %d, "
                      "tolerance %.2f A (worst within-group %.3f A)",
-                     sub_info["n_poses"], sub_info["modes_out"],
+                     sub_info["n_grouped"], sub_info["n_poses"],
+                     sub_info["modes_out"],
                      sub_info["largest"], sub_info["tolerance_a"],
                      sub_info["worst_within_group_a"])
         elif method == "warhead_dbscan":
@@ -416,6 +508,10 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
             "approach_angle": res[i].approach_angle,   # None for SN2 by design
             "angle_kind": res[i].angle_kind,
             "viable": viable[i], "in_range": bool(in_rng[i]),
+            # FLAGGED, NOT DELETED (D0089 + D0093). An invalid pose keeps its
+            # row and its place in the cloud; it is only excluded from grouping
+            # and from the aggregates.
+            "pb_valid": bool(pb_valid[i]),
         } for i in range(len(res))])
 
         # Anchoring quality per pose, computed ONCE. Used twice below: to score
@@ -444,6 +540,9 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         _parent = sub_info.get("parent", {})
         _label = sub_info.get("label", {})
         for k in mode_ids:
+            # `labels` is already -1 for PoseBusters-invalid poses, so a mode
+            # mask cannot pick one up -- the gate is enforced by the labelling
+            # rather than by a second filter that could drift from it.
             sel = labels == k
             ident_k = f"{cand.ident}_m{k}"
             ident_row = dict(agg)
@@ -578,8 +677,15 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
             # were mode-assigned (e.g. 418 in the SDF against 405 in the table),
             # which is #44's rule -- the cloud must come from the same run that
             # produced the scores -- broken by a cache check.
-            order = [int(i) for i in np.argsort(labels, kind="stable")
-                     if labels[i] in mode_ids]
+            # EVERY POSE, INCLUDING UNGROUPED ONES (D0093). This read
+            # `if labels[i] in mode_ids`, which dropped every DBSCAN-noise pose
+            # -- 21% of each cloud -- from a file named `allposes`. Four
+            # experiments then measured a population nobody had chosen, and the
+            # viewer drew an 88th-percentile pose identically to the best one.
+            # Ungrouped poses are written with `mode = -1` and their pb_valid
+            # flag, so a reader can exclude them by IDENTITY rather than by
+            # their absence.
+            order = [int(i) for i in np.argsort(labels, kind="stable")]
             write_sdf(mol, order, adest,
                       modes=[int(labels[i]) for i in order], energies=en)
 

@@ -91,6 +91,29 @@ docking:
   # experiment wants.
   seed: 42
 
+  # POSEBUSTERS VALIDITY GATE (D0089 -- adopted there, built 2026-08-27).
+  #
+  # What it buys, from D0089's own measurements rather than the hope: attack-ready
+  # poses pass at 98.57% against 92.80% for the rest (odds ratio 5.35, Fisher
+  # p = 1.9e-23), because its clash threshold of 0.75x the vdW sum is 2.625 A for
+  # the reactive carbon against Cys113 SG -- BELOW the near-attack window's 2.8 A
+  # floor -- so it rejects poses that are too CLOSE. And it does NOT improve the
+  # ranking: rho = 0.9989 on per-mode viable_fraction, top-25 overlap 25/25,
+  # median rank movement zero places. Validity, reproducibility and an equal
+  # denominator; not a better answer. That qualification IS the decision.
+  #
+  # Invalid poses are FLAGGED, not deleted: they keep their per-pose row and
+  # their place in the persisted cloud with `pb_valid = False`, and are excluded
+  # only from grouping and the aggregates. D0093 is the record of what a filter
+  # that deletes costs.
+  posebusters:
+    enabled: true
+    config: dock         # 22 checks INCLUDING protein clashes -- what D0089
+                         # measured. `mol` is 12 ligand-only checks and cannot
+                         # see the clash at all (93.0% valid vs 99.8%).
+    max_workers: 8       # measured on this box: 86 s -> 20 s per 500 poses, and
+                         # 16 or 32 workers buy nothing beyond 8.
+
 splitting:
   # WHICH SPLITTER RUNS. Named here rather than defaulted in code, because two
   # rules that both produce integer labels are indistinguishable downstream and

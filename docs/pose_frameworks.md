@@ -88,3 +88,28 @@ rejected: it discards 29% of a cloud as noise, lost the MD-validated pose in 3 o
 cluster count grows linearly with sampling because it has no length scale
 (D0090). It stays on disk so those experiments still run; it is listed in
 `data/ready_to_delete.md` and should go when they are archived.
+
+---
+
+## Before you bump `run.topic`
+
+`config/target.yaml` is global state, and **detached processes from other Claude
+Code sessions read it.** Long-running supervisors survive the session that
+started them, poll every few minutes, and resolve every path from `run.topic`.
+Bumping it therefore redirects work already in flight, and a resume check that
+finds the new topic empty reads as *"nothing has been done yet"* — which is how a
+supervisor comes to launch a full sweep against a screen that has produced no
+modes.
+
+Measured 2026-08-27: two `overnight.sh` supervisors, 14 and 9 days old, started
+from a session in `~/repos/murmurent`, were keeping the nac_v5 campaign alive.
+Bumping the topic to `nac_v6` made one of them build an empty report tree for it
+within five minutes.
+
+```bash
+ps -eo pid,etime,cmd | grep -E '[o]vernight|[s]weep_worker|[p]ipeline.py serve|[p]romote_to'
+```
+
+**Stop the supervisor before its children** — killing a watched child only makes
+it respawn. And do not treat an idle process as finished: a `promote_to_bpmd` had
+been resident for 10 days 22 hours with zero GPU usage.

@@ -54,6 +54,8 @@ defect this project keeps rediscovering.
 
 from __future__ import annotations
 
+import functools as _functools
+
 import logging
 from dataclasses import dataclass
 
@@ -271,8 +273,22 @@ def measure_poses(mol, smarts_match: tuple[int, ...], mechanism: str,
     return out
 
 
+@_functools.lru_cache(maxsize=None)
 def isotropic_null(mechanism: str) -> float:
     """Fraction of approach directions that would pass the window BY CHANCE.
+
+    CACHED, AND THE KEY IS THE WHOLE INPUT. This is a pure function of
+    `mechanism` -- there are four -- and the perpendicular branch integrates a
+    2001 x 4000 grid to get there. The screen called it 384 times per molecule
+    at 0.8 s each: 309 s of a 333 s per-molecule budget, 93% of the run, all of
+    it recomputing four constants. Profiled 2026-08-27.
+
+    This project has been bitten three times by caches keyed on LESS than their
+    inputs (catalogue #8, #9, #18), so it is worth saying why this one is safe:
+    the body reads `mechanism`, module constants, and nothing else, and the
+    docstring below already states the result is "independent of which molecule
+    is being scored". If a window constant ever becomes configurable, this cache
+    becomes wrong and must be keyed on it too.
 
     The window is a cone, so its solid angle divided by the sphere's is the rate
     a sulfur arriving from a uniformly random direction would clear it. Computed
