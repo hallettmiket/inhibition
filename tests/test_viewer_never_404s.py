@@ -48,9 +48,28 @@ def _rows() -> list[tuple[str, str]]:
 
 
 def _md_results_exist() -> bool:
-    """Has any MD run produced a residence row for this topic?"""
+    """Has a PRODUCTION run finished for this topic? Not: has any MD run at all.
+
+    `combined.html` shows 100 ns results. The first version of this globbed every
+    csv under `md_residence_<topic>/` and so counted the TRIAGE SWEEP's own
+    residence files -- `md_residence_sweep_r*.csv`, `production_ps = 5000` --
+    as production output. The rail was then required to have rows on a topic
+    whose 100 ns stage had never run, and the test failed for a state that is
+    correct. Distinguished by the length the run actually used, which is the
+    thing that separates them.
+    """
     import glob
-    return bool(glob.glob(str(rp.BLACKSMITH / f"md_residence_{rp.topic()}" / "*.csv")))
+    import pandas as pd
+    from shared import target_config as _tc
+    want = float(_tc.md_production_ps())
+    for f in glob.glob(str(rp.BLACKSMITH / f"md_residence_{rp.topic()}" / "*.csv")):
+        try:
+            d = pd.read_csv(f)
+        except Exception:                                   # noqa: BLE001
+            continue
+        if "production_ps" in d and (d["production_ps"] >= want * 0.9).any():
+            return True
+    return False
 
 
 def test_there_are_rows_at_all():

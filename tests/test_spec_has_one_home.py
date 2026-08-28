@@ -105,12 +105,21 @@ def test_the_spec_resolves_to_the_decisions_on_record():
     API the runners now use. A config edit that contradicts a decision fails
     here.
 
-    The sweep length was 8 ns under D0085 and is 5 ns under D0087, which amends
-    it on length alone: the optimum was measured as a plateau (bootstrap 95% CI
-    4.3-9.5 ns) and truncation is one-sided, so a shorter window can only admit
-    extras, never drop a survivor. The BAR is untouched.
+    The sweep length was 8 ns under D0085, 5 ns under D0087, and is 1.2 ns under
+    D0100. Each amends it on LENGTH alone and the BAR is untouched throughout.
+
+    D0087 could call 5 ns safe because it sits inside D0085's bootstrap 95% CI of
+    4.3-9.5 ns. **D0100's 1.2 ns does not**, and that argument does not carry
+    over: it is safe only because truncation is one-sided, so a shorter window
+    admits extras and cannot drop a survivor. It is a STANDALONE TRIAGE setting
+    -- the pass rate goes 10.7% -> 36.3%, which triples the cost of any 100 ns
+    stage that follows, and anyone running one should put this back to 5 ns.
+
+    THIS ASSERTION IS THE GUARD THAT CAUGHT THE EDIT. The config was changed to
+    1200 before D0100 was written, and this test failed on it, which is exactly
+    what "a config edit that contradicts a decision fails here" is for.
     """
-    assert tc.md_sweep_ps() == 5_000.0
+    assert tc.md_sweep_ps() == 1_200.0
     assert tc.md_survivor_rmsd_nm() == 0.35
     assert tc.md_production_ps() == 100_000.0
     assert list(tc.get("run.tiers")) == ["T4"]

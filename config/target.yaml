@@ -442,7 +442,21 @@ md:
   # ~25 modes per molecule. At 4.10 min/ns measured over 251 sweeps, 8 -> 5 ns
   # takes a mode from 32.8 to 20.5 min. That is a 37% cut per mode against a 5x
   # larger worklist, so it softens the increase rather than absorbing it.
-  sweep_ps: 5000             # triage: decides what earns a 100 ns run
+  # 1.2 ns TRIAGE (@tt8804, 2026-08-27). NOT the measured optimum and must not be
+  # read as one: D0085 put the yield peak at 8.3 ns with a bootstrap 95% CI of
+  # 4.3-9.5 ns, and 1.2 ns is well OUTSIDE that interval, so D0087's "safe
+  # because it sits inside the CI" argument does not carry over to it.
+  #
+  # WHAT MAKES IT SAFE IS TRUNCATION, NOT THE PLATEAU. The bar is one-sided:
+  # anything that would clear 5 ns also clears 1.2 ns, so a shorter sweep cannot
+  # LOSE a survivor. It admits more false positives instead.
+  #
+  # WHAT IT COSTS, MEASURED: pass rate rises 10.7% -> 36.3%, so the sweep gets
+  # 4.2x cheaper (141 -> 34 GPU-h over 413 modes) while the 100 ns stage it feeds
+  # gets 3.4x dearer (199 -> 675 GPU-h). End to end the yield per GPU-hour halves,
+  # 43.4 -> 20.8. This is therefore a STANDALONE TRIAGE setting. Anyone going on
+  # to 100 ns should put it back to 5 ns first.
+  sweep_ps: 1200
   production_ps: 100000
   salt_molar: 0.15           # #57. Every 2.2.0 system was built with
                              # `addions ... 0` -- neutralise and stop -- so none
