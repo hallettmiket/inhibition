@@ -166,3 +166,32 @@ def test_no_gui_builder_reads_a_flat_run_directory():
         hits = [l.strip() for l in src.splitlines()
                 if bad.search(l) and not l.lstrip().startswith("#")]
         assert not hits, f"{f} still reads a flat run directory: {hits[:2]}"
+
+
+def test_the_three_md_tiers_are_a_cascade_at_one_bar():
+    """D0101. Each tier filters the one before at the SAME max-RMSD bar, so the
+    lengths must be strictly increasing -- a middle tier that is not longer than
+    the triage cannot cull anything, and one not shorter than production cannot
+    save anything.
+
+    The nesting is what makes a longer tier 2 free of recall risk: max RMSD over
+    a longer window is >= the max over a shorter one, so anything holding 100 ns
+    necessarily held 10 ns. Choosing 10 over 5 is therefore a pure cost decision
+    (122 against 212 GPU-h over the 90 survivors), not a sensitivity trade.
+    """
+    t1 = tc.md_tier_ps("triage")
+    t2 = tc.md_tier_ps("screen")
+    t3 = tc.md_tier_ps("production")
+    assert t1 < t2 < t3, f"tiers must strictly increase, got {t1}, {t2}, {t3}"
+    assert (t1, t2, t3) == (1_200.0, 10_000.0, 100_000.0)
+    # tier 1 and 3 keep their own readers; the cascade must agree with them
+    assert tc.md_sweep_ps() == t1
+    assert tc.md_production_ps() == t3
+
+
+def test_an_unknown_md_tier_raises():
+    """A fourth tier name must not resolve to a default and run a length nobody
+    chose."""
+    import pytest as _p
+    with _p.raises(Exception, match="unknown MD tier"):
+        tc.md_tier_ps("overnight")

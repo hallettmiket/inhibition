@@ -1373,3 +1373,52 @@ would be worth more than a deeper one.
 Still open from earlier: exp/14–16 re-run on raw clouds; the MD-validated-pose
 test; SIFt as a baseline; the 30° off-normal window, which binds for all three
 families and is a chemistry judgement for #12.
+
+---
+
+## 2.9 Three MD tiers — D0101
+
+*2026-08-29.*
+
+| tier | length | population | status |
+|---|---:|---|---|
+| 1 — triage | 1,200 ps | 300 modes → **90 held** | ✅ 299/300, 0 errors, 9.4 h |
+| 2 — screen | **10,000 ps** | 90 → ~9–27 expected | running, 4 cards, ~15 h |
+| 3 — production | 100,000 ps | the result | not started |
+
+All three apply the **same** 0.35 nm max-ligand-RMSD bar. That is what makes it a
+cascade rather than three unrelated filters — and it is why tier 2's length costs
+nothing in recall.
+
+**Why a middle tier.** 1.2 ns straight to 100 ns is 615 GPU-h for the 90. Culling
+at 10 ns first is 122 — **80% less** — because a 100 ns run is 83× a 1.2 ns one.
+
+**Why 10 ns and not 5.** The bar is **nested**: max RMSD over a longer window is ≥
+the max over a shorter one, so anything holding 100 ns necessarily held 10 ns.
+A longer tier 2 cannot lose a tier 3 survivor, so it is pure cost:
+
+| tier 2 | → tier 3 | total GPU-h |
+|---:|---:|---:|
+| 5 ns | 27 | 212 |
+| 8 ns | 18 | 170 |
+| **10 ns** | **9** | **122** |
+
+At 10 ns the stages balance (62 against 61 GPU-h). It is also the edge of what
+`exp_sweep_length` measured, so longer would be extrapolation.
+
+**Caveat carried into the run:** those pass rates are *transferred* from an
+unconditional curve over the nac_v5 list. These 90 are pre-selected by both the
+triage and engagement, so tier 3 will likely receive more than 9.
+
+### Tier 1's result, for the record
+
+299 modes, **90 held (30.1%)** — 54 acrylamide, 36 bdhi_c5, max-RMSD 0.150–0.349 nm.
+At other bars: 12.4% at 0.25 nm, 62.9% at 0.50, 94.0% at 1.20 (dissociation).
+
+And the finding that motivated none of this but matters most:
+**engagement does not discriminate within the band it selected.** Over the 301
+swept modes, ρ(engagement, frac_attack_ready) = **+0.057, p = 0.33**, with the
+lowest quartile (33% attack-ready) indistinguishable from the highest (41%).
+D0098's ρ = +0.652 held across a range spanning 0–0.9; inside 0.707–0.956 there is
+nothing. **Engagement is a threshold, not a ranking** — so the 150/family cap is
+sampling, not selecting.

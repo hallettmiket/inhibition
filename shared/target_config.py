@@ -290,3 +290,25 @@ def md_held_residence_floor(cfg: dict | None = None) -> float:
     this says whether it stayed put while it was there.
     """
     return float(get("md.held_residence_floor", cfg, default=0.95))
+
+
+def md_tier_ps(tier: str, cfg: dict | None = None) -> float:
+    """Length in ps of one MD tier: `triage` | `screen` | `production` (D0101).
+
+    AN ALLOWLIST OF THREE, and it RAISES on anything else. The three lengths are
+    a filter cascade at ONE bar, and a caller that invents a fourth name would
+    otherwise get a default and run a length nobody chose -- the shape #14
+    records. `md.sweep_ps` and `md.production_ps` remain the readers for tiers 1
+    and 3 so existing callers are untouched; this is the one place that knows the
+    cascade as a whole.
+    """
+    names = {"triage": "triage_ps", "screen": "screen_ps",
+             "production": "production_ps"}
+    if tier not in names:
+        raise ConfigError(f"unknown MD tier {tier!r}; known: {sorted(names)}")
+    v = get(f"md.tiers.{names[tier]}", cfg, default=None)
+    if v is None:
+        raise ConfigError(
+            f"md.tiers.{names[tier]} is not set. The three tiers are a measured "
+            "cascade (D0101), not defaults: see config/target.yaml.")
+    return float(v)

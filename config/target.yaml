@@ -457,6 +457,44 @@ md:
   # 43.4 -> 20.8. This is therefore a STANDALONE TRIAGE setting. Anyone going on
   # to 100 ns should put it back to 5 ns first.
   sweep_ps: 1200
+
+  # ---------------------------------------------------------------------------
+  # THREE MD TIERS (D0101). Each is a filter on the one before, at the SAME bar.
+  #
+  #   tier 1  triage_ps      1,200 ps   300 modes -> 90 held
+  #   tier 2  screen_ps     10,000 ps   the cull that pays for tier 3
+  #   tier 3  production_ps 100,000 ps  the result
+  #
+  # WHY A MIDDLE TIER EXISTS AT ALL. Straight from 1.2 ns to 100 ns costs 615
+  # GPU-h for the 90 survivors. Culling at 10 ns first costs 122 -- a 80% saving
+  # -- because a 100 ns run is 83x a 1.2 ns one, so an hour spent culling buys
+  # far more than an hour saved.
+  #
+  # WHY 10 ns AND NOT 5. THE BAR IS NESTED: max ligand RMSD over a longer window
+  # is >= the max over a shorter one, so anything that holds 100 ns necessarily
+  # held 10 ns and 5 ns. A longer tier 2 therefore CANNOT lose a tier 3 survivor
+  # -- it is a pure cost trade with no recall risk, and culling harder always
+  # wins. Measured against exp_sweep_length's curve, over the 90:
+  #
+  #     tier 2   -> tier 3   tier2 GPU-h   tier3 GPU-h   TOTAL
+  #      3 ns        46           18           313        331
+  #      5 ns        27           31           182        212
+  #      8 ns        18           49           121        170
+  #     10 ns         9           62            61        122   <- adopted
+  #
+  # At 10 ns the two stages balance (62 against 61 GPU-h), which is the optimum;
+  # and 10 ns is the edge of what exp_sweep_length measured (0.1-10 ns), so going
+  # longer is not defensible without new data.
+  #
+  # THE PASS RATES ARE TRANSFERRED, NOT MEASURED ON THIS COHORT. They come from
+  # exp_sweep_length's UNCONDITIONAL curve over the nac_v5 ranked list; our 90
+  # are pre-selected by both 1.2 ns and engagement, so their true rate at 10 ns
+  # is probably higher and tier 3 will receive more than 9. The nesting argument
+  # is unaffected; the arithmetic is an estimate.
+  tiers:
+    triage_ps: 1200
+    screen_ps: 10000
+    production_ps: 100000
   production_ps: 100000
   salt_molar: 0.15           # #57. Every 2.2.0 system was built with
                              # `addions ... 0` -- neutralise and stop -- so none
