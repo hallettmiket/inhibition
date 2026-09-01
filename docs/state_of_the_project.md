@@ -354,7 +354,7 @@ issue #11 and the reason the hand-maintained version of this table was wrong
 within 24 h of being written.*
 
 > **The refresh cannot currently be run as `mhallet`, so this table is one
-> T_4 frame stale (2026-09-01).** Five of the nine latest frames the script
+> T_4 frame stale (2026-09-01). See issue #82.** Five of the nine latest frames the script
 > reads are owned by `twu383` and are unreadable by anyone else despite mode
 > `770` and a shared `ssmd-ud-vmlab` group: `D1_32`, `D3_38`, `D4_53`,
 > `D2_33` and the degree-2 `D2_8`. The export is NFSv3 off an Isilon, whose
