@@ -1,7 +1,8 @@
 # How this project breaks
 
-*Written 2026-07-31, at handover. Last updated 2026-08-27 (catalogue now 31
-entries). Read this before the README.*
+*Written 2026-07-31, at handover. Last updated 2026-09-01 (catalogue 31
+entries; the discovery-route table below refreshed for entries 22-31, which it
+had never been). Read this before the README.*
 
 Every substantive bug found in this project has been the same bug.
 
@@ -190,15 +191,25 @@ from a real result at stage six.
 
 Worth being honest, because it should change how you spend your attention.
 
-| route | count |
-|---|---|
-| Someone looked at output and it didn't match expectation | 9 |
-| Found while building something else entirely | 6 |
-| An existing guard fired | 3 |
-| Deliberate audit for this class of defect | 3 |
+| route | 1-21 | 22-31 | total | which of 22-31 |
+|---|---:|---:|---:|---|
+| Someone looked at output and it didn't match expectation | 9 | 7 | **16** | 23, 24, 25, 26, 28, 30, 31 |
+| Found while building something else entirely | 6 | 1 | **7** | 29 |
+| An existing guard fired | 3 | 0 | **3** | none |
+| Deliberate audit for this class of defect | 3 | 2 | **5** | 22, 27 |
 
-*Updated 2026-08-02 with entries 14-21. The ratio did not improve: still only
-3 of 21 caught by a guard. Two of the new ones (#20, #21) were caught by
+*Updated 2026-09-01 with entries 22-31. **The ratio got worse: still only
+3 of 31 caught by a guard**, because not one of the ten new entries was. Seven
+of the ten surfaced because someone read output that did not match
+expectation, and two of those (#23, #28) came from @tt8804 seeing two things
+presented side by side and asking why they disagreed — a route no guard
+performs. The 22-31 column names which entry went where so the next person can
+check the arithmetic instead of trusting it; the 1-21 column is left as
+originally judged and is not re-derived here. This table went four weeks and
+ten entries without being updated, which is itself a pinned default gone
+stale (§3).*
+
+*Updated 2026-08-02 with entries 14-21. Two of those (#20, #21) were caught by
 checking against **6VAJ, whose covalent linkage D0001 already records at
 1.78 Å** — ground truth the project already had, in a decision record, costing
 one query to check. Both had produced output that read as a discovery: "zero

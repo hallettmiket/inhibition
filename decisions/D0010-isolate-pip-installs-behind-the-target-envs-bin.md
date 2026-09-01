@@ -4,7 +4,7 @@ title: Isolate pip installs behind the target env's bin
 date: 2026-07-27
 status: accepted
 approach: shared
-decided_by: '@mhallett'
+decided_by: '@mhallet'
 origin: implementation
 supersedes: []
 superseded_by: null

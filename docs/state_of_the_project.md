@@ -122,15 +122,30 @@ as a blocking question and withdrawn.)
 | **T_3** | R-group decoration | sulfopin' | REINVENT LibInvent | covalent Cys113 |
 | **T_4** | warhead × R-group | sulfopin core | combinatorial | covalent Cys113 |
 
-**13,863 candidates** across the four arms, plus **42,588** from the five-seed
-T_2 reseeding and **15,653** from a degree-2 ATRA sample — **~72,000
-molecules, all docked and ranked** as of 2026-08-02.
+**53,593 molecules docked and 53,467 ranked** as of the last successful
+refresh, so **~53,500** is the figure to quote for "docked and ranked":
+**11,982** generated across T_1, T_3 and T_4 of which **8,996** docked and
+**8,997** ranked, plus **44,597** docked and **44,470** ranked across the six
+T_2 variants. Every one of those figures comes from the generated table in
+§"Measured state of every frame" below; take them from there, not from here.
+
+> **The "~72,000" that used to sit in this line was a generation count being
+> read as a screening count.** It was 13,863 (four arms) + 42,588 (five-seed
+> T_2 reseeding) + 15,653 (degree-2 ATRA sample), and the last term is the
+> problem: of those 15,653 molecules, **127 were ever docked and none were
+> ranked**. Quote ~72,000 only for molecules *generated*; quote ~53,500 for
+> molecules *docked and ranked*. They are not interchangeable, and the gap
+> between them is almost entirely one sample that was enumerated and then not
+> screened. This is catalogue entry-shaped: a number that was right for the
+> quantity it originally described, reused for a different quantity, with both
+> readings plausible.
 
 ---
 
 ## 2. The one thing to understand
 
-> **We have ~72,000 candidates and no validated way to rank any of them.**
+> **We have ~53,500 docked and ranked candidates and no validated way to rank
+> any of them.**
 
 That is not pessimism; it is the measured position, and it is the project's
 central finding so far. Four levels of theory have been tested and none
@@ -337,6 +352,19 @@ rather than the ~265 GPU-hour full re-dock.
 `tests/test_orientation_current.py` fails the suite if this drifts, which is
 issue #11 and the reason the hand-maintained version of this table was wrong
 within 24 h of being written.*
+
+> **The refresh cannot currently be run as `mhallet`, so this table is one
+> T_4 frame stale (2026-09-01).** Five of the nine latest frames the script
+> reads are owned by `twu383` and are unreadable by anyone else despite mode
+> `770` and a shared `ssmd-ud-vmlab` group: `D1_32`, `D3_38`, `D4_53`,
+> `D2_33` and the degree-2 `D2_8`. The export is NFSv3 off an Isilon, whose
+> on-disk ACL does not honour the POSIX group bits the mode string advertises,
+> so `refresh_orientation.py` dies with `PermissionError` on the first frame
+> and `--check` cannot tell you the doc is stale either. `D4_53` already
+> exists where the table below still names `D4_52`. **Whoever fixes this needs
+> either group-readable writes from every contributor or a shared service
+> identity; until then treat the numbers below as a floor with a known
+> one-frame lag, and do not hand-edit them to compensate.**
 
 <!-- AUTO:arms:BEGIN -->
 | arm | frame | rows | docked | ranked | shortlist |
