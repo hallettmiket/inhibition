@@ -41,6 +41,7 @@ from shared import run_paths as rp                      # noqa: E402
 from shared import md_movie as mov                      # noqa: E402
 from shared import outputs as sout                      # noqa: E402
 from shared import report_theme as rt                   # noqa: E402
+from shared import reference_set as rs                  # noqa: E402
 
 log = logging.getLogger("shortlist")
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
@@ -304,14 +305,16 @@ def reactive_atom_index(mol, warhead_class: str) -> int | None:
     from rdkit import Chem
     if mol is None or not warhead_class:
         return None
-    fs = sorted(glob.glob(str(REPO / "data" / "reference" / "warhead_classes_*.csv")))
-    if not fs:
+    # RESOLVED NUMERICALLY. This was `sorted(glob(...))[-1]`, a LEXICAL sort, so
+    # from `_10` onwards it read `warhead_classes_9.csv` and the one class `_10`
+    # adds -- `cinnamamide` -- was never found. Silently, because the miss below
+    # returns None: an aryl Michael acceptor simply got no reactive atom marked
+    # on its report, with nothing to say why.
+    try:
+        row = rs.load_warhead_row(warhead_class)
+    except Exception:                                          # noqa: BLE001
         return None
-    d = pd.read_csv(fs[-1])
-    hit = d[d.class_id == warhead_class]
-    if hit.empty:
-        return None
-    sma = str(hit.iloc[0].reactive_atom_smarts or "")
+    sma = str(row.reactive_atom_smarts or "")
     patt = Chem.MolFromSmarts(sma) if sma else None
     if patt is None:
         return None

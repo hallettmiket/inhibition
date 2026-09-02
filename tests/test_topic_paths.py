@@ -91,3 +91,87 @@ def test_no_hardcoded_topic_directory_survives_in_the_source():
     for bad in ("nac_v3_poses", "nac_v3_allposes", "nac_v2_poses"):
         assert bad not in code, \
             f"{bad} is hardcoded in code again -- this is the 2.2.0 defect"
+
+
+# ---------------------------------------------------------------------------
+# The same defect, one caller out.
+#
+# Everything above reads `nac_screen_v2.py` and nothing else. But `one()` reads
+# POSE_DIR and ALL_POSE_DIR off the MODULE when it writes, so any script that
+# drives `one()` directly has to move them itself -- and `dock_reference_modes`
+# set `nsv.OUT` alone, sending a reference compound's tables to its own topic
+# and its 500-pose cloud into the production run's `<topic>_allposes`.
+#
+# The guard above could not fail on that, because it never looked outside one
+# file. This is that scope hole, closed: a partial rebind is now a test failure
+# wherever it is written.
+# ---------------------------------------------------------------------------
+
+_PATHS = ("OUT", "POSE_DIR", "ALL_POSE_DIR", "TOPIC")
+
+
+def _callers():
+    """Every repo file that imports the screen as a module."""
+    out = []
+    for d in ("scripts", "shared", "integration", "approaches"):
+        for f in (REPO / d).rglob("*.py") if (REPO / d).is_dir() else []:
+            if f.name == "nac_screen_v2.py":
+                continue
+            src = f.read_text(errors="ignore")
+            if "nac_screen_v2" in src:
+                out.append((f, src))
+    return out
+
+
+def test_no_caller_rebinds_the_screens_output_paths_piecemeal():
+    """`nsv.OUT = ...` without the other three is the whole bug.
+
+    Assigning ANY of the four individually is banned outright rather than
+    checking that all four are assigned together: 'all four are present' is a
+    condition a future edit deletes one line from and nothing complains. There
+    is exactly one supported way to move them, `use_topic()`, so anything else
+    is the defect regardless of how complete it looks.
+    """
+    import re
+    offenders = []
+    for f, src in _callers():
+        alias = re.findall(r"import\s+nac_screen_v2\s+as\s+(\w+)", src)
+        alias.append("nac_screen_v2")
+        for ln_no, ln in enumerate(src.splitlines(), 1):
+            code = ln.split("#")[0]
+            for a in alias:
+                for attr in _PATHS:
+                    if re.search(rf"\b{a}\.{attr}\s*=(?!=)", code):
+                        offenders.append(f"{f.relative_to(REPO)}:{ln_no}: {ln.strip()}")
+    assert not offenders, (
+        "these assign the screen's output paths directly; call "
+        "nac_screen_v2.use_topic(topic) instead so all four move together:\n  "
+        + "\n  ".join(offenders))
+
+
+def test_use_topic_moves_all_four(m, tmp_path):
+    """The replacement must actually be the thing that cannot be half-done."""
+    m.use_topic("probe_topic_a")
+    assert m.TOPIC == "probe_topic_a"
+    assert m.POSE_DIR.name == "probe_topic_a_poses"
+    assert m.ALL_POSE_DIR.name == "probe_topic_a_allposes"
+    before = (m.OUT, m.POSE_DIR, m.ALL_POSE_DIR)
+    m.use_topic("probe_topic_b")
+    assert m.POSE_DIR.name == "probe_topic_b_poses"
+    assert m.ALL_POSE_DIR.name == "probe_topic_b_allposes"
+    assert (m.OUT, m.POSE_DIR, m.ALL_POSE_DIR) != before, \
+        "use_topic() did not move the paths"
+
+
+def test_the_guard_can_fail(tmp_path):
+    """A vacuous guard is this project's most common bug -- prove this one bites.
+
+    Written because two tests in this repo passed for free: one counted zero
+    accesses, the other flagged only docstrings.
+    """
+    import re
+    bad = "import nac_screen_v2 as nsv\nnsv.OUT = something\n"
+    alias = re.findall(r"import\s+nac_screen_v2\s+as\s+(\w+)", bad)
+    hit = any(re.search(rf"\b{a}\.OUT\s*=(?!=)", ln.split("#")[0])
+              for a in alias for ln in bad.splitlines())
+    assert hit, "the pattern the guard searches for does not match the defect"

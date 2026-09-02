@@ -52,6 +52,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from rdkit import Chem
 import pandas as pd
 
 REPO = Path(__file__).resolve().parent.parent
@@ -62,6 +63,7 @@ from shared import md_movie as mov                  # noqa: E402
 from shared import nac_criterion as nac             # noqa: E402
 from shared import outputs as sout                  # noqa: E402
 from shared import target_config as tc              # noqa: E402
+from shared import md_movie as mdm
 from shared import run_paths as rp        # noqa: E402
 
 log = logging.getLogger("attack-sweep")
@@ -173,6 +175,56 @@ def geometry_stats(dist: np.ndarray, angle: np.ndarray, kind: str,
     }
 
 
+def _static_sg() -> np.ndarray:
+    """Cys113 SG in the prepared receptor -- the SAME frame the MD uses.
+
+    Verified 2026-09-02: `receptor_cys.pdb` in a sweep workdir and the docking
+    receptor `3IKD_noligand.pdb` both put Cys113 SG at (13.385, 3.989, -2.040),
+    residue 113 renumbering to 63 in the MD system. There is no frame
+    transformation between docking and MD, which is why the drift seen at the
+    start of production is PHYSICS and not a coordinate mismatch.
+    """
+    rec = rp.receptor_prep()
+    for ln in Path(rec).read_text(errors="replace").splitlines():
+        if not ln.startswith(("ATOM", "HETATM")):
+            continue
+        # BY RESIDUE NUMBER. 3IKD also has a Cys57, and taking the first CYS SG
+        # would measure the approach to the wrong sulfur entirely.
+        if (ln[17:20].strip() == "CYS" and ln[12:16].strip() == "SG"
+                and ln[22:26].strip() == "113"):
+            return np.array([float(ln[30:38]), float(ln[38:46]), float(ln[46:54])])
+    raise SweepError(f"no Cys113 SG in {rec}")
+
+
+def _cand_meta(ident: str) -> dict:
+    """The candidate's mechanism and reactive SMARTS, from the warhead library."""
+    import pandas as _pd
+    wh = _pd.read_csv(REPO / "data/reference/warhead_classes_10.csv")
+    frames = sorted((rp.DATA / "04_t4_combinatorial").glob("D4_*.parquet"),
+                    key=lambda f: int(f.stem.split("_")[1]))
+    df = _pd.read_parquet(frames[-1])
+    row = df[df.candidate_id == ident]
+    if row.empty:
+        raise SweepError(f"{ident} is in no candidate frame")
+    cls = str(row.iloc[0].warhead_class)
+    w = wh[wh.class_id == cls]
+    if w.empty:
+        raise SweepError(f"warhead class {cls!r} not in the library")
+    return {"mechanism": str(w.iloc[0].mechanism),
+            "smarts": str(w.iloc[0].reactive_atom_smarts)}
+
+
+def _pose_at_rank(pose_sdf: Path, pose_rank: int):
+    """The pose carrying `pose_rank`, selected by its property (never position)."""
+    from rdkit import Chem as _Chem
+    for m in _Chem.SDMolSupplier(str(pose_sdf), removeHs=False):
+        if m is None or not m.HasProp("pose_rank"):
+            continue
+        if int(m.GetProp("pose_rank")) == pose_rank:
+            return m
+    raise SweepError(f"no pose_rank {pose_rank} in {pose_sdf.name}")
+
+
 def pose_mode(pose_sdf: Path, pose_rank: int) -> int | None:
     """The `mode` property of the pose with this `pose_rank`, or None.
 
@@ -214,8 +266,137 @@ def _finished(rep: Path) -> bool:
         return False
 
 
+class SweepAborted(SweepError):
+    """The pose left the site during equilibration; production was not run.
+
+    A distinct type because this is a RESULT, not a failure -- the molecule was
+    measured and found to have gone. Recording it as `failed:` would make a
+    real observation indistinguishable from a crashed GPU job.
+    """
+
+    def __init__(self, dist_a: float) -> None:
+        super().__init__(f"warhead {dist_a:.2f} A from SG after equilibration")
+        self.dist_a = dist_a
+
+
+def _elev():
+    """`elevation_run.read_gro` -- one .gro parser, not two."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "elev_for_sweep", REPO / "scripts" / "elevation_run.py")
+    m = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = m
+    spec.loader.exec_module(m)
+    return m
+
+
+def _gro_resids(gro: Path, n_atoms: int) -> list[int] | None:
+    """Residue number per atom, in the same order `read_gro` returns atoms.
+
+    A SEPARATE READ, so the two must be checked to agree. `read_gro` gives
+    names and coordinates but not residue numbers; taking them from a second
+    pass is only safe if both passes see the same atoms in the same order, so
+    the count is asserted rather than assumed. A silent off-by-one here would
+    shift every residue number by one and pick the wrong cysteine.
+    """
+    lines = gro.read_text(errors="replace").splitlines()
+    if len(lines) < 3:
+        return None
+    body = lines[2:2 + n_atoms]
+    if len(body) != n_atoms:
+        log.warning("%s: %d atom lines for %d atoms; not measuring",
+                    gro.name, len(body), n_atoms)
+        return None
+    try:
+        return [int(l[0:5]) for l in body]
+    except ValueError:
+        log.warning("%s: unparseable residue numbers; not measuring", gro.name)
+        return None
+
+
+def _equil_distance(cand: str, rep: Path, pose: Path,
+                    pose_rank: int) -> float | None:
+    """Warhead-SG distance in the equilibrated frame, or None if not certain.
+
+    RETURNS None RATHER THAN A GUESS, and the caller then runs production. An
+    abort must be taken only on a distance we are sure of: skipping work on a
+    bad number silently discards a molecule, where doing the work costs six
+    minutes. Fail safe means DO the sweep.
+
+    PERIODIC IMAGES ARE THE WHOLE REASON THIS FUNCTION IS CAREFUL. The first
+    version read the .gro naively and reported 51.18 A for a ligand in a ~7 nm
+    box -- the box length minus the real distance, which is large, finite and
+    completely wrong. A pose sitting perfectly in the pocket but wrapped across
+    a boundary would have been aborted. Minimum image is applied here, the box
+    is required to be orthorhombic, and a result beyond half the box diagonal is
+    refused outright as still-suspect.
+    """
+    gro = rep / "npt.gro"
+    if not gro.is_file():
+        log.warning("%s: no npt.gro to measure; running production", cand)
+        return None
+    try:
+        E = _elev()
+        names, xyz, box = E.read_gro(gro)
+        if box.size >= 6 and float(np.abs(box[3:]).max()) > 1e-6:
+            log.warning("%s: triclinic box; not measuring", cand)
+            return None
+
+        c = _cand_meta(cand)
+        m0 = _pose_at_rank(pose, pose_rank)
+        mt = m0.GetSubstructMatches(Chem.MolFromSmarts(c["smarts"]))[0]
+
+        # The ligand's atoms, by RESIDUE NAME. The atom count must match the
+        # pose or the index `mt[0]` addresses a different atom -- and a distance
+        # from the wrong atom is a plausible wrong number, not an error.
+        lig = [k for k, (resn, _) in enumerate(names)
+               if resn.strip() in {"LIG", "UNL", "MOL"}]
+        if len(lig) != m0.GetNumAtoms():
+            log.warning("%s: gro has %d ligand atoms, pose has %d; not "
+                        "measuring", cand, len(lig), m0.GetNumAtoms())
+            return None
+        # CYS113 BY RESIDUE NUMBER, THROUGH THE SHARED CONSTANT.
+        #
+        # 3IKD has Cys57 as well as Cys113 and BOTH are reduced CYS in the MD
+        # system, so matching on resname alone finds two and cannot choose --
+        # the first version correctly refused rather than guess, which is why
+        # it never measured anything. The MD system renumbers from 1
+        # (`md_movie.PIN1_OFFSET`), putting Cys113 at residue 63.
+        #
+        # The offset is not trusted: the residue found there must BE a cysteine
+        # or this returns None. An offset that slipped by one would name a
+        # different residue with a distance that still looks plausible, which is
+        # the failure `elevation_report`'s own numbering guard exists to stop.
+        resids = _gro_resids(gro, len(names))
+        if resids is None:
+            return None
+        target = mdm.CYS113_RESI
+        sg = [k for k, (resn, at) in enumerate(names)
+              if resids[k] == target and at.strip() == "SG"
+              and resn.strip() == "CYS"]
+        if len(sg) != 1:
+            log.warning("%s: %d CYS SG at residue %d (offset %d); not "
+                        "measuring", cand, len(sg), target, mdm.PIN1_OFFSET)
+            return None
+
+        v = xyz[lig[mt[0]]] - xyz[sg[0]]
+        mic = float(np.linalg.norm(v - box[:3] * np.round(v / box[:3]))) * 10.0
+        half_diag = float(np.linalg.norm(box[:3])) * 10.0 / 2.0
+        if mic > half_diag:
+            log.warning("%s: %.1f A exceeds half the box diagonal (%.1f); "
+                        "measurement suspect, running production",
+                        cand, mic, half_diag)
+            return None
+        return mic
+    except Exception as exc:                              # noqa: BLE001
+        log.warning("%s: could not measure equilibrated frame (%s); "
+                    "running production", cand, exc)
+        return None
+
+
 def run_sweep(cand: str, pose: Path, pose_rank: int, gpu: int,
-              ps: float, net_charge: int | None) -> Path | None:
+              ps: float, net_charge: int | None,
+              abort_above: float | None = None) -> Path | None:
     """10 ns of MD through the production script, so the physics is identical."""
     # ONE WORKDIR PER (MOLECULE, MODE). md_residence names the directory after
     # the candidate, so sweeping two modes of one molecule would put them in the
@@ -252,13 +433,48 @@ def run_sweep(cand: str, pose: Path, pose_rank: int, gpu: int,
             f"{cand}: an unfinished {int(ps)} ps trajectory is already in "
             f"{rep} — another worker may be running it. Not analysing a partial "
             f"run as a complete one.")
-    cmd = [str(PY), str(REPO / "scripts/md_residence_3ikd.py"),
-           "--candidate", cand, "--pose", str(pose),
-           "--pose-rank", str(pose_rank), "--production-ps", str(int(ps)),
-           "--gpu", str(gpu), "--keep", "--tag", f"sweep_r{pose_rank}",
-           "--work-root", str(root)]
+    base = [str(PY), str(REPO / "scripts/md_residence_3ikd.py"),
+            "--candidate", cand, "--pose", str(pose),
+            "--pose-rank", str(pose_rank), "--production-ps", str(int(ps)),
+            "--gpu", str(gpu), "--keep", "--tag", f"sweep_r{pose_rank}",
+            "--work-root", str(root)]
     if net_charge is not None:
-        cmd += ["--net-charge", str(net_charge)]
+        base += ["--net-charge", str(net_charge)]
+
+    # ---- EARLY GIVE-UP, after equilibration and before production ----------
+    #
+    # WHY HERE AND NOT EARLIER. The DOCKED geometry does not predict the sweep:
+    # over the first nac_v8 modes, five poses all sitting at 2.78-2.97 A gave
+    # outcomes from 0.000 to 0.926 attack-ready. What separates them is the
+    # distance AFTER 300 ps of unrestrained equilibration -- 3.58 A gave 0.926,
+    # 6.46 A gave 0.000 -- and that cannot be known without running it.
+    #
+    # Equilibration is 300 ps of the 1,500 a sweep runs, so a pose that has
+    # already left the site is dropped for a fifth of the cost.
+    #
+    # THE THRESHOLD IS DELIBERATELY LOOSE AND THE REASON IS n. It is set from
+    # FIVE observations, which is exactly the basis this project has a record
+    # about not trusting (D0094, D0085). 6.0 A is well past the 4.2 A window and
+    # past every pose that has scored above zero so far, so it catches only the
+    # unambiguously departed. `equil_dist_a` is recorded on EVERY row whether it
+    # aborts or not, so the cut can be re-derived from hundreds of runs later
+    # rather than from these five.
+    if abort_above:
+        r0 = subprocess.run(base + ["--stop-after", "npt"],
+                            capture_output=True, text=True, timeout=7200)
+        if r0.returncode != 0:
+            raise SweepError(f"{cand}: equilibration rc={r0.returncode} "
+                             f"{(r0.stderr or '').strip()[-200:]}")
+        d_eq = _equil_distance(cand, rep, pose, pose_rank)
+        if d_eq is not None and d_eq > abort_above:
+            log.info("%s: warhead %.2f A from SG after equilibration "
+                     "(> %.1f) — skipping production", cand, d_eq, abort_above)
+            raise SweepAborted(d_eq)
+        log.info("%s: %.2f A after equilibration — running production",
+                 cand, d_eq if d_eq is not None else float("nan"))
+        cmd = base + ["--reuse-equilibration"]
+    else:
+        cmd = base
     log.info("%s: %.0f ps sweep on GPU %d", cand, ps, gpu)
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=14400)
     if r.returncode != 0:
@@ -292,11 +508,45 @@ def main() -> None:
     ap.add_argument("--sweep-ps", type=float, default=SWEEP_PS)
     ap.add_argument("--stage0-only", action="store_true",
                     help="report starting geometry only — costs no GPU at all")
+    # A STAGE-0 ROW IS NOT A RESULT, AND MUST BE ABLE TO LAND SOMEWHERE ELSE.
+    #
+    # `--stage0-only` writes a row with `status = "stage0 only"` and no
+    # measurements, into the SAME table as finished sweeps. Anything that
+    # resumes by asking "is this ident present?" then treats a free geometry
+    # probe as a completed simulation -- which is exactly what happened on
+    # 2026-09-02: 12 modes were marked done by a probe and dropped out of the
+    # worklist. `sweep_supervisor.done_tasks` now requires `status == "ok"`,
+    # but the deeper fix is that a probe should not have to share the results
+    # directory at all.
+    # DEFAULT OFF until the equilibrated-frame measurement has been verified on
+    # a real trajectory. It was briefly 6.0 with a naive .gro read that ignored
+    # periodic images, and it wrongly aborted t4_b49ffa60a11a_m113 at a reported
+    # 56.6 A -- the box length minus the real distance. An abort DISCARDS work,
+    # so it stays opt-in: the caller asks for it, having read this.
+    ap.add_argument("--abort-above-a", type=float, default=0.0, metavar="A",
+                    help="after equilibration, if the warhead is further than "
+                         "this from Cys113 SG, skip production and record the "
+                         "distance. 0 disables. Default 6.0 -- LOOSE on "
+                         "purpose: it is set from five observations and only "
+                         "catches poses that have unambiguously left")
+    ap.add_argument("--out-topic", default=None, metavar="NAME",
+                    help="write rows to attack_sweep_<NAME> instead of the "
+                         "current run's table; use for stage-0 probes so they "
+                         "cannot be mistaken for finished sweeps")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if args.out_topic:
+        global OUT
+        OUT = sout.Topic("blacksmith", f"attack_sweep_{args.out_topic}")
+        log.info("rows -> attack_sweep_%s (NOT the run's results table)",
+                 args.out_topic)
     if args.pose_dir is None:
         from shared import target_config as tc
-        args.pose_dir = str(POSES / f"{tc.get('run.topic')}_poses")
+        # THROUGH THE RESOLVER, so a corrected pose set is picked up rather
+        # than the superseded one this literal named. `rp.poses_dir` takes the
+        # highest integer version present; the base directory has no suffix and
+        # still resolves when no correction exists.
+        args.pose_dir = str(rp.poses_dir(tc.get('run.topic')))
     log.info("poses from %s", Path(args.pose_dir).name)
     mp = _mp()
 
@@ -328,11 +578,49 @@ def main() -> None:
             rows.append(rec); log.warning("%s: %s", cand, rec["status"]); continue
 
         if args.stage0_only:
+            # STAGE 0 NOW ACTUALLY MEASURES SOMETHING (2026-09-02).
+            #
+            # It used to write this row and `continue` -- no geometry at all --
+            # while the module docstring advertised "the elevated pose's OWN
+            # geometry, before any simulation ... a filter that costs nothing".
+            # The flag existed, produced a row, computed nothing, and those rows
+            # were counted as finished sweeps by anything resuming on ident.
+            #
+            # AND IT DOES NOT PREDICT THE SWEEP. Measured over the first five
+            # nac_v8 sweeps, all five had a DOCKED warhead-SG distance of
+            # 2.78-2.97 A and outcomes from 0.000 to 0.926 attack-ready. What
+            # separated them was the distance AFTER the 300 ps unrestrained
+            # equilibration (3.58 A -> 0.926, 6.46 A -> 0.000), which is the
+            # tier-1 quantity and is not obtainable without running it. So this
+            # is honest bookkeeping, not a triage filter -- do not use it as one.
             rec["status"] = "stage0 only"
+            try:
+                c = _cand_meta(cand)
+                m0 = _pose_at_rank(pose, args.pose_rank)
+                mt = m0.GetSubstructMatches(Chem.MolFromSmarts(c["smarts"]))[0]
+                pos = m0.GetConformer().GetPositions()[list(mt)]
+                r0 = nac.measure(c["mechanism"], pos, _static_sg())
+                rec.update({"start_dist_a": r0.distance,
+                            "start_angle_deg": r0.angle,
+                            "start_attack_ready": bool(r0.viable),
+                            "stage0_frame": "docked pose vs static Cys113 SG"})
+            except Exception as exc:                      # noqa: BLE001
+                rec["status"] = f"stage0 failed: {type(exc).__name__}: {exc}"[:180]
             rows.append(rec); continue
 
         try:
-            rep = run_sweep(cand, pose, args.pose_rank, args.gpu, args.sweep_ps, None)
+            rep = run_sweep(cand, pose, args.pose_rank, args.gpu, args.sweep_ps,
+                            None, abort_above=(args.abort_above_a or None))
+        except SweepAborted as exc:
+            # A RESULT, NOT A FAILURE. The pose was measured and had gone, so
+            # the row carries the distance and a status of its own. `frac_*`
+            # stay NaN because nothing was simulated -- writing 0.0 would be a
+            # measurement nobody made.
+            rec["status"] = "aborted: left during equilibration"
+            rec["equil_dist_a"] = exc.dist_a
+            rows.append(rec)
+            log.info("%s: %s", cand, exc)
+            continue
         except SweepError as exc:
             # Recorded, never dropped, and never as a number: the row says why
             # there is no reading rather than carrying a value from a partial run.

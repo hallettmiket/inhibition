@@ -1,6 +1,6 @@
 # State of the project
 
-*Written 2026-07-31 at handover. Last updated 2026-08-19. Start here.*
+*Written 2026-07-31 at handover. Last updated 2026-09-02. Start here.*
 
 > **The measured numbers in §7 are generated now** — `scripts/refresh_orientation.py`,
 > and `tests/test_orientation_current.py` fails the suite if they drift (D0055,
@@ -25,6 +25,88 @@ Read alongside:
   problem, audited against the code rather than against the threads). **#4**
   remains the plan and reasoning of record. #2, #6 and #8 are closed into those
   two; read them for history, not for status.
+
+---
+
+## 0b. Every NAC geometry back to nac_v5 was measured against the wrong sulfur
+
+*2026-09-02. Read this FIRST. It invalidates more than anything else on this
+page, and the direction of the error is counterintuitive.*
+
+Cys113 docks as a **flexible** sidechain, so every pose has its own SG.
+`nac_screen.sg_position` returned the FIRST docked model's sulfur and
+`measure_poses` broadcast that one value across all 640 conformers while taking
+ligand coordinates per conformer. **Poses 2..N were measured against where the
+sulfur used to be** (D0109). The function's own docstring states the correct
+rule — *"its position must come from the pose being measured"* — and the body
+applies it once.
+
+**The error reads SHORT, so it suppressed scores rather than inflating them.**
+Same cloud, same 208-group split, only the sulfur differing: `viable` 49 → 96,
+in-window 199 → 238, poses under 3.0 Å 96 → 7. So `viable_fraction`,
+`enrichment`, `anchor_quality` and **`engagement`** were all systematically
+depressed — and non-uniformly, by however far each run's flexible sulfur
+happened to wander, which is a property of the docking and not of the molecule.
+
+**Invalidated: nac_v5, nac_v6 and nac_v7 geometry and every ranking on it.**
+Not invalidated: the modes (contact linkage never touches distance-to-SG —
+verified identical before and after), PoseBusters validity, and D0108's NO GO
+(tier 1 measures in the MD frame through a different code path).
+
+It surfaced only because a distance ranking with no lower bound put impossible
+1.22 Å distances on top — shorter than a C–S bond. **PoseBusters had been
+disagreeing all along and was right**; the natural reading, that PB's clash
+check was broken again like catalogue #31, was backwards.
+
+**nac_v8 is the re-screen** with per-pose sulfur. `measure_poses` now refuses a
+single SG for a multi-conformer molecule, so the broadcast cannot recur silently.
+
+---
+
+## 0a. Where 3.3.0 is going, and the two readouts it retires
+
+*2026-09-02. Read this before §0 and §3 — it retires measurements those sections
+still treat as live.*
+
+**Two of the three physics readouts fail their own positive control, and we only
+just checked** (D0107).
+
+* **BPMD does not discriminate.** All 7 runs ever completed at the 10 ns protocol
+  have `escaped = True`, *including sulfopin in its own crystal pose*. Escape
+  happens inside 1 ns with zero accumulated bias in half the replicates, the
+  ligands come back, and `max_cv_nm` is 1.60–1.66 nm in every run because that is
+  where the `UPPER_WALLS` restraint sits. `escaped` is a touch-once test on a CV
+  that measures warhead-to-SG distance, not ligand displacement.
+* **100 ns non-covalent residence does not discriminate either**, and here the
+  reason is chemical: run for the first time on 3IKD, sulfopin's reactant form
+  gives mean ligand RMSD **0.803 nm** against a candidate's 0.314 — the positive
+  is the *worst* of three. A covalent inhibitor's potency is in the bond, so its
+  non-covalent residence is genuinely poor. D0072 said this in prose and the
+  pipeline ranked on it anyway.
+* **Tier 1 is the one readout that survives.** 300 ps unrestrained equilibration,
+  warhead displacement; separates crystallographic binders from candidates at
+  p = 0.007 (D0071), REF median 0.102 nm, and that band is reproduced by
+  molecules outside the original cohort (D0108).
+
+**The first synthesis decision made on tier 1 alone is a NO GO** (D0108).
+`t4_80fbed3bdf1e` was proposed for synthesis; nine molecules already existed
+sharing its exact R-group and differing only in warhead, and on tier 1 it came
+**8th of 9** (0.281 nm) while `snar_chloroazine` and `naphthoquinone_c2` on the
+identical molecule reached **0.057 nm** — better than the crystallographic
+median. Three of the nine beat that median, so the scaffold is fine and the
+warhead is not. BDHI still has **zero** crystallographic Cys113 positives, now
+confirmed rather than merely unfound. Recommended replacement:
+`t4_b720c5a33d32`, same molecule with a naphthoquinone warhead, easier to make
+(SAscore 3.39 vs 4.14) — carrying an electrophilicity flag that needs a chemist.
+
+**And the screen's denominator was subtly wrong** (D0106). `consensus` =
+mode_size / n_poses with n_poses = the number DOCKED, equal at 500 and verified
+equal across all 34,059 rows. But only PoseBusters-valid poses can join a mode,
+and that fraction runs 0.812–0.982 — so a molecule at 81% valid had a consensus
+*ceiling* of 0.81 where one at 98% could reach 0.98. **nac_v7 samples to 500
+VALID poses** (dock 640, keep the first 500 valid in docking order), which
+equalises both. nac_v6's `consensus` and everything built on it are not
+comparable with nac_v7's.
 
 ---
 
@@ -157,6 +239,10 @@ discriminates:
 | **Docking pose recovery** | **5% in production** (6VAJ, invalidated); on 3IKD **18.3% top-1 / 41.5% best-of-9** | **D0046**, #66 |
 | Ensemble MM-GBSA | below chance | D0036 |
 | Implicit + explicit MD residence | not reproducible | D0038, D0044 |
+| **100 ns non-covalent residence** | **positive control is the WORST of three** | **D0107** |
+| **All NAC geometry, nac_v5-v7** | **measured against pose 1's sulfur; re-screening** | **D0109** |
+| **BPMD (`escaped`, 10 ns)** | **positive control fails it too, 7/7 escape** | **D0107** |
+| Tier-1 warhead drift, 300 ps | **works** — p = 0.007, REF median 0.102 nm | D0071, D0108 |
 
 **D0046's framing has been corrected against the literature (#66), and the
 correction matters.** This table used to compare our recovery against a
@@ -371,7 +457,7 @@ within 24 h of being written.*
 |---|---|---:|---:|---:|---:|
 | T_1 de novo (DiffSBDD) | `D1_32.parquet` | 4,803 | 3,233 | 3,233 | 25 (`shortlist_synth`) |
 | T_3 R-group (LibInvent) | `D3_38.parquet` | 5,396 | 4,080 | 4,080 | 25 (`shortlist_synth`) |
-| T_4 warhead x R-group | `D4_52.parquet` | 1,783 | 1,683 | 1,684 | 27 (`shortlist_synth`) |
+| T_4 warhead x R-group | `D4_53.parquet` | 1,784 | 1,683 | 1,684 | 27 (`shortlist_synth`) |
 <!-- AUTO:arms:END -->
 
 <!-- AUTO:t2:BEGIN -->
@@ -387,7 +473,7 @@ within 24 h of being written.*
 <!-- AUTO:t2:END -->
 
 <!-- AUTO:decisions:BEGIN -->
-**100** decision records.
+**108** decision records.
 <!-- AUTO:decisions:END -->
 
 All six T_2 variants are ranked (size-decorrelated, D0049) and carry rebuilt

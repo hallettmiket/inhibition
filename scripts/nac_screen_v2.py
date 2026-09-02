@@ -197,9 +197,29 @@ def topic_paths(topic: str) -> tuple:
             BLACKSMITH / f"{topic}_allposes")
 
 
+def use_topic(topic: str) -> tuple:
+    """Point THIS MODULE's four output globals at `topic`, all together.
+
+    `one()` reads POSE_DIR and ALL_POSE_DIR off the module at write time, so any
+    caller that drives `one()` directly -- rather than through `main()` -- has to
+    move them itself. `dock_reference_modes` set `OUT` alone, which sent a
+    reference compound's tables to its own topic and its POSES into the
+    production run's `<topic>_poses` / `<topic>_allposes`. That is the 2.2.0
+    defect (see `topic_paths`) in a caller instead of in the screen, and the test
+    that pins it only ever read this file.
+
+    Rebinding through one function is what makes the partial rebind impossible
+    to write: there is no longer a supported way to move some of the four.
+    """
+    global TOPIC, OUT, POSE_DIR, ALL_POSE_DIR
+    TOPIC = topic
+    OUT, POSE_DIR, ALL_POSE_DIR = topic_paths(topic)
+    return OUT, POSE_DIR, ALL_POSE_DIR
+
+
 def write_sdf(mol, order: list[int], dest: Path,
               modes: list[int] | None = None,
-              energies=None) -> int:
+              energies=None, labels=None) -> int:
     """Write the top-`order` conformers to one SDF, stamping `pose_rank`.
 
     The rank is written as a PROPERTY, not left to file position, because
@@ -231,10 +251,29 @@ def write_sdf(mol, order: list[int], dest: Path,
         # never by enumeration position.
         if energies is not None:
             mol.SetProp("free_energy_kcal", f"{float(energies[int(i)]):.4f}")
-        # The mode this pose represents, so a downstream reader selects by
-        # IDENTITY rather than by file position -- the same rule pose_rank
-        # already follows for bpmd_run.
-        if modes is not None:
+        # THE MODE COMES FROM THE POSE, NOT FROM A PARALLEL LIST (@tt8804,
+        # 2026-08-29). This read `modes[rank - 1]` -- the WRITE POSITION -- into
+        # a list built separately from the poses being written, three lines under
+        # a comment promising selection "by IDENTITY rather than by file
+        # position". Any drift between the two lists relabels every pose after
+        # the first divergence, and both lists are plausible: same dtype, same
+        # kind of small integer, and for most molecules the same length, so the
+        # labels agree by coincidence and the defect is invisible.
+        #
+        # MEASURED on nac_v6: 203 of 5,943 representatives (3.4%) carry a `mode`
+        # that disagrees with `allposes`, and it is ALL-OR-NOTHING PER MOLECULE
+        # -- 29 of 30 sampled molecules were perfect and one was 100% wrong. For
+        # `t4_081de1d32ce4` the viewer asked for mode 149, drew the pose at file
+        # position 149, and that pose is `pose_idx` 458, which belongs to mode
+        # 53. The panel's score and the picture beside it described different
+        # poses. @tt8804 caught it by eye: "this is the 10th ranked but looks
+        # absolutely unengaged."
+        #
+        # `labels` is indexed by CONFORMER ID, the same key `pose_idx` is written
+        # from one line above, so the label cannot be separated from its pose.
+        if labels is not None:
+            mol.SetProp("mode", str(int(labels[int(i)])))
+        elif modes is not None:
             mol.SetProp("mode", str(modes[rank - 1]))
         w.write(mol, confId=i)
         n += 1
@@ -383,8 +422,13 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
             # ONE rebuild, ONE reactive-atom match, shared by the criterion and
             # the clustering, so they can never describe different atoms.
             mol_j, match_j = ns.rebuild_and_match(dlg, cand)
+            # PER-POSE SULFUR (D0109). Cys113 docks flexible, so pose j's
+            # geometry must be measured against pose j's SG. This passed
+            # `sg_position(dlg)` -- pose 1's sulfur for all 640 conformers --
+            # and every distance and angle after the first pose was measured
+            # against a sulfur that had since moved.
             res = nac.measure_poses(mol_j, match_j, cand.mechanism,
-                                    ns.sg_position(dlg))
+                                    ns.sg_positions(dlg))
             en = ns.pose_energies(dlg)
             if len(en) != len(res):
                 raise ValueError(f"{len(en)} energies vs {len(res)} poses")
@@ -424,6 +468,58 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         log.info("  posebusters: %d of %d poses valid (%.1f%%)",
                  int(pb_valid.sum()), len(pb_valid), pb_valid.mean() * 100)
 
+        # ---- EQUAL VALID CLOUDS: keep the first `target` valid poses -------
+        #
+        # WHAT THIS FIXES. `consensus` = mode_size / n_poses, and n_poses was
+        # the number DOCKED -- equal at 500 for every molecule. But only the
+        # PB-valid poses are eligible to join a mode, and that fraction varies:
+        # measured over nac_v6's 561 acrylamide/bdhi molecules, 0.812 to 0.982
+        # (median 0.920). So a molecule whose cloud is 81% valid could not reach
+        # a consensus above 0.81 however tight its poses were, while one at 98%
+        # could. The denominator was equal and the NUMERATOR's ceiling was not.
+        #
+        # Sampling to a fixed number of VALID poses makes both equal, which is
+        # the only way two molecules' consensus values are comparable.
+        #
+        # THE FIRST `target`, IN DOCKING ORDER, and that choice needs its
+        # reason on the record (@twu383, 2026-09-01). AutoDock-GPU's runs are
+        # independent GA replicates, so the first N valid poses are an unbiased
+        # sample of the valid population -- the cloud still means "what docking
+        # produces". Truncating by ENERGY instead would make it "the best-
+        # scoring N", a different population: exp/21 measured that filtering to
+        # the best 25% concentrates attack-ready poses 2.60x over a random 25%,
+        # so an energy cut would raise `engagement` for reasons that are not
+        # chemistry. Position-based selection is defensible HERE and only
+        # because the runs are i.i.d.; that is the whole argument.
+        #
+        # NOTHING IS DELETED (D0089, D0093). Every docked pose keeps its
+        # per-pose row and its place in the persisted cloud. `pb_valid` says
+        # whether PoseBusters passed it; `pb_kept` says whether it is in the
+        # analysed 500. A pose can be valid and not kept, and that is a third
+        # state the record has to be able to express.
+        target = int(_cfg("docking.target_pb_valid", 0) or 0)
+        valid_idx = np.flatnonzero(pb_valid)
+        if target and len(valid_idx) > target:
+            keep_sel = valid_idx[:target]
+        else:
+            keep_sel = valid_idx
+        pb_kept = np.zeros(len(pb_valid), dtype=bool)
+        pb_kept[keep_sel] = True
+        n_kept = int(len(keep_sel))
+        agg["n_poses_kept"] = n_kept
+        agg["target_pb_valid"] = target
+        agg["target_met"] = bool(target == 0 or n_kept >= target)
+        if target and n_kept < target:
+            # LOUD. A molecule short of the target is not comparable with one
+            # that met it, and a run that quietly mixes the two is the equal-
+            # denominator defect back in new clothing.
+            log.warning("  %s: only %d valid poses of a %d target -- this "
+                        "molecule's consensus is NOT on the same denominator "
+                        "as the rest of the run", cand.ident, n_kept, target)
+        elif target:
+            log.info("  kept the first %d valid poses of %d (docking order)",
+                     n_kept, int(pb_valid.sum()))
+
         in_rng = np.array([nac.NAC_DIST_MIN <= r.distance <= nac.NAC_DIST_MAX
                            for r in res])
         viable = np.array([bool(r.viable) for r in res])
@@ -435,7 +531,7 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         # itself, which is the score.
         feat = pmod.features(mol, match)
         method = split_method or _cfg("splitting.method", "warhead_dbscan")
-        keep_idx = np.flatnonzero(pb_valid)
+        keep_idx = keep_sel
         if method == "contact_linkage":
             # ONE CALL REPLACES BOTH STAGES. `split_poses` bounds within-group
             # distance structurally, returns no noise label, and never touches
@@ -512,6 +608,10 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
             # row and its place in the cloud; it is only excluded from grouping
             # and from the aggregates.
             "pb_valid": bool(pb_valid[i]),
+            # VALID IS NOT THE SAME AS ANALYSED. A pose beyond the `target`
+            # cap is valid and excluded; without this column the two are
+            # indistinguishable in the per-pose table.
+            "pb_kept": bool(pb_kept[i]),
         } for i in range(len(res))])
 
         # Anchoring quality per pose, computed ONCE. Used twice below: to score
@@ -548,7 +648,11 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
             ident_row = dict(agg)
             ident_row.update({
                 "ident": ident_k, "parent_ident": cand.ident, "mode": k,
-                "n_poses": int(len(res)),
+                # THE ANALYSED CLOUD, not the docked one. `sel.mean()` divided
+                # by every docked pose including the ones PoseBusters rejected
+                # and the ones past the cap, so consensus was a fraction of a
+                # population no mode could ever fill.
+                "n_poses": n_kept,
                 "n_poses_mode": int(sel.sum()),
                 # CONSENSUS IS NOW MODE POPULATION. Not "do the top-10 by energy
                 # agree" -- that read an energy-selected sample of a uniformly
@@ -556,7 +660,7 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
                 # this geometry is the same idea with the energy removed, and it
                 # picks the crystal pose 93.3% of the time against 60.0% for the
                 # old energy window.
-                "consensus": float(sel.mean()),
+                "consensus": float(sel.sum() / n_kept) if n_kept else 0.0,
                 "n_in_range": int((in_rng & sel).sum()),
                 "n_viable": int((viable & sel).sum()),
                 "n_viable_given_in_range": int((viable & in_rng & sel).sum()),
@@ -622,7 +726,7 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
             # molecule with zero modes, because those are different failures: one
             # is a molecule that does nothing reproducible, the other is a bug.
             agg["status"] = "no mode above the population floor"
-            agg["n_poses"] = int(len(res))
+            agg["n_poses"] = n_kept
             return rows, [agg]
 
         # ---- persist a representative of EVERY mode ------------------------
@@ -652,8 +756,22 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
         # is not tuned. What is not one molecule is 6.7% against 26.7%: argmax is
         # the thing to stop doing.
         reps = representative_indices(labels, anchor, dmat, mode_ids)
+        # ONE REPRESENTATIVE PER MODE, AND IT MUST BE *THAT* MODE'S. Both halves
+        # are asserted because both have failed: the counts can drift, and the
+        # labels can drift while the counts agree. Neither is visible downstream
+        # -- a representative file with the wrong labels parses, renders, and
+        # scores exactly like a correct one.
+        got = [int(labels[int(i)]) for i in reps]
+        if got != list(mode_ids):
+            bad = sum(1 for a, b in zip(got, mode_ids) if a != b)
+            raise ValueError(
+                f"{cand.ident}: representative labels do not match their modes "
+                f"({bad} of {len(mode_ids)} wrong; {len(reps)} reps for "
+                f"{len(mode_ids)} modes). Writing this file would relabel every "
+                f"pose after the first divergence, and nothing downstream could "
+                f"tell.")
         if not sdf.exists():                       # append_only: never overwrite
-            write_sdf(mol, reps, sdf, modes=mode_ids, energies=en)
+            write_sdf(mol, reps, sdf, energies=en, labels=labels)
 
         # EVERY POSE, not just each mode's representative (#41).
         #
@@ -686,12 +804,11 @@ def one(cand, rec_dir: Path, plain_rec: Path, nrun: int, gpu: str,
             # flag, so a reader can exclude them by IDENTITY rather than by
             # their absence.
             order = [int(i) for i in np.argsort(labels, kind="stable")]
-            write_sdf(mol, order, adest,
-                      modes=[int(labels[i]) for i in order], energies=en)
+            write_sdf(mol, order, adest, energies=en, labels=labels)
 
         if do_gnina:
             tmp = work / "modes.sdf"
-            write_sdf(mol, reps, tmp, modes=mode_ids, energies=en)
+            write_sdf(mol, reps, tmp, energies=en, labels=labels)
             g = gnina_scores(plain_rec, tmp, gpu)
             if len(g) != len(reps):
                 raise ValueError(f"gnina returned {len(g)} scores for {len(reps)} modes")
@@ -786,9 +903,7 @@ def main() -> None:
     # and its poses to nac_v3_*, where the append-only guard silently dropped
     # every one of them. Tables and poses are the same claim about the same run;
     # a code path that can separate them will eventually separate them.
-    global TOPIC, OUT, POSE_DIR, ALL_POSE_DIR
-    TOPIC = args.topic
-    OUT, POSE_DIR, ALL_POSE_DIR = topic_paths(TOPIC)
+    use_topic(args.topic)
     logging.basicConfig(level=(logging.DEBUG if os.environ.get("NACV2_DEBUG") else logging.INFO),
                         format=f"%(levelname)s [s{args.shard}] %(message)s")
     log.info("topic %s -> tables %s, poses %s, clouds %s",

@@ -260,16 +260,58 @@ def measure(mechanism: str, coords: np.ndarray, sg: np.ndarray) -> NACResult:
 
 
 def measure_poses(mol, smarts_match: tuple[int, ...], mechanism: str,
-                  sg: np.ndarray) -> list[NACResult]:
+                  sg: np.ndarray, *, allow_static_sg: bool = False
+                  ) -> list[NACResult]:
     """`measure` over every conformer on `mol`, in conformer order.
 
     `smarts_match` comes from a substructure search on THIS molecule, so the
     indices address the same atoms the conformers hold.
+
+    THE SULFUR IS PER POSE, AND PASSING ONE FOR ALL OF THEM IS NOW AN ERROR
+    (D0109). Cys113 is docked as a FLEXIBLE sidechain, so each pose has its own
+    SG. `nac_screen.sg_position` read the sulfur from the FIRST docked model and
+    this function broadcast it silently across every conformer, so poses 2..N
+    were measured to where the sulfur was in pose 1.
+
+    Measured on t4_084b1552486e, 200 poses, same ligand atom, only the sulfur
+    choice differing: the minimum distance moves from 1.45 A -- below a C-S bond
+    and physically impossible -- to 2.88 A; 78% of poses shift by more than
+    0.1 A; 11% change their in-window classification; and the count below 3.0 A
+    falls from 70 to 46.
+
+    Parameters
+    ----------
+    sg : numpy.ndarray
+        `(n_conformers, 3)` -- one sulfur per pose. A bare `(3,)` is accepted
+        only for a single-conformer molecule, or when `allow_static_sg` is set
+        explicitly by a caller that has a rigid receptor and knows it.
+    allow_static_sg : bool
+        Opt in to one sulfur for many poses. Named rather than inferred: the
+        silent broadcast is the defect, so re-enabling it has to be a decision
+        somebody wrote down at the call site.
     """
+    n = mol.GetNumConformers()
+    sg = np.asarray(sg, dtype=float)
+    if sg.ndim == 1:
+        if n > 1 and not allow_static_sg:
+            raise ValueError(
+                f"one SG position was given for {n} conformers. Cys113 is "
+                f"docked flexible, so each pose has its own sulfur and "
+                f"broadcasting one across all of them measures poses 2..{n} "
+                f"against where the sulfur sat in pose 1 (D0109). Pass "
+                f"`nac_screen.sg_positions(dlg)` -- shape ({n}, 3) -- or set "
+                f"allow_static_sg=True if the receptor really is rigid.")
+        sg = np.broadcast_to(sg, (n, 3))
+    elif sg.shape != (n, 3):
+        raise ValueError(
+            f"sg has shape {sg.shape}, expected ({n}, 3) -- one sulfur per "
+            f"conformer. A mismatch here pairs poses with other poses' "
+            f"sulfurs, which is worse than the defect D0109 fixed.")
+
     out = []
-    for cid in range(mol.GetNumConformers()):
+    for cid in range(n):
         pos = mol.GetConformer(cid).GetPositions()
-        out.append(measure(mechanism, pos[list(smarts_match)], sg))
+        out.append(measure(mechanism, pos[list(smarts_match)], sg[cid]))
     return out
 
 

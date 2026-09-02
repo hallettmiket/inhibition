@@ -245,6 +245,11 @@ def solvate(src: Path, wd: Path, salt_molar: float = SALT_M) -> dict:
 
     p.save(str(wd / "sys.top"), overwrite=True)
     p.save(str(wd / "sys.gro"), overwrite=True)
+    if RESTRAIN_EQUIL:
+        n_res = _inject_ligand_posres(wd / "sys.top", prm)
+        log.info("%s: INHIBITION_RESTRAIN_EQUIL=1 — %d ligand heavy atoms "
+                 "restrained at %.0f kJ/mol/nm^2 through NVT/NPT", wd.name,
+                 n_res, POSRES_FC)
     # The realised concentration, not the requested one: if tleap placed fewer
     # ions than asked, the row must say what the box actually contains.
     realised = (n_pairs * 55.5 / waters) if waters else 0.0
@@ -255,6 +260,90 @@ def solvate(src: Path, wd: Path, salt_molar: float = SALT_M) -> dict:
             "net_charge": round(float(charge), 4),
             "box_a": [round(float(x), 2) for x in p.box[:3]]}
 
+
+
+# ---------------------------------------------------------------------------
+# OPT-IN: restrain the ligand through equilibration
+# ---------------------------------------------------------------------------
+#: Ligand heavy-atom position restraints during NVT/NPT, off unless
+#: `INHIBITION_RESTRAIN_EQUIL=1` is exported.
+#:
+#: WHY THIS EXISTS, AND WHY IT IS OFF. `run_pipeline`'s unrestrained
+#: equilibration is deliberate -- 300 ps of free dynamics IS the measurement
+#: "does the docked pose survive". But it means frame 0 of production is not
+#: the docked pose, and measured over the 302 swept nac_v6 modes it is a long
+#: way from it: the warhead sits +1.75 A farther from Cys113 SG and +39.8 deg
+#: off, farther in 95.0% of modes (Wilcoxon p = 1.8e-47), and the frame-0 angle
+#: is uncorrelated with the docked pose's (rho = -0.013).
+#:
+#: That matters because `frac_attack_ready` is the outcome every geometry score
+#: is validated against. Frame-0 engagement predicts it at rho = +0.730 while
+#: the representative pose the screen actually SCORED predicts it at +0.024 --
+#: so the validated relationship is an early MD frame predicting later frames of
+#: its own trajectory, not the screen predicting MD.
+#:
+#: Turning this on answers the one question that separates "the screen's
+#: geometry is uninformative" from "the screen's geometry never reaches
+#: production": with the ligand held, does frame 0 still start where docking put
+#: it? It is a CONTROL, not a protocol change -- a restrained run measures a
+#: different thing from the shipped one and the two must never be pooled.
+RESTRAIN_EQUIL = os.environ.get("INHIBITION_RESTRAIN_EQUIL", "") == "1"
+
+#: kJ/mol/nm^2 on each ligand heavy atom while restrained.
+POSRES_FC = 1000.0
+
+
+def _inject_ligand_posres(top: Path, prmtop: Path, resname: str = "MOL") -> int:
+    """Append an `#ifdef POSRES_LIG` block to the ligand's own moleculetype.
+
+    The indices are LOCAL to that moleculetype and 1-based, which is what
+    GROMACS wants and is not the same as the atom's index in the system. Getting
+    that wrong restrains a water somewhere and the run completes normally, so
+    the count is returned and logged rather than assumed.
+    """
+    import parmed
+    p = parmed.load_file(str(prmtop))
+    res = [r for r in p.residues if r.name == resname]
+    if len(res) != 1:
+        raise GromacsError(
+            f"{top.parent.name}: expected exactly one {resname} residue for the "
+            f"restraint block, found {len(res)}")
+    heavy = [i + 1 for i, a in enumerate(res[0].atoms) if a.atomic_number > 1]
+    if not heavy:
+        raise GromacsError(f"{top.parent.name}: {resname} has no heavy atoms")
+
+    lines = top.read_text(encoding="utf-8").splitlines(keepends=True)
+    starts = [i for i, l in enumerate(lines) if l.strip().startswith("[ moleculetype ]")]
+    target = None
+    for i in starts:
+        for l in lines[i + 1:i + 6]:
+            t = l.strip()
+            if not t or t.startswith(";"):
+                continue
+            if t.split()[0] == resname:
+                target = i
+            break
+        if target is not None:
+            break
+    if target is None:
+        raise GromacsError(f"{top.parent.name}: no [ moleculetype ] named {resname}")
+    later = [i for i in starts if i > target]
+    sys_at = [i for i, l in enumerate(lines) if l.strip().startswith("[ system ]")]
+    end = min(later + sys_at) if (later or sys_at) else len(lines)
+
+    blk = ["\n#ifdef POSRES_LIG\n[ position_restraints ]\n",
+           "; ai  funct      fcx      fcy      fcz\n"]
+    for a in heavy:
+        blk.append(f"{a:6d}     1 {POSRES_FC:8.1f} {POSRES_FC:8.1f} {POSRES_FC:8.1f}\n")
+    blk.append("#endif\n\n")
+    lines[end:end] = blk
+    top.write_text("".join(lines), encoding="utf-8")
+    return len(heavy)
+
+#: Prepended to the EQUILIBRATION mdps only. Production is never restrained:
+#: the restraint exists to deliver the docked pose to frame 0, not to hold it
+#: there while the thing being measured is whether it stays.
+_DEFINE_LIG = "define = -DPOSRES_LIG\n" if RESTRAIN_EQUIL else ""
 
 _COMMON = """cutoff-scheme   = Verlet
 coulombtype     = PME
@@ -293,7 +382,7 @@ MDP = {
 
 
 def nvt_mdp(seed: int) -> str:
-    return (f"integrator = md\ndt = 0.002\nnsteps = {int(NVT_PS*500)}\n"
+    return (_DEFINE_LIG + f"integrator = md\ndt = 0.002\nnsteps = {int(NVT_PS*500)}\n"
             f"tcoupl = v-rescale\ntc-grps = System\ntau-t = 0.1\n"
             f"ref-t = {TEMPERATURE_K}\ngen-vel = yes\n"
             f"gen-temp = {TEMPERATURE_K}\ngen-seed = {seed}\n"
@@ -301,7 +390,7 @@ def nvt_mdp(seed: int) -> str:
 
 
 def npt_mdp(seed: int) -> str:
-    return (f"integrator = md\ndt = 0.002\nnsteps = {int(NPT_PS*500)}\n"
+    return (_DEFINE_LIG + f"integrator = md\ndt = 0.002\nnsteps = {int(NPT_PS*500)}\n"
             f"tcoupl = v-rescale\ntc-grps = System\ntau-t = 0.1\n"
             f"ref-t = {TEMPERATURE_K}\n"
             f"pcoupl = C-rescale\npcoupltype = isotropic\ntau-p = 2.0\n"
@@ -346,6 +435,12 @@ def _stage(wd: Path, name: str, mdp: str, start_gro: str, start_cpt: str | None,
     grompp = [_bin(GMX_ENV, "gmx"), "grompp", "-f", f"{name}.mdp",
               "-c", start_gro, "-p", "sys.top", "-o", f"{name}.tpr",
               "-maxwarn", "5"]
+    # GROMACS >= 2018 REFUSES TO GUESS THE RESTRAINT REFERENCE. Without `-r` it
+    # is a fatal error, not a silent fallback -- so this is driven off the mdp's
+    # own `define` rather than off the module flag: the file that will be run is
+    # the only thing that says whether this stage restrains anything.
+    if "-DPOSRES" in mdp:
+        grompp += ["-r", start_gro]
     if start_cpt:
         grompp += ["-t", start_cpt]
     _run(grompp, wd, f"grompp_{name}.log", timeout=3600)

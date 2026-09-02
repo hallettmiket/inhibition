@@ -84,6 +84,47 @@ def latest_reference(stem: str) -> Path:
     return best
 
 
+def warhead_library() -> "pd.DataFrame":
+    """The highest-numbered `warhead_classes_N.csv`, read.
+
+    ONE RESOLVER, because two call sites had each written their own and both
+    wrote the same bug: `sorted(glob("warhead_classes_*.csv"))[-1]` sorts
+    LEXICALLY, so the moment the library reached `_10` the string `"..._9.csv"`
+    sorted last and `_10` became unreachable. `_10` adds exactly one class --
+    `cinnamamide`, the aryl Michael acceptor with the ESI-MS-confirmed Cys113
+    adduct -- so both call sites quietly saw a library with that class missing.
+
+    `dock_reference_modes` failed loudly on it (its lookup raises on a miss).
+    `shortlist_report` returns None on a miss, so there it was silent: a
+    cinnamamide molecule simply had no warhead resolved, with no error.
+
+    The lesson is the one the module already teaches for pins, one step on: a
+    glob is only dynamic resolution if it ORDERS the way the versions are
+    numbered. `latest_reference` compares the integer.
+    """
+    import pandas as pd
+    return pd.read_csv(latest_reference("warhead_classes"))
+
+
+def load_warhead_row(class_id: str) -> "pd.Series":
+    """One warhead class by id, from the latest library.
+
+    Raises rather than returning a default: the class list is an ALLOWLIST, and
+    a caller handed a name nobody registered must not proceed on a fallback.
+    That is the rule `canonical_class()` already follows, and catalogue #29 is
+    what happens when it is not followed -- an unregistered mechanism scored
+    0.0, the worst LEGAL value, and nothing raised.
+    """
+    d = warhead_library()
+    hit = d[d.class_id == class_id]
+    if hit.empty:
+        raise ReferenceSetError(
+            f"no warhead class {class_id!r} in "
+            f"{latest_reference('warhead_classes').name}; known: "
+            f"{sorted(d.class_id)}")
+    return hit.iloc[0]
+
+
 def _default_master() -> Path:
     return latest_reference("pin1_reference_binders")
 

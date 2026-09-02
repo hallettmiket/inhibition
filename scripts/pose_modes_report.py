@@ -45,6 +45,7 @@ from shared import run_paths as rp                       # noqa: E402
 from shared import mode_assets as massets                # noqa: E402
 from shared import outputs as sout                       # noqa: E402
 from shared import report_theme as rt                    # noqa: E402
+from shared import io as dio                             # noqa: E402
 
 log = logging.getLogger("pose-modes")
 B = Path("/data/lab_vm/append_only/inhibition/00_outputs/blacksmith")
@@ -63,10 +64,15 @@ def mode_rows(ident: str) -> pd.DataFrame:
     """Every mode of this molecule, from the newest rank table that holds it."""
     out = []
     for tier, score in (("T4", "conditional_eb"), ("T3", "enrichment_conditional")):
-        fs = sorted(glob.glob(str(B / f"rank_v2/rank_v2_{tier}_{score}_*.csv")))
-        if not fs:
+        # NEWEST BY INTEGER, NOT BY STRING. `sorted(glob(...))[-1]` puts `_9`
+        # after `_10`, so this would silently start reading a stale rank table
+        # the moment a stem passed nine versions -- and these stems are already
+        # at six. The same construct was live in the warhead library, where the
+        # count HAD passed ten and the newest class was unreachable.
+        newest = dio.latest(B / "rank_v2", f"rank_v2_{tier}_{score}", ".csv")
+        if newest is None:
             continue
-        d = pd.read_csv(fs[-1])
+        d = pd.read_csv(newest)
         s = d[d.parent_ident == ident]
         if len(s):
             out.append(s.sort_values("mode"))

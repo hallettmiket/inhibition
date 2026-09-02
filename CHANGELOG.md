@@ -18,6 +18,78 @@ Every entry below states whether prior numbers survive it.
 
 ## 3.1.0 — in progress
 
+### 2026-09-02 — the sulfur moved and nobody followed it
+
+**MAJOR.** Cys113 docks as a **flexible** sidechain, so every pose has its own
+SG. `nac_screen.sg_position` returned the FIRST docked model's sulfur and
+`measure_poses` broadcast that one value across all 640 conformers while taking
+ligand coordinates per conformer — so poses 2..N were measured against where the
+sulfur used to be (D0109). **Every distance, angle, `in_range`, `viable`,
+`viable_fraction`, `enrichment`, `anchor_quality` and `engagement` in `nac_v5`,
+`nac_v6` and `nac_v7` must be re-measured.**
+
+The error reads SHORT, which is why it suppressed scores instead of inflating
+them. Same cloud, same 208-group split, only the sulfur differing: `viable`
+49 → 96, in-window 199 → 238, poses under 3.0 Å 96 → 7. Non-uniform, because it
+scales with how far each run's sulfur wandered — a property of the docking, not
+of the molecule. That makes it a ranking defect rather than an offset.
+
+It surfaced only because a distance ranking with no lower bound put impossible
+1.22 Å distances on top, shorter than a C–S bond. **PoseBusters had been
+disagreeing all along and was right.**
+
+Survives: the modes (contact linkage never touches distance-to-SG — verified
+identical before and after), PoseBusters validity, and D0108's NO GO, which
+measures in the MD frame through a separate code path.
+
+- `sg_positions(dlg)` returns one sulfur per model; `sg_position` deprecated,
+  not deleted, so stale callers fail by name.
+- **`measure_poses` refuses a single SG for a multi-conformer molecule.** That
+  is the fix — a bare `(3,)` raises unless `allow_static_sg=True` is passed
+  explicitly, and a wrong-length array raises too. `tests/test_per_pose_sulfur.py`.
+
+### 2026-09-02 — the screen samples to a fixed number of VALID poses
+
+**MAJOR for `consensus` and anything built on it.** `consensus` = mode_size /
+n_poses with n_poses = the number DOCKED — equal at 500, and verified equal
+across all 34,059 `nac_v6` rows. But only PoseBusters-valid poses can join a
+mode, and that fraction runs **0.812–0.982**: a molecule at 81% valid had a
+consensus *ceiling* of 0.81 where one at 98% could reach 0.98. The denominator
+was equal and the numerator's headroom was not (D0106).
+
+`docking.target_pb_valid: 500`, `n_runs: 640` — sized from the measured pass-rate
+distribution of the same 562 molecules, where the worst case observed is 0.812.
+The kept set is the **first 500 valid in docking order**: the runs are
+independent GA replicates, so that is an unbiased sample, where an energy cut
+would make it "the best-scoring 500" and inflate `engagement` (exp/21: the best
+25% of a cloud concentrates attack-ready poses 2.60x over a random 25%).
+
+Nothing is deleted — all 640 poses keep their row and their place in the cloud.
+`pb_kept` distinguishes "in the analysed 500" from "valid", which are now
+different things.
+
+### 2026-09-02 — two physics readouts fail their own positive control
+
+**Not a major** — the measured values are correct; their interpretation was not.
+BPMD's `escaped` is True for 7 of 7 runs ever completed at 10 ns, *including
+sulfopin's crystal pose*; and the first 100 ns non-covalent control on 3IKD puts
+the positive **worst of three** (mean ligand RMSD 0.803 nm against a candidate's
+0.314). Neither may be used to rank or reject a covalent candidate (D0107).
+Tier-1 warhead drift over 300 ps remains the one validated readout.
+
+**First synthesis verdict on it: NO GO on `t4_80fbed3bdf1e`** (D0108). Nine
+molecules already existed sharing its exact R-group and differing only in
+warhead; on tier 1 it came 8th of 9 (0.281 nm) while two crystallographically
+validated warheads on the identical molecule reached 0.057 nm — better than the
+REF median of 0.102. BDHI still has zero crystallographic Cys113 positives.
+
+- **BPMD ran `pose_rank=1` for every run ever made** (D0105). `read_pose`,
+  `run_pose` and `prepare_pose` all supported the argument; neither call site in
+  `main()` passed one and no CLI flag existed. `already_done` was keyed without
+  it too, so adding the flag alone would have made a finished rank-1 run mark
+  rank 11 as done.
+
+
 ### 2026-08-19 — the run completed, and the modes it ranked are mixtures
 
 **The screen finished**: 147/147 triaged, 15/15 at 100 ns — 5 held, 1 held

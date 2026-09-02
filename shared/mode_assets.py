@@ -31,9 +31,16 @@ def poses_dir() -> Path:
     the defect that cost 2.2.0 and nearly cost 3.0.0, and a GUI is where it would
     be least visible: the page renders, the poses look like poses, and nothing
     says they came from a different screen than the table beside them.
+
+    NOR A PINNED VERSION. The directory is append-only, so a correction lands
+    beside the original as `<topic>_poses_2` rather than replacing it, and this
+    used to name the base directory outright -- which would have kept serving
+    the superseded poses forever with nothing to say a fix existed. Deferred to
+    `run_paths.poses_dir`, which takes the highest integer present.
     """
+    from shared import run_paths as rp
     from shared import target_config as tc
-    return B / f"{tc.get('run.topic')}_poses"
+    return rp.poses_dir(tc.get('run.topic'))
 
 
 POSES = poses_dir()

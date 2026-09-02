@@ -433,9 +433,34 @@ def add_props(df: pd.DataFrame) -> pd.DataFrame:
         for col in ("QED",):
             if col in d.columns:
                 extra.setdefault(col, {}).update(dict(zip(d.candidate_id.astype(str), d[col])))
-    df["smiles"] = df.ident.map(smi)
+    # JOIN ON THE MOLECULE, NOT ON `ident`. `ident` is the MODE identifier once a
+    # cloud has been split (`t4_89929bdfb633_m119`); the molecule it belongs to is
+    # `parent_ident` (`t4_89929bdfb633`), and that is what `candidate_id` is. This
+    # mapped on `ident` and matched 0 of 327,167 rows on nac_v6 -- `.map()` returns
+    # NaN for a miss, so `smiles` and `QED` were present, fully typed and entirely
+    # null, and the GUI showed `nan` in both columns for every molecule. Nothing
+    # raised, because nothing was asked to. `docs/how_this_project_breaks.md`
+    # disguise #1: `ident` is the name that DESCRIBES an identifier; `parent_ident`
+    # is the one derived from the thing that owns the property.
+    key = df["parent_ident"] if "parent_ident" in df.columns else df["ident"]
+    key = key.astype(str)
+    df["smiles"] = key.map(smi)
     for c, m in extra.items():
-        df[c] = df.ident.map(m)
+        df[c] = key.map(m)
+
+    # A GUARD THAT CAN ACTUALLY FAIL. The failure above is invisible in the output
+    # -- a null column looks exactly like a property nobody computed -- so the only
+    # thing that catches it is comparing the match rate against zero here.
+    if smi:
+        hit = float(df["smiles"].notna().mean())
+        if hit == 0.0:
+            raise SystemExit(
+                f"add_props matched 0 of {len(df):,} rows against "
+                f"{len(smi):,} candidate ids. The join key is wrong -- keys look "
+                f"like {next(iter(smi))!r}, rows carry {key.iloc[0]!r}.")
+        if hit < 0.5:
+            log.warning("add_props: only %.1f%% of rows matched a SMILES "
+                        "(%d of %d ids)", 100 * hit, df["smiles"].notna().sum(), len(df))
 
     from rdkit import Chem, RDLogger
     from rdkit.Chem import rdMolDescriptors as rdd

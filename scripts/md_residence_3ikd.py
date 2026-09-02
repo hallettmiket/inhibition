@@ -461,7 +461,9 @@ def ga_read(path: Path) -> np.ndarray:
 def run_one(ident: str, smiles: str, label: str, *, production_ps: float,
             nrun: int, gpu: str, keep: bool, pose: Path | None = None,
             pose_rank: int = 1, net_charge: int = 0,
-            work_root: Path | None = None, replicate: int = 1) -> dict:
+            work_root: Path | None = None, replicate: int = 1,
+            stop_after: str | None = None,
+            reuse_equilibration: bool = False) -> dict:
     wd = (work_root or WORK) / ident.replace(":", "_")
     wd.mkdir(parents=True, exist_ok=True)
     # THE ROW CARRIES THE PAIR, NOT JUST THE LABEL. `ident` may now be
@@ -485,7 +487,18 @@ def run_one(ident: str, smiles: str, label: str, *, production_ps: float,
         log.info("  solvated")
         res = gx.run_pipeline(wd, md_wd, gpu_id=int(gpu),
                               production_ps=production_ps, replicate=replicate,
-                              candidate_id=ident)
+                              candidate_id=ident,
+                              stop_after=stop_after,
+                              reuse_equilibration=reuse_equilibration)
+        if stop_after:
+            # NO ROW. A row means a measured result, and there is nothing
+            # measured here -- writing one would be the `stage0 only` defect
+            # again, where a placeholder in the results table was counted as a
+            # finished sweep.
+            log.info("  stopped after %s; no row written (caller decides)",
+                     stop_after)
+            return {"status": f"stopped after {stop_after}",
+                    "equilibration_dir": res.get("equilibration_dir")}
         row.update({k: v for k, v in res.items() if isinstance(v, (int, float, str))})
         log.info("  production done (%.0f ps)", production_ps)
         # Measure, and let a measurement failure FAIL THE ROW rather than
@@ -630,6 +643,22 @@ def main() -> None:
     ap.add_argument("--replicate", type=int, default=tc.md_replicates(),
                     help="replicate index; selects the velocity seed (D0038)")
     ap.add_argument("--tag", default=None, help="output stem suffix")
+    # TWO-PHASE MD, so a caller can look at the pose after equilibration and
+    # decide whether production is worth running (2026-09-02). Both default off,
+    # so every existing caller behaves exactly as before.
+    #
+    # WHY THIS IS WORTH A FLAG. Measured over the first nac_v8 sweeps, the
+    # DOCKED geometry does not predict the outcome -- five modes all at
+    # 2.78-2.97 A gave 0.000 to 0.926 attack-ready -- while the distance AFTER
+    # the 300 ps unrestrained equilibration does (3.58 A -> 0.926, 6.46 A ->
+    # 0.000). Equilibration is 300 ps of the 1,500 ps a sweep runs, so a pose
+    # that has already left can be dropped for a fifth of the cost.
+    ap.add_argument("--stop-after", default=None, choices=("npt",),
+                    help="end after equilibration and write NO row; the caller "
+                         "inspects the frame and decides about production")
+    ap.add_argument("--reuse-equilibration", action="store_true",
+                    help="continue from an existing npt frame instead of "
+                         "re-equilibrating (pair with an earlier --stop-after)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -669,7 +698,18 @@ def main() -> None:
                       gpu=args.gpu, keep=args.keep, pose=pose,
                       pose_rank=args.pose_rank, net_charge=nc,
                       work_root=Path(args.work_root) if args.work_root else None,
-                      replicate=args.replicate)
+                      replicate=args.replicate,
+                      stop_after=args.stop_after,
+                      reuse_equilibration=args.reuse_equilibration)
+        if args.stop_after:
+            # NO ROW FOR A HALF-RUN. `run_one` already declined to measure; if
+            # this wrote the row anyway the residence table would carry a
+            # `stopped after npt` entry with no residence in it, and anything
+            # resuming on ident would count it as a finished 100 ns run. That is
+            # the `stage0 only` defect exactly, one table over.
+            print(f"\n  {row['status']}; no row written")
+            print(f"  equilibration at {row.get('equilibration_dir')}")
+            return
         df = pd.DataFrame([row])
         dest = OUT.write(f"md_residence_{args.tag or ident}", ".csv")
         df.to_csv(dest, index=False)

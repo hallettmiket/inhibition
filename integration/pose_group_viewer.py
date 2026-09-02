@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -54,6 +55,8 @@ for p in (REPO, REPO / "exp" / "15_rmsf_predictor", REPO / "exp" / "16_contact_c
 
 from shared import pose_contacts as pc              # noqa: E402
 from shared import run_paths as rp                  # noqa: E402
+from shared import target_config as tc              # noqa: E402
+from shared import reference_set as rs              # noqa: E402
 
 #: Distinct enough to tell apart on a dark surface, and stable across reruns so a
 #: group keeps its colour while you click through the table.
@@ -103,11 +106,48 @@ def clouds() -> list[tuple[str, str, Path]]:
             if os.access(f, os.R_OK):
                 out.append((f"RAW deep cloud, no energies — {d.name[11:]}",
                             d.name[11:], f))
+    # The current topic's own clouds, unprefixed -- this page's default subject.
     ap = rp.allposes_dir()
     if ap.is_dir():
         for f in sorted(ap.glob("*.sdf")):
             if os.access(f, os.R_OK):
                 out.append((f"mode-assigned only (D0093) — {f.stem}", f.stem, f))
+    return out
+
+
+def cloud_topics() -> list[str]:
+    """Every topic with a readable pose cloud, the current run first.
+
+    WHY THIS IS SEPARATE FROM `clouds()`. Listing every topic's clouds in one
+    flat selectbox produces ~8,200 entries, most of them single-molecule probe
+    runs -- unusable, and the kind of "technically complete" control that makes
+    a page worse. Topic first, then ligand.
+
+    THE POINT OF LISTING OTHER TOPICS AT ALL is that a targeted run -- a
+    reference compound, a positive control -- writes to its own topic, and the
+    only way to view one used to be to bump `run.topic`. That is global state
+    which detached supervisors poll (CLAUDE.md), so opening a viewer would have
+    redirected work already in flight.
+    """
+    cur = rp.topic()
+    ts = []
+    for d in sorted(rp.BLACKSMITH.glob("*_allposes")):
+        if not d.is_dir():
+            continue
+        if any(os.access(f, os.R_OK) for f in d.glob("*.sdf")):
+            ts.append(d.name[:-len("_allposes")])
+    # Current run first; it is the one a reader means by default.
+    return sorted(ts, key=lambda t: (t != cur, t))
+
+
+def clouds_in(topic: str) -> list[tuple[str, str, Path]]:
+    """(label, ident, path) for one topic's clouds."""
+    out = []
+    d = rp.allposes_dir(topic)
+    if d.is_dir():
+        for f in sorted(d.glob("*.sdf")):
+            if os.access(f, os.R_OK):
+                out.append((f.stem, f.stem, f))
     return out
 
 
@@ -202,6 +242,74 @@ def receptor_block() -> str:
     return rp.receptor_prep().read_text(encoding="utf-8", errors="replace")
 
 
+def anchor_sg() -> tuple[float, float, float] | None:
+    """Cys113's SG coordinates from the prepared receptor, BY IDENTITY.
+
+    PIN1 HAS TWO CYSTEINES -- 57 and 113 -- and only one of them is the target.
+    Taking "the first CYS" or "the first SG" would find Cys57 in this file, and
+    a sphere drawn on the wrong sulfur is exactly the defect that put a
+    GLUTAMATE on screen labelled as the target cysteine (state_of_the_project
+    §8): plausible, unremarkable, wrong.
+
+    So the residue NUMBER and the residue NAME are both checked, and a mismatch
+    returns None rather than a guess. The renumbering guard in
+    `elevation_report` (PIN1_OFFSET = 50) describes the MD system, not this
+    file -- the prepared receptor keeps crystallographic numbering -- which is
+    why the identity is verified here instead of an offset being trusted.
+    """
+    # BOTH HALVES COME FROM THE CONFIG'S OWN `target.anchor`, e.g. "Cys113" ->
+    # residue 113, named CYS. Writing 113 and "CYS" here as literals would make
+    # this file disagree with the config the moment the tool is pointed at
+    # another target, which is what `paths:` in target.yaml exists to prevent.
+    anchor = str(tc.get("target.anchor", default="Cys113") or "Cys113")
+    atom = str(tc.get("target.anchor_atom", default="SG") or "SG")
+    m = re.match(r"([A-Za-z]+)(\d+)$", anchor.strip())
+    if not m:
+        return None
+    resn, resid_want = m.group(1).upper()[:3], int(m.group(2))
+    for ln in receptor_block().splitlines():
+        if not ln.startswith(("ATOM", "HETATM")):
+            continue
+        try:
+            resid = int(ln[22:26])
+        except ValueError:
+            continue
+        if (resid == resid_want and ln[17:20].strip() == resn
+                and ln[12:16].strip() == atom):
+            return (float(ln[30:38]), float(ln[38:46]), float(ln[46:54]))
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def warhead_indices(path_str: str, mtime: float, smarts: str) -> list[int]:
+    """Positions of the reactive group IN THE HEAVY-ATOM ARRAY the viewer draws.
+
+    `load_cloud` drops hydrogens and returns coordinates indexed over the heavy
+    atoms only, so a SMARTS match -- which is indexed over the whole molecule --
+    cannot be used against it directly. Mapping through the same `hv` list
+    `load_cloud` builds is what keeps the highlighted atoms the matched ones.
+    Taking the match indices raw would light up whichever atoms happened to sit
+    at those positions, which is this project's defect in one line.
+
+    Empty if the SMARTS does not match: the caller says so on screen rather
+    than drawing nothing and leaving the reader to conclude the molecule has no
+    warhead.
+    """
+    from rdkit import Chem, RDLogger
+    RDLogger.DisableLog("rdApp.*")
+    ms = Chem.SDMolSupplier(path_str, removeHs=False, sanitize=True)
+    tpl = next((m for m in ms if m is not None), None)
+    if tpl is None or not smarts:
+        return []
+    patt = Chem.MolFromSmarts(smarts)
+    if patt is None:
+        return []
+    hv = [a.GetIdx() for a in tpl.GetAtoms() if a.GetAtomicNum() > 1]
+    pos = {idx: k for k, idx in enumerate(hv)}
+    hits = tpl.GetSubstructMatches(patt)
+    return sorted({pos[i] for m in hits for i in m if i in pos})
+
+
 def xyz_block(coords: np.ndarray, sym: list) -> str:
     """One pose as an XYZ record — no bonds, so RDKit never has to re-perceive."""
     lines = [str(len(coords)), "pose"]
@@ -209,9 +317,26 @@ def xyz_block(coords: np.ndarray, sym: list) -> str:
     return "\n".join(lines)
 
 
+#: The reactive group's colour. Deliberately not in the group palette -- the
+#: warhead is a different KIND of thing from a mode, and colouring it from the
+#: same set would read as "one more group".
+WARHEAD_COLOUR = "#e8342a"
+ANCHOR_COLOUR = "#f2c200"
+
+
 def render(xyz, sym, draw: list[tuple[int, str]], style: str, opacity: float,
-           surface: bool, height: int) -> str:
-    """`draw` is (pose index, colour). Receptor first, ligands into it."""
+           surface: bool, height: int,
+           warhead: list[int] | None = None,
+           show_anchor: bool = True) -> str:
+    """`draw` is (pose index, colour). Receptor first, ligands into it.
+
+    THE WARHEAD IS DRAWN AS ITS OWN MODEL PER POSE, not by restyling atoms of
+    the ligand model. Poses are added as XYZ records with no bonds precisely so
+    RDKit never re-perceives them, and 3Dmol's atom selectors over a bond-free
+    XYZ model address atoms by serial -- which is a selection by POSITION, the
+    thing this project keeps being bitten by. A separate model built from the
+    matched indices carries the identity with it.
+    """
     import py3Dmol
     v = py3Dmol.view(width="100%", height=height)
     v.addModel(receptor_block(), "pdb")
@@ -220,12 +345,24 @@ def render(xyz, sym, draw: list[tuple[int, str]], style: str, opacity: float,
         v.addSurface("VDW", {"opacity": opacity, "color": "#b9c6d4"}, {"model": 0})
     for i, colour in draw:
         v.addModel(xyz_block(xyz[i], sym), "xyz")
-        n = v.getModel().__dict__.get("id", None)
         spec = ({"stick": {"colorscheme": {"prop": "elem", "map": {}},
                            "color": colour, "radius": 0.13}}
                 if style == "stick" else
                 {"line": {"color": colour, "linewidth": 2.0}})
         v.setStyle({"model": -1}, spec)
+        if warhead:
+            wsym = [sym[k] for k in warhead]
+            v.addModel(xyz_block(xyz[i][warhead], wsym), "xyz")
+            v.setStyle({"model": -1},
+                       {"sphere": {"color": WARHEAD_COLOUR, "radius": 0.42}})
+    # THE ANCHOR THE WARHEAD HAS TO REACH. Without it the highlight says which
+    # atoms are reactive but not whether they got anywhere, which is the whole
+    # question a covalent screen asks.
+    sg = anchor_sg() if show_anchor else None
+    if sg is not None:
+        v.addModel(xyz_block(np.array([sg]), ["S"]), "xyz")
+        v.setStyle({"model": -1},
+                   {"sphere": {"color": ANCHOR_COLOUR, "radius": 0.75}})
     v.zoomTo({"model": 0})
     return v._make_html()
 
@@ -245,6 +382,19 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Source")
+        # TOPIC FIRST. `run.topic`'s clouds are the default subject, but a
+        # targeted run -- a reference compound or a positive control -- writes
+        # its own topic, and viewing one must not require bumping `run.topic`.
+        topics = cloud_topics()
+        cur = rp.topic()
+        t_pick = st.selectbox(
+            "run (topic)", topics, index=0,
+            format_func=lambda t: f"{t} — current run" if t == cur else t)
+        if t_pick != cur:
+            st.info(f"Showing **{t_pick}**, not the current run (`{cur}`). "
+                    "Numbers on other pages describe the current run.")
+        cs = [(f"mode-assigned only (D0093) — {i}", i, f)
+              for _, i, f in clouds_in(t_pick)] or cs
         labels = [c[0] for c in cs]
         pick = st.selectbox("pose cloud", range(len(cs)), format_func=lambda i: labels[i])
         label, ident, path = cs[pick]
@@ -285,6 +435,28 @@ def main() -> None:
                        "`persist_raw_clouds.py` recorded them. Every pose is drawn "
                        "identically regardless of score. Re-persist it with "
                        "`--force` to filter here.")
+
+        st.header("Warhead")
+        # THE CLASS IS CHOSEN, NOT GUESSED. Several classes share one reactive
+        # SMARTS (every Michael acceptor is `[CX3]=[CX3][CX3]=O`), so picking
+        # "the class that matches" would silently pick one of four. The reader
+        # names it and the SMARTS actually used is printed.
+        try:
+            _wh = rs.warhead_library()
+            _classes = ["(none)"] + sorted(_wh.class_id)
+        except Exception:                                      # noqa: BLE001
+            _wh, _classes = None, ["(none)"]
+        wclass = st.selectbox("highlight reactive group of class", _classes,
+                              help="Draws that class's reactive atoms as "
+                                   "spheres, plus the anchor it must reach.")
+        wsmarts = ""
+        if _wh is not None and wclass != "(none)":
+            wsmarts = str(_wh.set_index("class_id").loc[wclass,
+                                                        "reactive_atom_smarts"])
+            st.caption(f"`{wsmarts}`")
+        show_anchor = st.checkbox(
+            f"show the anchor ({tc.get('target.anchor', default='Cys113')} "
+            f"{tc.get('target.anchor_atom', default='SG')})", True)
 
         st.header("Display")
         style = st.radio("ligand style", ["line", "stick"], horizontal=True)
@@ -363,13 +535,43 @@ def main() -> None:
             draw += [(int(med[g]), GREY) for g in table.group.iloc[top_n:]]
             st.subheader(f"Overview — one representative per group ({len(draw)})")
 
+        # CAPPED BEFORE THE WARHEAD READOUT, so the distance quoted below
+        # describes exactly the poses on screen. Measured over the
+        # uncapped selection it would summarise a population the picture
+        # does not show -- catalogue #28, where statistics were correct
+        # over a set nobody realised they were reading.
         cap = 600
         if len(draw) > cap:
             st.warning(f"{len(draw):,} poses selected; drawing the first {cap:,}. "
                        "Narrow the selection or lower *poses to load*.")
             draw = draw[:cap]
+
+        # THE WARHEAD, MAPPED THROUGH THE SAME HEAVY-ATOM LIST THE COORDS USE.
+        # Reported on screen when it does not match: a highlight that silently
+        # draws nothing reads as "this molecule has no warhead", which is a
+        # claim about chemistry rather than about the SMARTS.
+        wh_idx = warhead_indices(str(path), mtime, wsmarts) if wsmarts else []
+        if wsmarts and not wh_idx:
+            st.warning(f"`{wsmarts}` does not match this ligand — nothing is "
+                       f"highlighted. This is a statement about the SMARTS, "
+                       f"not about the molecule.")
+        elif wh_idx:
+            sg = anchor_sg() if show_anchor else None
+            msg = (f"Reactive group of **{wclass}**: {len(wh_idx)} atoms, "
+                   f"drawn as red spheres.")
+            if sg is not None:
+                import numpy as _np
+                d = [float(_np.linalg.norm(xyz[i][wh_idx] - _np.array(sg), axis=1).min())
+                     for i, _c in draw]
+                msg += (f" Closest warhead atom to "
+                        f"{tc.get('target.anchor', default='Cys113')} SG across "
+                        f"the drawn poses: **{min(d):.2f} Å** "
+                        f"(median {float(_np.median(d)):.2f} Å).")
+            st.info(msg)
+
         st.components.v1.html(
-            render(xyz, sym, draw, style, opacity, surface, height),
+            render(xyz, sym, draw, style, opacity, surface, height,
+                   warhead=wh_idx, show_anchor=show_anchor),
             height=height + 24)
 
         if chosen:

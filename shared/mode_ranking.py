@@ -122,6 +122,26 @@ def gather() -> pd.DataFrame:
         if "mode" in d.columns:
             d = d[d["mode"].notna()]
         d["tier"] = d.get("tier", tier)
+        # THE SCORE THIS TIER WAS RANKED ON, CARRIED WITH THE ROWS.
+        #
+        # `_score` is the number the ordering came from. Everything downstream --
+        # the rail's headline figure and the global rank -- reads it instead of
+        # naming a column, because naming one is how the page came to DISPLAY
+        # `conditional_eb` while SORTING on `engagement`: two different columns,
+        # correlated at rho = 0.32, so the number shown went the wrong way at
+        # 36.4% of adjacent rows and the ranking looked broken while it was
+        # correct. @tt8804 read the page and asked exactly that.
+        #
+        # Raises on a missing column rather than falling back: the tier's score
+        # is named in config, and a page that silently showed a different one is
+        # the whole defect.
+        if score not in d.columns:
+            raise KeyError(
+                f"{f.name} does not carry {score!r}, the score "
+                f"ranking.score_by_tier names for {tier}. Showing another "
+                f"column would repeat the defect this stamp exists to close.")
+        d["_score_col"] = score
+        d["_score"] = pd.to_numeric(d[score], errors="coerce")
         frames.append(d)
     if not frames:
         return pd.DataFrame()
@@ -212,8 +232,14 @@ def gather() -> pd.DataFrame:
     # satisfies. A conjugated carboxylate is not a warhead.
     r["is_control"] = r.parent_ident.isin(HIGHLIGHT)
 
-    if "conditional_eb" in r.columns:
-        r["global_rank"] = r["conditional_eb"].rank(
+    # GLOBAL RANK USES THE SAME SCORE THE CLASS RANK USED. It ranked
+    # `conditional_eb` while `class_rank` arrives from `rank_v2` computed on
+    # whatever `ranking.score_by_tier` names -- `engagement` for T_4 -- so the
+    # two scope settings on this page ordered by DIFFERENT quantities. Switching
+    # "within class" to "global" therefore did not merely widen the comparison,
+    # it changed the score, and nothing on the page said so.
+    if "_score" in r.columns:
+        r["global_rank"] = r["_score"].rank(
             ascending=False, method="min", na_option="bottom")
     return r
 
@@ -257,6 +283,10 @@ def _rows_json(r: pd.DataFrame) -> str:
             "cr": (int(x.class_rank) if pd.notna(x.get("class_rank")) else None),
             "gr": num("global_rank"), "n": num("n_poses_mode"),
             "np": num("n_poses"), "vf": num("viable_fraction", 4),
+            # `sc` IS THE NUMBER THE ROW IS ORDERED BY; `eb` is context in the
+            # detail panel. They were the same field, which is what let the
+            # headline figure disagree with the order.
+            "sc": num("_score", 3),
             "eb": num("conditional_eb", 3), "en": num("enrichment", 2),
             "sp": num("spread_a", 2), "dc": num("dir_coherence", 3),
             "fa": num("frac_attack_ready", 4), "s": st,
@@ -483,6 +513,9 @@ __STEPNAV__
 <script type="text/plain" id="recpdb">__RECEPTOR__</script>
 <script>
 const ROWS = __ROWS__;
+// The column `ranking.score_by_tier` names. Shown wherever the headline number
+// is, so the page can never again display one score and sort by another.
+const SCORE_NAME = __SCORENAME__;
 // `i` is rebuilt here rather than sent 34,076 times. Everything downstream keeps
 // using `x.i`, so this is a wire-format saving and not a change of shape.
 ROWS.forEach(function(x){ x.i = x.p + '_m' + x.m; });
@@ -670,7 +703,8 @@ function rowHTML(x){
     // header and the detail caption, not as the row's name.
     ' <span class="mtag" style="background:' + modeCss(x) + '">m' + x.m +
     '</span></span>' +
-    '<span class="eng">' + fmt(x.eb, 2) + '</span></span>' +
+    '<span class="eng" title="' + SCORE_NAME + ' — the value this list is ordered by">'
+    + fmt(x.sc, 2) + '</span></span>' +
     '<span class="l2"><span class="wc">' + x.c + '</span>' +
     '<span class="meta">' + (x.n === null ? '—' : x.n) + ' poses · ' + pct + '% viable</span>' +
     '<span class="tag ' + (x.ctl ? 't-ctl' : 't-' + x.s) + '">' + badge +
@@ -796,6 +830,7 @@ async function pick(id){
     ['poses in mode', x.n === null ? '—' : x.n + ' of ' + (x.np === null ? '?' : x.np)],
     ['viable fraction', x.vf === null ? '—' : (x.vf*100).toFixed(1) + '%'],
     ['enrichment', fmt(x.en, 2)],
+    [SCORE_NAME + ' (ranks this list)', fmt(x.sc, 3)],
     ['conditional_eb', fmt(x.eb, 3)],
     ['spread', fmt(x.sp, 2) + ' Å'],
     ['direction coherence', fmt(x.dc, 3)],
@@ -1033,6 +1068,9 @@ def build(title: str, date_str: str, three: str = "",
            if RECEPTOR.is_file() else "")
     return (_TPL
             .replace("__ROWS__", _rows_json(r))
+            .replace("__SCORENAME__", json.dumps(
+                "/".join(sorted(set(r["_score_col"].dropna().astype(str))))
+                if "_score_col" in r.columns else "score"))
             .replace("__NOPOSE__", json.dumps(sorted(no_pose or [])))
             .replace("__RECEPTOR__", rec)
             .replace("__THREE__", three)

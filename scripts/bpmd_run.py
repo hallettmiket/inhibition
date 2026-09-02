@@ -865,8 +865,20 @@ def _chunk_files(d: Path, pattern: str) -> list[str]:
     return sorted(glob.glob(str(d / pattern)), key=key)
 
 
-def already_done() -> set[tuple[str, int]]:
-    """(ident, replicate) pairs that have already landed OK in a chunk file."""
+def already_done() -> set[tuple[str, int, int]]:
+    """(ident, pose_rank, replicate) triples that have already landed OK.
+
+    POSE_RANK IS PART OF THE IDENTITY, and leaving it out is how a resume skips
+    work it never did. Keyed on `(ident, replicate)` alone, a completed run of
+    pose_rank 1 marks pose_rank 11 as done -- the molecule is the same, so the
+    key matches -- and the second pose is never simulated while the table says
+    it was. That is `how_this_project_breaks` #22 exactly (this same function,
+    keyed on trajectory length there) and #23 (assets matched on molecule where
+    the runner writes one per (molecule, pose_rank)).
+
+    Rows written before `pose_rank` was recorded are read as rank 1, which is
+    what they were: no caller could pass anything else.
+    """
     done = set()
     for f in _chunk_files(OUT.dir, "bpmd_s*.csv"):
         try:
@@ -876,8 +888,12 @@ def already_done() -> set[tuple[str, int]]:
             continue
         if not {"ident", "replicate", "status"} <= set(df.columns):
             continue
-        ok = df[df.status == "ok"]
-        done.update(zip(ok.ident.astype(str), ok.replicate.astype(int)))
+        ok = df[df.status == "ok"].copy()
+        if "pose_rank" not in ok.columns:
+            ok["pose_rank"] = 1
+        ok["pose_rank"] = ok["pose_rank"].fillna(1).astype(int)
+        done.update(zip(ok.ident.astype(str), ok.pose_rank,
+                        ok.replicate.astype(int)))
     return done
 
 
@@ -886,7 +902,11 @@ def load_results() -> pd.DataFrame:
     if not fs:
         return pd.DataFrame()
     df = pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)
-    return df.drop_duplicates(["ident", "replicate"], keep="last")
+    if "pose_rank" not in df.columns:
+        df["pose_rank"] = 1
+    df["pose_rank"] = df["pose_rank"].fillna(1).astype(int)
+    # Same reason as `already_done`: two poses of one molecule are two results.
+    return df.drop_duplicates(["ident", "pose_rank", "replicate"], keep="last")
 
 
 def report() -> None:
@@ -1009,6 +1029,16 @@ def main() -> None:
     ap.add_argument("--pose-dir", default=None, metavar="DIR",
                     help="pose set to resolve --pose against; default is "
                          "the newest export_nac_poses directory")
+    # WHICH pose, not just which molecule. `read_pose` has selected by
+    # `pose_rank` since it was written, and `run_pose` takes the argument --
+    # but no caller in `main` ever passed one, so every production run silently
+    # took pose_rank 1. That is defect #23 in `how_this_project_breaks`: an
+    # asset matched on the MOLECULE where the runner writes one per
+    # (molecule, pose_rank). A BPMD result on rank 1 sitting beside a 100 ns
+    # run on rank 11 is two different poses under one molecule's name.
+    ap.add_argument("--pose-rank", type=int, default=1,
+                    help="which pose_rank to take from a multi-pose SDF; "
+                         "must match the rank any companion MD run used")
     ap.add_argument("--pose", default=None, metavar="IDENT",
                     help="a single pose to run (default for --convergence: a "
                          "crystallographic positive)")
@@ -1071,7 +1101,7 @@ def main() -> None:
         rows = run_pose(cand, replicates=replicates, production_ps=production_ps,
                         gpu=args.gpu, threads=args.threads, nrun=args.nrun,
                         dock_gpu=dock_gpu, allow_redock=not args.no_redock,
-                        on_row=chunk.add)
+                        pose_rank=args.pose_rank, on_row=chunk.add)
         chunk.flush()
         pd.DataFrame(rows).to_csv(
             CONV.write(f"bpmd_conv_replicas_{cand.ident.replace(':', '_')}", ".csv"),
@@ -1099,7 +1129,8 @@ def main() -> None:
             chunk.add({"ident": ident, "replicate": 0,
                        "status": "failed: not in the candidate set"})
             continue
-        todo = [k for k in range(1, replicates + 1) if (ident, k) not in done]
+        todo = [k for k in range(1, replicates + 1)
+                if (ident, args.pose_rank, k) not in done]
         if not todo:
             log.info("[%d/%d] %s: all %d replicates already done", i, len(idents),
                      ident, replicates)
@@ -1109,7 +1140,7 @@ def main() -> None:
         run_pose(cand, replicates=replicates, production_ps=production_ps,
                  gpu=args.gpu, threads=args.threads, nrun=args.nrun,
                  dock_gpu=dock_gpu, allow_redock=not args.no_redock,
-                 on_row=chunk.add)
+                 pose_rank=args.pose_rank, on_row=chunk.add)
     chunk.flush()
     report()
 

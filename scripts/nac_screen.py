@@ -269,20 +269,47 @@ def dock(lig: Path, rec_dir: Path, work: Path, nrun: int, gpu: str,
     return dlg
 
 
-def sg_position(dlg: Path) -> np.ndarray:
-    """Cys113 SG, taken from the FLEXIBLE residue in the first docked model.
+def sg_positions(dlg: Path) -> np.ndarray:
+    """Cys113 SG for EVERY docked model, in MODEL order. Shape (n_models, 3).
 
-    The flexible sidechain moves during docking, so its position must come from
-    the pose being measured -- reading it from the rigid receptor would measure
-    the approach to where the sulfur STARTED.
+    THE SIDECHAIN MOVES, SO THERE IS NO SUCH THING AS "THE" SULFUR (D0109).
+    `sg_position` (singular) returned the first match and its own docstring said
+    the position "must come from the pose being measured" -- then handed one
+    value to `measure_poses`, which broadcast it across all 640 conformers. So
+    every pose after the first was measured against where the sulfur sat in
+    pose 1.
+
+    Measured on t4_084b1552486e over 200 poses: SG moves a median 0.18 A from
+    pose 1's position but up to 1.88 A, 6% of poses by more than 0.5 A. The
+    resulting distance error is systematic and one-directional (mean -0.166 A,
+    i.e. reported too SHORT), 78% of poses move by more than 0.1 A, and 7 poses
+    came out below 1.81 A -- shorter than a C-S bond, which is what made the
+    defect visible at all.
+
+    Returned in MODEL order so index j is conformer j of the rebuilt molecule,
+    which is the same order `rebuild_and_match` and `pose_energies` use.
     """
+    out = []
     for ln in dlg.read_text(errors="replace").splitlines():
         if "DOCKED: ATOM" not in ln and "DOCKED: HETATM" not in ln:
             continue
         rec = ln.split("DOCKED: ", 1)[1]
         if rec[17:20].strip() == "CYS" and rec[12:16].strip() == "SG":
-            return np.array([float(rec[30:38]), float(rec[38:46]), float(rec[46:54])])
-    raise ValueError(f"no flexible Cys SG in {dlg}")
+            out.append([float(rec[30:38]), float(rec[38:46]), float(rec[46:54])])
+    if not out:
+        raise ValueError(f"no flexible Cys SG in {dlg}")
+    return np.asarray(out, dtype=float)
+
+
+def sg_position(dlg: Path) -> np.ndarray:
+    """DEPRECATED: pose 1's sulfur only. Use `sg_positions` (D0109).
+
+    Kept so the failure is a NAME the reader recognises rather than an
+    AttributeError in an unrelated place, and so anything that legitimately
+    wants one sulfur has to say so. `measure_poses` now refuses a single SG for
+    a multi-conformer molecule, so this can no longer be misused by accident.
+    """
+    return sg_positions(dlg)[0]
 
 
 def pose_energies(dlg: Path) -> list[float]:
@@ -329,7 +356,7 @@ def _reactive_xyz(dlg: Path) -> np.ndarray:
 def measure_dlg(dlg: Path, cand: Candidate) -> list[nac.NACResult]:
     """Rebuild the ligand from the docking output and score every pose."""
     mol, match = rebuild_and_match(dlg, cand)
-    return nac.measure_poses(mol, match, cand.mechanism, sg_position(dlg))
+    return nac.measure_poses(mol, match, cand.mechanism, sg_positions(dlg))
 
 
 def rebuild_and_match(dlg: Path, cand: Candidate):

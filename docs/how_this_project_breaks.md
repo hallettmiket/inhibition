@@ -1,8 +1,9 @@
 # How this project breaks
 
-*Written 2026-07-31, at handover. Last updated 2026-09-01 (catalogue 31
-entries; the discovery-route table below refreshed for entries 22-31, which it
-had never been). Read this before the README.*
+*Written 2026-07-31, at handover. Last updated 2026-09-02 (catalogue 38
+entries; the discovery-route table below carries a column per range, so which
+entry went where can be checked rather than trusted). Read this before the
+README.*
 
 Every substantive bug found in this project has been the same bug.
 
@@ -58,6 +59,13 @@ test, because the code was doing exactly what it was written to do.**
 | 29 | `0.0` from `anchor_quality` for a mechanism name nobody registered | A raise -- the mechanism list is an allowlist of four | Writing a test fixture with `mechanism="sn2"` instead of `sn2_displacement`. Every pose scored 0.0, which ranks the molecule LAST in a metric where 0 is the worst LEGAL value, and nothing raised. The symptom would have been a warhead class that never appears near the top of a shortlist. Fixed by raising, the rule `canonical_class()` already follows |
 | 30 | `cut = -inf` as a way to disable a filter | Not evaluating the filter at all | The engagement gate correctly logged "the mode_poses gate does not apply and is not being enforced" and then returned 0 of 93 groups. `consensus_gnina` is null whenever gnina did not run -- every nac_v6 shard -- and `NaN >= -inf` is False. A permissive threshold on an absent column is not permissive, it is unsatisfiable, and the log said the opposite |
 | 31 | "0 of 500 poses valid" from PoseBusters | "the receptor could not be parsed" | The gate was handed `3IKD_prepared_1.pdbqt`, the receptor the docking itself consumes. PoseBusters WARNS rather than raising on a file type it cannot read, so every protein-ligand check failed for want of a receptor and the verdict was total rejection -- an infrastructure fault wearing a chemistry result's clothes. Now the suffix is checked, and a zero-valid verdict names its worst failing checks and says to suspect the receptor |
+| 32 | `pose_rank=1`, the DEFAULT, on every BPMD run ever made | The rank the ranking chose -- `read_pose`, `run_pose` and `prepare_pose` all support the argument | Elevating one molecule needed the 100 ns run and BPMD on the SAME pose. `md_residence_3ikd` takes `--pose-rank`; `bpmd_run` did not, and neither call site in `main()` passed one. The workdir is even named `<stem>__p<rank>` for ranks other than 1 -- the whole mechanism was built and no caller used it. Rank 1 is a real pose of the right molecule, so it parameterises, biases and reports an ordinary stability score. Here it would have measured mode 0 (engagement 0.0000) and filed it beside a 100 ns run on mode 10 (0.7247). D0105 |
+| 33 | `n_poses` = the number DOCKED, equal at 500 for every molecule | The size of the set a mode can be drawn FROM -- the PB-VALID count | `consensus` = mode_size / n_poses, and the denominator was verified equal across all 34,059 rows. It was. But `labels` is -1 for every PoseBusters-invalid pose, and the valid fraction ranges **0.812-0.982**: a molecule at 81% valid had a consensus CEILING of 0.81 while one at 98% could reach 0.98. The denominator was equal and the NUMERATOR's room to grow was not. Found by asking what the equal denominator was a fraction OF. D0106 |
+| 34 | `escaped = any(d >= 1.0 nm)` as a verdict on pose stability | A sustained departure, and only after a NEGATIVE control exists | 3 of 3 replicates escaped, which reads as "the pose did not survive". So does sulfopin's crystal pose, and so does all 7 of 7 BPMD runs ever completed at 10 ns. Escape happens inside 1 ns with **zero accumulated bias** in half the replicates, so no barrier was measured; the ligands come back (33% of post-crossing time inside 0.6 nm); and `max_cv_nm` is 1.60-1.66 nm in every run because `WALL_NM = 1.5` is where the restraint sits. The CV is warhead-to-SG distance, not ligand displacement, so it crosses while the ligand stays seated. D0107 |
+| 35 | `rp.reports_dir()` with no argument, in a script that takes `--topic` | `rp.reports_dir(topic)` -- the function has taken an optional topic all along | `ligand_page.py --topic X` READ topic X's ranking and WROTE to `run.topic`'s directory. Building a page for any topic other than the current one would have silently overwritten the current run's `ligands.html` (1.2 MB, four days old) with another run's contents, under the current run's title, on every server serving it. Same half-moved-topic shape as #25, one function call later |
+| 36 | Pose 1's Cys113 sulfur, broadcast to all 640 poses | Each pose's OWN sulfur -- Cys113 docks FLEXIBLE | `sg_position`'s docstring says the position "must come from the pose being measured" and the body `return`s on the first match; `measure_poses` took ligand coords PER CONFORMER and one sulfur for all of them. The shapes were compatible so the broadcast was invisible. Error median 0.18 A, one-directional, distances too SHORT -- so poses fell below the 2.8 A window floor and `viable` was UNDER-counted by half (49 -> 96 on one cloud). Surfaced only when a ranking with no lower bound put impossible 1.22 A distances on top. **PoseBusters had been disagreeing all along and was right.** D0109 |
+| 37 | A `stage0 only` placeholder row, counted as a finished sweep | A row means a RESULT; a probe row means nothing | `attack_sweep --stage0-only` wrote a row with no measurements into the same table as completed sweeps, and `sweep_supervisor.done_tasks` matched on ident alone -- so running the free probe over the worklist marked 12 modes finished and they would never have been simulated. Self-inflicted, within an hour of writing the supervisor. And the flag computed NOTHING while its docstring advertised "the elevated pose's own geometry ... a filter that costs nothing". Fixed three ways: `done` requires `status == "ok"`, `--out-topic` keeps probes out of the results directory, and stage 0 now actually measures. D0110 |
+| 38 | A raw coordinate difference in a periodic box | The minimum image, with the atom identities checked | An early-give-up check read `npt.gro` naively and reported **51.18 A** for a ligand in a ~7 nm box -- the box length minus the real distance, which is large, finite and completely wrong. It gave up on one real mode at 56.6 A before being caught. Fixing the wrap by matching `resname == "CYS"` then found TWO sulfurs (3IKD has Cys57 as well as Cys113) and correctly refused to choose, so it measured nothing at all. Selecting Cys113 by residue number through `md_movie.PIN1_OFFSET`, identity verified, gives **4.56 A** on the frame that first read 51. `elevation_run.distance_nm` had done all of this correctly for weeks. D0110 |
 
 ---
 
@@ -74,6 +82,13 @@ sounds like the shortlist. `cnn_affinity` sounds like an affinity.
 right pattern for a molecule crystallised as an adduct — and is wrong, because
 the PDB deposits the FREE ligand and the bond lives in `_struct_conn`.
 
+**#33 and #34 are the same lesson at opposite ends.** #33 is a guard that was
+CHECKED and passed: the denominator really was equal, and nobody asked equal out
+of WHAT. #34 is a verdict nobody sanity-checked against the one molecule whose
+answer is written down -- the positive control fails it too. A verified invariant
+and an unverified verdict, and both produced a number in the right range for a
+reason nobody intended.
+
 **Defence:** derive the name from the thing that owns it. `rank_shortlist`
 refuses any metric not declared in `LOWER_IS_BETTER` *with its direction* —
 that guard caught #4 and is the only reason it was caught.
@@ -82,7 +97,11 @@ that guard caught #4 and is the only reason it was caught.
 
 The first row. The *i*th element. The order the file happens to be in.
 
-Instances **2, 3, 5**. The tell: an index used where an identity was meant.
+Instances **2, 3, 5, 36, 38**. The tell: an index used where an identity was meant.
+**#36 is the subtlest member and the one to study:** the index was not written by
+hand, it was a `return` inside a loop -- "the first one" -- feeding a function
+whose parameter shape made one value and many values interchangeable. No
+subscript appears anywhere in the defect.
 `rows[0]` is correct only if the row order encodes the property you want — and
 in #3 it encoded a *different* score than the one being read off it.
 
@@ -94,8 +113,12 @@ you have this bug.
 A constant naming a version. It was right when written. The file it names still
 exists and still parses, so nothing ever complains.
 
-Instances **6, 7, 15, 18, 19**, and the pattern behind **8, 9, 22** (a cache key
-is a pin on its inputs). Reference files alone have done this **five** times:
+Instances **6, 7, 15, 18, 19, 32, 35**, and the pattern behind **8, 9, 22** (a cache key
+is a pin on its inputs). **#32 and #35 are a NEW member of this family: a
+keyword argument with a default that no caller ever overrides.** The parameter
+exists, the plumbing works, the default is a legal value -- and it is a pin that
+cannot announce it is not what anyone wanted. Worth a sweep for keyword
+arguments whose non-default value is passed nowhere in the repo. Reference files alone have done this **five** times:
 generalising the version guard on 2026-08-01 found five stale pins at once, two
 of them in `choreography.yaml` naming a binder set and a warhead library two
 and eight versions behind what the code loaded — and read by nothing, so
@@ -121,7 +144,7 @@ cannot finish says so at launch rather than at the deadline.
 The check exists. It runs. It just doesn't cover the case, or it runs too late,
 or it cannot fail.
 
-Instances **11, 12, 13, 14, 16, 17, 20, 27, 28, 29, 30, 31** — the largest group, and growing
+Instances **11, 12, 13, 14, 16, 17, 20, 27, 28, 29, 30, 31, 33, 34, 37** — the largest group, and growing
 fastest. **#27** is the subtlest: the validation RAN, honestly, and reported a
 real number -- for a different question than the one its result was used to
 settle. A validation is scoped to the quantity it measured, and "the predictor
@@ -191,23 +214,36 @@ from a real result at stage six.
 
 Worth being honest, because it should change how you spend your attention.
 
-| route | 1-21 | 22-31 | total | which of 22-31 |
-|---|---:|---:|---:|---|
-| Someone looked at output and it didn't match expectation | 9 | 7 | **16** | 23, 24, 25, 26, 28, 30, 31 |
-| Found while building something else entirely | 6 | 1 | **7** | 29 |
-| An existing guard fired | 3 | 0 | **3** | none |
-| Deliberate audit for this class of defect | 3 | 2 | **5** | 22, 27 |
+| route | 1-21 | 22-31 | 32-38 | total | which of 32-38 |
+|---|---:|---:|---:|---:|---|
+| Someone looked at output and it didn't match expectation | 9 | 7 | 2 | **18** | 36, 38 |
+| Found while building something else entirely | 6 | 1 | 3 | **10** | 32, 35, 37 |
+| An existing guard fired | 3 | 0 | 0 | **3** | none |
+| Deliberate audit for this class of defect | 3 | 2 | 1 | **6** | 33 |
+| **Ran the pipeline on something whose answer was already written down** | — | 0 | 1 | **1** | 34 |
 
-*Updated 2026-09-01 with entries 22-31. **The ratio got worse: still only
-3 of 31 caught by a guard**, because not one of the ten new entries was. Seven
-of the ten surfaced because someone read output that did not match
-expectation, and two of those (#23, #28) came from @tt8804 seeing two things
-presented side by side and asking why they disagreed — a route no guard
-performs. The 22-31 column names which entry went where so the next person can
-check the arithmetic instead of trusting it; the 1-21 column is left as
-originally judged and is not re-derived here. This table went four weeks and
-ten entries without being updated, which is itself a pinned default gone
-stale (§3).*
+*Updated 2026-09-02 with entries 32-38. **The last row is new and it is the one
+to copy.** #34 was caught by running BPMD on sulfopin and finding the positive
+control fails the same test; #33 by asking what an already-verified equal
+denominator was a fraction OF. Both cost one query against data already on
+disk. The row is scored **—** for 1-21 rather than 2: #20 and #21 were caught
+exactly this way, against 6VAJ's linkage in D0001, but they are left in the row
+they were first judged into, on the same principle the 22-31 refresh adopted —
+the older columns are not re-derived here, only extended.*
+
+***Still 3 of 38 caught by a guard**, and not one of entries 32-38 was. That
+number is the argument this document keeps making: guards are cheap to write
+and are the only route that does not require a person to be looking. Two of the
+seven new entries (#36, #38) surfaced because a number was absurd on its face —
+1.22 Å, shorter than a C–S bond, and 51.18 Å in a 7 nm box — which is luck
+dressed as vigilance, since neither would have been visible had the error been
+merely plausible.*
+
+*Updated 2026-09-01 with entries 22-31. The ratio got worse: not one of those
+ten was caught by a guard. Seven surfaced because someone read output that did
+not match expectation, and two of those (#23, #28) came from @tt8804 seeing two
+things presented side by side and asking why they disagreed — a route no guard
+performs.*
 
 *Updated 2026-08-02 with entries 14-21. Two of those (#20, #21) were caught by
 checking against **6VAJ, whose covalent linkage D0001 already records at

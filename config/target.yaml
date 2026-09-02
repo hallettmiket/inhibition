@@ -46,7 +46,13 @@ run:
   #
   # nac_v4 (3.0.0 "Galena") stays on disk, unreferenced. Its GUI is archived
   # browsable at 00_outputs/blacksmith/gui_archive/galena_3.0.0_20260816/.
-  topic: nac_v6              # 3.2.0. Bump with the screen, never on its own.
+  # nac_v8 (3.3.1). nac_v7 IS RETIRED AS BROKEN, not superseded: every distance
+  # and angle in it was measured against pose 1's Cys113 sulfur for all 640
+  # poses (D0109), which under-counted `viable` by roughly half. Its tables stay
+  # on disk because the root is append-only; nothing may read them. A fresh
+  # topic rather than a re-screen into nac_v7 because `rank_v2` concatenates
+  # every agg_s*.csv in a topic and would count every mode twice.
+  topic: nac_v8              # 3.3.1. Bump with the screen, never on its own.
                              # A CLEAN RUN, carrying nothing from nac_v5: that
                              # data predates the #76 pose_idx fix, so its poses
                              # cannot be joined to their own measurements; it was
@@ -80,7 +86,20 @@ target:
 # Pose generation and splitting
 # ---------------------------------------------------------------------------
 docking:
-  n_runs: 500                # per molecule; 500 is far past saturation, see below
+  # 640 SO THAT 500 POSES SURVIVE POSEBUSTERS, not 640 for its own sake. See
+  # `target_pb_valid` below for why the target is on the VALID count. Sized from
+  # the measured pass rate over nac_v6's 561 acrylamide/bdhi molecules -- the
+  # same set this run screens -- rather than from a margin someone chose:
+  #
+  #     quantile   pass rate   n_runs for 500 valid
+  #      median      0.920            544
+  #      5th pct     0.864            579
+  #      1st pct     0.834            600
+  #      MINIMUM     0.812            616   <- 640 clears this with margin
+  #
+  # At the worst rate observed anywhere in that set, 640 runs yield 520 valid.
+  # Well under the ~2,000 where AutoDock-GPU starts failing silently (#77).
+  n_runs: 640                # per molecule; sized to yield >=500 PB-valid
   persist_all_poses: true    # #44 -- a rule, not an option. The cloud must come
                              # from the SAME run that produced the scores.
   # 500 runs give >=95% probability of sampling at least one pose within 2 A of
@@ -111,6 +130,27 @@ docking:
   # their place in the persisted cloud with `pb_valid = False`, and are excluded
   # only from grouping and the aggregates. D0093 is the record of what a filter
   # that deletes costs.
+  # SAMPLE TO A FIXED NUMBER OF *VALID* POSES (@twu383, 2026-09-01).
+  #
+  # `consensus` = mode_size / n_poses, and n_poses was the number DOCKED --
+  # equal at 500 for everything, which looked like an equal denominator and was
+  # not one. Only PB-valid poses can join a mode, and that fraction ranges
+  # 0.812-0.982 across this set, so a molecule at 81% valid had a consensus
+  # CEILING of 0.81 while one at 98% could reach 0.98. The comparison was
+  # between numerators with unequal room to grow.
+  #
+  # Setting the target on the valid count equalises both. 0 disables the cap and
+  # restores the previous behaviour exactly, which is what reproduces nac_v6.
+  #
+  # WHICH 500, when a cloud overshoots: the FIRST 500 in docking order. The runs
+  # are independent GA replicates, so that is an unbiased sample of the valid
+  # population and the cloud keeps meaning "what docking produces". An ENERGY
+  # cut would make it "the best-scoring 500" -- a different population, and
+  # exp/21 measured that the best 25% of a cloud concentrates attack-ready poses
+  # 2.60x over a random 25%, so it would inflate `engagement` for reasons that
+  # are not chemistry.
+  target_pb_valid: 500
+
   posebusters:
     enabled: true
     config: dock         # 22 checks INCLUDING protein clashes -- what D0089
@@ -409,6 +449,74 @@ ranking:
   # The old rule, kept REACHABLE so 3.0.0's earlier tables can be reproduced
   # rather than only described. `rank_v2 --floor 0.05 --gate consensus_fraction`.
   legacy_consensus_floor: 0.05
+
+  # HOW A MOLECULE'S SCORE IS BUILT FROM ITS MODES' `rank_score` (@tt8804,
+  # 2026-08-29, after reading the curves). `mean`, and the alternatives are NOT
+  # interchangeable -- measured on nac_v6's 1,684 molecules the top-50 by `mean`
+  # and the top-50 by `best` share TWO members. They answer different questions:
+  #
+  #   mean  -- what fraction of this molecule's accessible poses are
+  #            reaction-competent. A typical-behaviour measure.
+  #   best  -- can this molecule reach attack geometry AT ALL. A capability
+  #            measure, and arguably the mechanistically right one for an
+  #            irreversible warhead, which only has to arrive once.
+  #
+  # `mean` was chosen on the SHAPE OF ITS CURVE: it decays smoothly and almost
+  # linearly from 0.249 across the top of the ranking, where `fraction_above`
+  # gave five parallel curves that ordered molecules without separating them
+  # (every cutoff from 0.05 to 0.60 left ~100% of molecules with a qualifying
+  # mode). No cutoff is involved, which is the point -- `fraction_above`
+  # reintroduced at the molecule level exactly the hard threshold that
+  # `anchor_quality` exists to remove.
+  #
+  # THE CAVEAT THAT TRAVELS WITH IT: the denominator is the mode COUNT, and
+  # that is a function of docking depth (D0092). Measured here,
+  # rho(n_modes, mean) = -0.118, p = 1.2e-06 -- dock deeper, accumulate sparse
+  # poor modes, and a molecule's mean falls without its chemistry changing. The
+  # effect is small and one-directional, and it is why `mean` is comparable
+  # ACROSS MOLECULES AT FIXED DEPTH and nowhere else. Do not compare a mean
+  # from a 500-run cloud against one from a 2,000-run cloud. `best` is the only
+  # option here that is depth-immune.
+  ligand_agg: fraction_above
+  # THE CUTOFF, DERIVED RATHER THAN CHOSEN (@tt8804, 2026-08-29: "from first
+  # principles lets determine a cutoff"). The previous value, 0.4, was picked as
+  # the midpoint of a usable range and then given a chemical-sounding gloss
+  # after the fact. It corresponded to no criterion anyone had defined.
+  #
+  # THE DERIVATION. `anchor_quality = d_term x a_term`, and both factors are
+  # bounded in [0, 1]. A PRODUCT >= 0.5 THEREFORE FORCES EACH FACTOR >= 0.5 --
+  # if either fell below, the product could not reach 0.5 even with the other at
+  # its maximum. And each factor at 0.5 is exactly the classical NAC window:
+  #
+  #     d_term >= 0.5  <=>  2.8 <= d <= 4.2 A
+  #     a_term >= 0.5  <=>  theta <= 30 degrees off-normal
+  #
+  # So `anchor_quality >= 0.5` IMPLIES the pose sits inside the NAC window. It
+  # is the SUFFICIENT condition, and it admits no pose the window excludes.
+  # Verified numerically: at a perfect angle it admits 2.81-4.20 A, at a perfect
+  # distance up to 30 degrees.
+  #
+  # 0.25 IS THE OTHER PRINCIPLED VALUE and it is the wrong one here. It is the
+  # window's CORNER (4.2 A and 30 degrees at once), so everything inside the
+  # window scores at least 0.25 -- the NECESSARY condition. But it also admits
+  # 45 degrees off-normal at a perfect distance, which is outside the window.
+  # Counting "reaction-competent modes" wants no false positives, so the
+  # sufficient condition is the right one.
+  ligand_cutoff: 0.5
+  # AND THE CUTOFF IS APPLIED TO THE ANCHOR, NOT TO `rank_score`. This is the
+  # part that is easy to get wrong: `rank_score = anchor x support`, support
+  # runs to 1.15, so a pose with anchor 0.44 -- OUTSIDE the window -- reaches
+  # rank_score 0.506 on a Ser114/115 hydrogen bond. Measured on nac_v6, 1,448
+  # modes clear 0.5 on `rank_score` with an anchor below 0.5: admitted by a
+  # bonus rather than by geometry. A geometric criterion applied to a quantity
+  # that is not purely geometric silently widens the window by 15%, and nothing
+  # in the output would say so.
+  #
+  # SUPPORT SHAPES THE ORDERING, NOT THE CRITERION. That is what "conservative,
+  # supporting rules only" has to mean: the H-bond can move a competent mode up
+  # the list; it must never make an incompetent one competent.
+  ligand_cut_col: anchor_quality_max
+  ligand_tiebreak: mean_mode_engagement
 
 # ---------------------------------------------------------------------------
 # Simulation

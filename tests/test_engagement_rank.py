@@ -122,3 +122,76 @@ def test_unmapped_mechanism_raises_rather_than_scoring_zero():
         nac.anchor_quality(3.5, 180.0, "sn2")
     with pytest.raises(ValueError, match="unknown mechanism"):
         er.pose_engagement([3.5], [180.0], ["michael"])
+
+
+# --------------------------------------------------------------------------- #
+#  the conservative support term
+# --------------------------------------------------------------------------- #
+def test_support_can_never_promote_a_pose_that_cannot_react():
+    """THE SAFETY PROPERTY. `rank_score = anchor * support`, so a pose with no
+    attack geometry scores zero however well supported it is. An ADDITIVE
+    support term would let contacts rescue a pose that cannot react, which is
+    exactly the influence the rule is meant not to have."""
+    assert er.rank_score(0.0, 1.0 + er.MAX_SUPPORT) == 0.0
+    assert er.rank_score(0.5, 1.0) == pytest.approx(0.5)
+    assert er.rank_score(0.5, 1.15) == pytest.approx(0.575)
+
+
+def test_support_is_bonus_only_and_bounded():
+    """It may never demote a pose, and may never outweigh geometry."""
+    s = er.receptor_support_atoms()
+    far = er.support_factor(np.array([[999.0, 999.0, 999.0]]), ["O"], s)
+    assert far == 1.0, "an unsupported pose must keep its geometry score exactly"
+    near = er.support_factor(np.array([s[0] + np.array([3.0, 0, 0]),
+                                       s[1] + np.array([3.0, 0, 0])]), ["O", "N"], s)
+    assert near == pytest.approx(1.0 + er.MAX_SUPPORT)
+    assert er.MAX_SUPPORT <= 0.25, (
+        "a tie-breaker, not a weight: above ~0.25 a supported mediocre pose "
+        "could outrank an unsupported excellent one")
+
+
+def test_only_polar_ligand_atoms_earn_support():
+    """Letting carbon satisfy an H-bond claim turns this into a proximity bonus,
+    which is a shape preference by another name."""
+    s = er.receptor_support_atoms()
+    pos = np.array([s[0] + np.array([3.0, 0, 0])])
+    assert er.support_factor(pos, ["C"], s) == 1.0
+    assert er.support_factor(pos, ["O"], s) > 1.0
+
+
+def test_support_atoms_are_the_two_serines_only():
+    """The omissions are the design: His59 would reward pi-stacking, the leucines
+    would reward greasiness, and the Arg loop would select for anions."""
+    resi = {r for _, r, _, _ in er.SUPPORT_ATOMS}
+    assert resi == {114, 115}
+    assert 59 not in resi and 122 not in resi and 68 not in resi
+
+
+def test_a_missing_support_atom_raises(tmp_path):
+    """Silently losing one serine would lower the factor for every pose
+    uniformly and read as a chemistry result."""
+    p = tmp_path / "half.pdb"
+    p.write_text("ATOM      1  OG  SER A 114      10.743   0.304  -2.297  1.00  0.00           O\n")
+    with pytest.raises(ValueError, match="support atoms absent"):
+        er.receptor_support_atoms(p)
+
+
+def test_fraction_above_refuses_a_default_cutoff():
+    m = pd.DataFrame([dict(ident="a", engagement=0.9)])
+    with pytest.raises(ValueError, match="needs an explicit cutoff"):
+        er.rank_ligands(m, how="fraction_above")
+
+
+def test_fraction_above_and_best_order_differently():
+    """The reason both exist. `best` sees one group; `fraction_above` sees how
+    much of the molecule's repertoire is reaction-competent."""
+    m = pd.DataFrame([
+        dict(ident="a", engagement=0.9), dict(ident="a", engagement=0.8),
+        dict(ident="a", engagement=0.1),
+        dict(ident="b", engagement=0.95), dict(ident="b", engagement=0.02),
+        dict(ident="b", engagement=0.01)])
+    frac = er.rank_ligands(m, how="fraction_above", cutoff=0.5)
+    best = er.rank_ligands(m, how="best")
+    assert frac.iloc[0].ident == "a", "a has 2 of 3 competent, b has 1 of 3"
+    assert best.iloc[0].ident == "b", "b holds the single strongest group"
+    assert set(frac.columns) >= {"n_above", "n_modes"}

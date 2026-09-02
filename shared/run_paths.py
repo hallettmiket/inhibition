@@ -144,8 +144,29 @@ def worklist_dir(t: str | None = None) -> Path:
 
 
 def poses_dir(t: str | None = None) -> Path:
-    """Representative poses -- already topic-scoped before this module."""
-    return BLACKSMITH / f"{t or topic()}_poses"
+    """Representative poses -- already topic-scoped before this module.
+
+    RESOLVED BY GLOB, NEVER PINNED. `<topic>_poses` is append-only, so a
+    correction cannot overwrite it -- it is written beside the original as
+    `<topic>_poses_2`, and the original stays because every artefact built
+    before the correction was read from it. The highest integer wins, which is
+    the same rule `reference_set.latest_reference` follows and for the same
+    reason: a literal directory name is a pin, and a pin cannot announce that a
+    newer version exists (`how_this_project_breaks.md`, disguise #3).
+
+    WHY THERE IS A `_2` AT ALL (2026-08-29): `write_sdf` stamped each
+    representative's `mode` from its WRITE POSITION rather than from the pose,
+    so for 128 of 1,684 molecules every representative carried another mode's
+    label. The scores were never affected -- they are computed from the cloud --
+    but the viewer drew one pose beside another pose's number, and any join on
+    `mode` into the representative file paired the wrong rows.
+    """
+    base = f"{t or topic()}_poses"
+    cands = [d for d in BLACKSMITH.glob(f"{base}_*")
+             if d.is_dir() and d.name[len(base) + 1:].isdigit()]
+    if cands:
+        return max(cands, key=lambda d: int(d.name[len(base) + 1:]))
+    return BLACKSMITH / base
 
 
 def allposes_dir(t: str | None = None) -> Path:

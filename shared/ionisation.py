@@ -107,6 +107,115 @@ def protonate(smiles_by_id: dict[str, str], ph: float = DEFAULT_PH,
     return out
 
 
+def _repair_azole_anion(smi: str) -> str | None:
+    """Rewrite an obabel azole anion RDKit rejects, or return None.
+
+    THE DEFECT. obabel deprotonates a tetrazole correctly -- pKa ~4.9, so the
+    anion IS the pH 7.4 species -- and then writes it in a Kekule form that puts
+    three bonds on the anionic nitrogen:
+
+        [N-]1=C(NN=N1)R      ->  "Explicit valence for atom # 0 N, 3, is
+                                  greater than permitted"
+
+    It only does this to an anion it CREATES. Handed the aromatic anion
+    `c1nnn[n-]1` it round-trips it perfectly, which is why nothing upstream ever
+    saw this: every molecule screened so far was neutral at the azole.
+
+    THE REPAIR, AND WHY IT IS NOT BOND-SHUFFLING. obabel is the authority on
+    WHICH site ionises and RDKit is the authority on what a valid structure
+    looks like, so each does the part it is right about: neutralise the
+    over-valent nitrogen, let RDKit sanitise and perceive the aromatic ring,
+    then remove the ring NH again. The charge obabel decided on is preserved and
+    re-asserted, never recomputed -- a repair that silently changed the
+    protonation state would be the D0074 defect with extra steps.
+
+    Returns None if the input is not this shape or the repair does not
+    reproduce obabel's charge, so the caller drops the molecule rather than
+    docking a species nobody chose.
+    """
+    from rdkit import Chem, RDLogger
+    RDLogger.DisableLog("rdApp.*")
+
+    m = Chem.MolFromSmiles(smi, sanitize=False)
+    if m is None:
+        return None
+    m.UpdatePropertyCache(strict=False)
+    want_charge = sum(a.GetFormalCharge() for a in m.GetAtoms())
+
+    touched: list[int] = []
+    for a in m.GetAtoms():
+        if (a.GetSymbol() == "N" and a.GetFormalCharge() == -1
+                and a.IsInRing() and a.GetExplicitValence() > 2):
+            a.SetFormalCharge(0)
+            a.SetNumExplicitHs(0)
+            a.SetNoImplicit(False)
+            touched.append(a.GetIdx())
+    if not touched:
+        return None                      # not this defect; do not touch it
+    try:
+        m.UpdatePropertyCache(strict=True)
+        Chem.SanitizeMol(m)
+    except Exception:                                          # noqa: BLE001
+        return None
+
+    # Put the charge back, on the ring it came off. The tetrazolate is
+    # delocalised, so WHICH ring nitrogen carries it is a canonicalisation
+    # detail, not chemistry -- but it must be that ring, and there must be an
+    # N-H there to remove.
+    #
+    # RINGS ARE READ FROM THE SANITISED MOLECULE. Taken from the unsanitised one
+    # `AtomRings()` comes back without the ring this is about, so the lookup
+    # missed and the repair returned None -- succeeding at the hard half and
+    # failing at the bookkeeping. Atom indices are unchanged by sanitisation, so
+    # `touched` stays valid across it.
+    rings = [set(r) for r in m.GetRingInfo().AtomRings()]
+    for idx in touched:
+        ring = next((r for r in rings if idx in r), None)
+        if ring is None:
+            return None
+        for j in sorted(ring):
+            a = m.GetAtomWithIdx(j)
+            if a.GetSymbol() == "N" and a.GetTotalNumHs() >= 1:
+                a.SetNumExplicitHs(a.GetTotalNumHs() - 1)
+                a.SetNoImplicit(True)
+                a.SetFormalCharge(-1)
+                break
+        else:
+            return None
+    try:
+        Chem.SanitizeMol(m)
+    except Exception:                                          # noqa: BLE001
+        return None
+
+    if Chem.GetFormalCharge(m) != want_charge:
+        # The whole point is to preserve obabel's decision. If the repair
+        # drifted off it, it is not a repair.
+        return None
+    return Chem.MolToSmiles(m)
+
+
+def _validated(ident: str, smi: str) -> str | None:
+    """obabel's SMILES if RDKit can read it, the repaired one if not, else None.
+
+    VALIDITY WAS NEVER CHECKED HERE. `protonate` guaranteed IDENTITY -- the
+    right string matched to the right id -- and said nothing about whether the
+    string was a molecule. The failure surfaced two stages downstream in
+    `nac_screen.prepare_ligand`, as a molecule that could not be docked, which
+    reads like a property of the molecule rather than of the converter.
+    """
+    from rdkit import Chem, RDLogger
+    RDLogger.DisableLog("rdApp.*")
+    if Chem.MolFromSmiles(smi) is not None:
+        return smi
+    fixed = _repair_azole_anion(smi)
+    if fixed is None:
+        log.warning("%s: obabel returned an unparseable pH %s species and it "
+                    "could not be repaired: %r", ident, DEFAULT_PH, smi)
+        return None
+    log.info("%s: repaired obabel's Kekule azole anion -> %s", ident, fixed)
+    return fixed
+
+
 def _convert_recursive(items: list[tuple[str, str]], ph: float,
                        depth: int) -> dict[str, str]:
     """Convert a chunk; on a short return, split it and retry the halves."""
@@ -140,7 +249,13 @@ def _convert_chunk(items: list[tuple[str, str]], ph: float) -> dict[str, str]:
                 parts = line.strip().split("\t")
                 if len(parts) < 2:
                     continue
-                out[parts[1].strip()] = parts[0].strip()
+                cid, got = parts[1].strip(), parts[0].strip()
+                # VALIDATED HERE, not two stages downstream. A molecule whose
+                # species cannot be built is ABSENT from the result -- the
+                # caller's existing contract -- rather than present and broken.
+                ok = _validated(cid, got)
+                if ok is not None:
+                    out[cid] = ok
         finally:
             path.unlink(missing_ok=True)
     return out

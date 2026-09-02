@@ -152,8 +152,12 @@ def rank_modes(modes: pd.DataFrame, within: str | None = "warhead_class",
 
 
 def rank_ligands(modes: pd.DataFrame, how: str = "mean",
-                 ligand_key: str = "ident") -> pd.DataFrame:
-    """Order LIGANDS by their modes' engagement. `how` is mean | best | median.
+                 ligand_key: str = "ident", cutoff: float | None = None,
+                 score_col: str = "engagement",
+                 cut_col: str | None = None) -> pd.DataFrame:
+    """Order LIGANDS by their modes' engagement.
+
+    `how` is mean | best | median | fraction_above.
 
     @tt8804 asked for the average across modes, and it is the default. But the
     choice is load-bearing and the two answer different questions:
@@ -173,14 +177,76 @@ def rank_ligands(modes: pd.DataFrame, how: str = "mean",
     attack geometry, which is a precondition for covalent chemistry and not
     evidence of it.
     """
-    if how not in ("mean", "best", "median"):
-        raise ValueError(f"unknown aggregation {how!r}; known: mean, best, median")
+    if how not in ("mean", "best", "median", "fraction_above"):
+        raise ValueError(f"unknown aggregation {how!r}; known: mean, best, "
+                         "median, fraction_above")
+    if how == "fraction_above":
+        # @tt8804: "rank by mol based either on the proportion of a rankscore
+        # above a cutoff, or a molecule mode mean rankscore."
+        #
+        # WHAT IT ASKS: of everything this molecule can do, how much of it is
+        # reaction-competent? A molecule with 200 groups of which 40 clear the
+        # cutoff is a better bet than one with 200 of which 2 do, even if both
+        # have the same best group -- which `best` cannot see and `mean` blurs,
+        # because the median group scores ~0 and drags every mean toward it.
+        #
+        # STILL DEPTH-DEPENDENT, and it has to be said: both numerator and
+        # denominator grow with docking depth, and the groups added at depth are
+        # mostly sparse singletons (D0092: 61% of groups hold <= 3 poses, and the
+        # count never saturates). So a fraction falls as you dock longer. It is
+        # comparable across molecules AT FIXED DEPTH and nowhere else; `best` is
+        # the only depth-immune aggregation of the four.
+        if cutoff is None:
+            raise ValueError("fraction_above needs an explicit cutoff -- there is "
+                             "no defensible default, and a silent one would set "
+                             "the selection rule without anybody choosing it")
+        # THE CUTOFF MAY BE APPLIED TO A DIFFERENT COLUMN THAN THE ORDERING
+        # (`cut_col`). The threshold is a GEOMETRIC criterion -- anchor >= 0.5 is
+        # exactly "inside the NAC window", because the score is a product of two
+        # [0,1] factors and so >= 0.5 forces both >= 0.5, which are precisely
+        # 2.8-4.2 A and <= 30 degrees. `rank_score` multiplies that anchor by a
+        # support bonus of up to 1.15, so thresholding IT at 0.5 admits poses at
+        # anchor 0.44 -- outside the window, promoted by a hydrogen bond. 1,448
+        # modes on nac_v6 do exactly that. The bonus belongs in the ORDER, never
+        # in the criterion.
+        cut_on = cut_col or score_col
+        if cut_on not in modes.columns:
+            raise KeyError(
+                f"fraction_above needs {cut_on!r} to apply its cutoff and the "
+                f"frame does not carry it. Falling back to {score_col!r} would "
+                f"silently change what the threshold MEANS, which is the whole "
+                f"defect this argument exists to prevent.")
+        g = (modes.assign(_hit=modes[cut_on] >= float(cutoff))
+                  .groupby(ligand_key)
+                  .agg(ligand_engagement=("_hit", "mean"),
+                       n_modes=("_hit", "size"),
+                       n_above=("_hit", "sum"),
+                       best_mode_engagement=(score_col, "max"),
+                       mean_mode_engagement=(score_col, "mean"))
+                  .reset_index())
+        g["ligand_aggregation"] = f"fraction_above({cut_on} >= {cutoff})"
+        # MEAN BREAKS THE TIE (@tt8804, 2026-08-29). A fraction over a few
+        # hundred modes is coarse -- two molecules landing on the same value is
+        # a real event, not a rounding artefact -- and leaving the tie to the
+        # frame's row order is selection by position, which is the shape this
+        # project breaks on (`how_this_project_breaks.md`, disguise #2). A
+        # secondary key makes the order TOTAL and reproducible, and `mean` is
+        # the right one: it is the same quantity read at finer resolution, so
+        # the tiebreak never contradicts the primary key's logic.
+        #
+        # MEASURED on nac_v6: at cutoff 0.4 the fraction takes 1,288 distinct
+        # values over 1,684 molecules and the top 50 hold 49 of them, so the
+        # tiebreak decides roughly one placement in fifty. It is cheap
+        # insurance, not a second ranking.
+        return (g.sort_values(["ligand_engagement", "mean_mode_engagement"],
+                              ascending=False)
+                 .reset_index(drop=True))
     agg = {"mean": "mean", "best": "max", "median": "median"}[how]
     g = (modes.groupby(ligand_key)
-               .agg(ligand_engagement=("engagement", agg),
-                    n_modes=("engagement", "size"),
-                    best_mode_engagement=("engagement", "max"),
-                    mean_mode_engagement=("engagement", "mean"))
+               .agg(ligand_engagement=(score_col, agg),
+                    n_modes=(score_col, "size"),
+                    best_mode_engagement=(score_col, "max"),
+                    mean_mode_engagement=(score_col, "mean"))
                .reset_index())
     g["ligand_aggregation"] = how
     # THE DENOMINATOR IS REPORTED BESIDE THE MEAN, always. `n_modes` grows with
@@ -255,3 +321,108 @@ def needs_population_gate(metric: str) -> bool:
     if metric in POSE_PROPERTY_METRICS:
         return False
     return True
+
+
+# --------------------------------------------------------------------------- #
+#  Supporting contacts — conservative, bounded, and multiplicative
+# --------------------------------------------------------------------------- #
+#: The residues whose side chains may earn a pose credit, and the atom on each
+#: that does it. DELIBERATELY SHORT, and the omissions are the design.
+#:
+#: @tt8804: "we do not want to influence the physical nature of molecules we
+#: select, only adding basic derivative/supporting rules that would be essential
+#: for cys113 engagement."
+#:
+#: Measured on the prepared 3IKD, six residues sit inside the 4.2 A near-attack
+#: window: CYS113, HIS59, SER114, SER115, LEU122, LEU61. Only the two serines are
+#: here, because only they can hold the warhead at the reaction centre without
+#: expressing a preference about what KIND of molecule wins:
+#:
+#:   SER114 (3.3 A) / SER115 (3.4 A)  -- INCLUDED. Both donor and acceptor, both
+#:       flanking the sulfur. A polar contact here holds the warhead in place at
+#:       the reaction centre; it does not favour any scaffold class.
+#:   HIS59 (3.2 A)  -- EXCLUDED. Rewarding contact with it rewards pi-stacking,
+#:       which is a shape preference and would change what gets selected.
+#:   LEU122 / LEU61 -- EXCLUDED. Rewarding hydrophobic burial pushes selection
+#:       toward greasier molecules. That is precisely the influence being ruled
+#:       out.
+#:   The Arg loop (LYS63, ARG68, ARG69, 7-10 A) -- EXCLUDED. It is where Pin1's
+#:       own phosphopeptide affinity lives, and it is the least conservative
+#:       thing that could be added: it would select for anionic ligands.
+SUPPORT_ATOMS = (("A", 114, "SER", "OG"), ("A", 115, "SER", "OG"))
+
+#: An H-bond, generously: heavy-atom donor/acceptor separation. Wider than the
+#: 2.6-3.2 A ideal because the pose is a docked prediction, not a crystal.
+HBOND_MIN_A = 2.4
+HBOND_MAX_A = 3.6
+
+#: The most a supporting contact may add. A TIE-BREAKER, not a weight -- at 0.15
+#: a fully supported pose outranks an unsupported one of equal geometry, and
+#: cannot outrank a pose with meaningfully better attack geometry.
+MAX_SUPPORT = 0.15
+
+
+def support_factor(ligand_xyz, ligand_elements, support_xyz,
+                   max_support: float = MAX_SUPPORT) -> float:
+    """1.0 to 1+max_support: does the pose hold itself at the reaction centre?
+
+    BONUS-ONLY AND MULTIPLICATIVE, and both properties are load-bearing:
+
+      * bonus-only -- an unsupported pose keeps its geometry score untouched, so
+        adding this rule can never DEMOTE a pose that reaches attack geometry.
+      * multiplicative -- `rank_score = anchor_quality * support`, so a pose with
+        anchor_quality 0 scores 0 however well supported it is. Support cannot
+        promote a pose that is not reaction-competent. An additive term could,
+        and that is the whole risk being avoided.
+
+    Only N and O ligand atoms count: a polar contact is the claim, and letting
+    carbon satisfy it would make this a proximity bonus, which is a shape
+    preference by another name.
+    """
+    import numpy as _np
+    xyz = _np.asarray(ligand_xyz, dtype=float)
+    els = [str(e).upper() for e in ligand_elements]
+    polar = _np.array([i for i, e in enumerate(els) if e in ("N", "O")], dtype=int)
+    if polar.size == 0 or len(support_xyz) == 0:
+        return 1.0
+    P = xyz[polar]
+    hits = 0
+    for s in support_xyz:
+        d = _np.sqrt(((P - _np.asarray(s, dtype=float)) ** 2).sum(-1))
+        if ((d >= HBOND_MIN_A) & (d <= HBOND_MAX_A)).any():
+            hits += 1
+    return 1.0 + max_support * (hits / len(support_xyz))
+
+
+def receptor_support_atoms(receptor_pdb=None) -> list:
+    """Coordinates of `SUPPORT_ATOMS`, matched by (chain, resi, resname, atom).
+
+    RAISES on a missing one rather than scoring without it. A support term that
+    silently loses one of its two serines would return a systematically lower
+    factor for every pose and look exactly like a chemistry result.
+    """
+    import numpy as _np
+    from shared import run_paths as _rp
+    path = receptor_pdb or _rp.receptor_prep()
+    want = {(c, i, rn, an): None for c, i, rn, an in SUPPORT_ATOMS}
+    for ln in open(path, errors="replace"):
+        if not ln.startswith(("ATOM", "HETATM")):
+            continue
+        k = ((ln[21:22].strip() or "A"), int(ln[22:26]), ln[17:20].strip(),
+             ln[12:16].strip())
+        if k in want:
+            want[k] = (float(ln[30:38]), float(ln[38:46]), float(ln[46:54]))
+    missing = [k for k, v in want.items() if v is None]
+    if missing:
+        raise ValueError(f"support atoms absent from {path}: {missing}")
+    return [_np.array(v) for v in want.values()]
+
+
+def rank_score(anchor: float, support: float = 1.0) -> float:
+    """The per-mode rank score. A mode and a single pose are the same thing here
+    -- a pose is a mode of one -- so this is the only score either needs.
+    """
+    a = float(anchor)
+    if a != a:
+        return float("nan")
+    return a * float(support)
