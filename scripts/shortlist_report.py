@@ -723,7 +723,15 @@ def block(ident: str, er, three: str, cls: dict,
     movie = ""
     nacs = None
     if mpdb.is_file():
-        pdb_txt, dsg, labels, lpos = er.surface_payload(mpdb)
+        # SAME atom the nac_series plot below uses. These two disagreed by a
+        # median of 3.11 A because one asked the molecule and the other asked
+        # for an atom named C10.
+        _ra = mp.reactive_atom(ident, rep)
+        if _ra is None:
+            log.warning("%s: no reactive atom; movie skipped", ident)
+            return ""
+        pdb_txt, dsg, labels, lpos = er.surface_payload(
+            mpdb, reactive_idx=_ra["heavy_idx"])
         movie = mov.viewer_html(pdb_txt, dsg, labels, lpos, "", elem_id=f"gl_{ident}{suffix}")
         nacs = mp.nac_series(ident, rep, mpdb, total_ns)
     img = mp.figure(ident, s, res, er, nacs)

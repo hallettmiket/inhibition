@@ -251,9 +251,22 @@ def test_a_missing_protein_trace_degrades_the_plot_rather_than_failing_it():
 
 
 def test_the_distance_panel_reads_the_window_from_the_criterion():
-    """A hand-typed 2.8-4.2 here could drift from the number that scores."""
+    """A hand-typed band here could drift from the number that scores.
+
+    UPDATED 2026-09-02: the band is no longer `NAC_DIST_MIN..NAC_DIST_MAX`.
+    That pair is the SCREEN's near-attack window (2.8-4.2 A); the sweep is
+    judged at 2.8-3.5 (D0111), and shading the wider one meant a trace could
+    sit in the green zone while scoring 0% engaged on the same figure. The
+    test's intent is unchanged -- read the band from the criterion, never type
+    it -- so it now names the function that owns it.
+    """
     src = (REPO / "scripts" / "sweep_assets.py").read_text()
-    assert "nac.NAC_DIST_MIN" in src and "nac.NAC_DIST_MAX" in src
+    assert "nac.attack_ready_window()" in src, (
+        "the shaded band is not read from nac_criterion.attack_ready_window()")
+    # and the wider window is still drawn, as a reference line rather than as
+    # the band -- dropping it would make this figure and the screen's own
+    # criterion describe different physics
+    assert "nac.NAC_DIST_MAX" in src
 
 
 def test_only_a_finished_sweep_supplies_assets():

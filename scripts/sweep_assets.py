@@ -159,14 +159,31 @@ def plots(rep: Path, ident: str) -> str:
             ax[0].legend(loc="upper left", fontsize=7, frameon=False,
                          ncol=2, handlelength=1.4, borderaxespad=0.2)
     if t_d is not None:
-        # THE WINDOW THE SCORE USES, drawn from the criterion itself.
-        ax[1].axhspan(nac.NAC_DIST_MIN, nac.NAC_DIST_MAX, color="#0f7a54",
-                      alpha=0.13, lw=0)
+        # THE BAND THE GATE USES, drawn from the gate itself. This shaded
+        # 2.8-4.2 A, the screen's NAC window, while the sweep is judged at
+        # 2.8-3.5 (D0111) -- so a trace could sit inside the green zone for most
+        # of the run and still score 0% engaged on the same page.
+        _lo, _hi = nac.attack_ready_window()
+        ax[1].axhspan(_lo, _hi, color="#0f7a54", alpha=0.15, lw=0)
+        # The wider NAC window is kept as a hairline rather than deleted: it is
+        # still the criterion the SCREEN scored these poses with, and dropping
+        # it would make the two pages describe different physics.
+        if nac.NAC_DIST_MAX > _hi:
+            ax[1].axhline(nac.NAC_DIST_MAX, color="#0f7a54", ls=":", lw=0.8,
+                          alpha=0.55)
+            ax[1].text(0.005, nac.NAC_DIST_MAX, " NAC window ", ha="left",
+                       va="bottom", fontsize=6.5, color="#0f7a54", alpha=0.8,
+                       transform=ax[1].get_yaxis_transform(),
+                       bbox=dict(fc="white", ec="none", alpha=0.7, pad=1.0))
         ax[1].plot(t_d, dist * 10.0, lw=1.0, color="#b3261e")
         ax[1].set_ylabel("warhead–S$\\gamma$ (Å)")
-        ax[1].text(0.995, nac.NAC_DIST_MAX, " attack range", ha="right",
+        # BOXED, because the label sits at the band edge where the trace
+        # spends most of its time -- unboxed it was overprinted by the red line
+        # and read as noise.
+        ax[1].text(0.995, _hi, f" attack ready ≤{_hi:.1f} Å", ha="right",
                    va="bottom", fontsize=7, color="#0f7a54",
-                   transform=ax[1].get_yaxis_transform())
+                   transform=ax[1].get_yaxis_transform(),
+                   bbox=dict(fc="white", ec="none", alpha=0.78, pad=1.0))
     ax[1].set_xlabel("time (ns)")
     for a in ax:
         for s in ("top", "right"):
@@ -175,6 +192,36 @@ def plots(rep: Path, ident: str) -> str:
     fig.tight_layout()
     buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode()
+
+
+
+def _sweep_ps(ident: str, default: float = 1200.0) -> float:
+    """This mode's sweep length, from its own row.
+
+    Falls back to the CONFIG value rather than a literal, and only then to
+    `default` -- so a run whose rows are missing still gets the length the
+    campaign was configured with rather than one from two campaigns ago.
+    """
+    try:
+        import glob as _g
+        import pandas as _pd
+        fs = _g.glob(str(rp.BLACKSMITH / rp.sweep_topic() / "attack_sweep_*.csv"))
+        if fs:
+            d = _pd.concat([_pd.read_csv(f) for f in fs], ignore_index=True)
+            hit = d[d.ident.astype(str) == ident]
+            if len(hit) and _pd.notna(hit.iloc[-1].get("sweep_ps")):
+                return float(hit.iloc[-1]["sweep_ps"])
+    except Exception:                                      # noqa: BLE001
+        pass
+    try:
+        from shared import target_config as _tc
+        v = _tc.get("md.sweep_ps", default=None)
+        if v:
+            return float(v)
+    except Exception:                                      # noqa: BLE001
+        pass
+    return default
+
 
 
 def main() -> None:
@@ -193,9 +240,22 @@ def main() -> None:
 
     wl = pd.read_csv(args.worklist)
     OUT.mkdir(parents=True, exist_ok=True)
-    idents = list(wl.ident.astype(str))[:args.limit]
-    # ident -> pose_rank, so each mode's OWN trajectory is found.
-    prank = dict(zip(wl.ident.astype(str), wl.pose_rank.astype(int))) \
+    # THE MODE IDENT, WHATEVER THE WORKLIST CALLS IT.
+    #
+    # This read `wl.ident`, which in the older worklists WAS `<parent>_m<mode>`.
+    # `sweep_supervisor`'s worklists put the MOLECULE in `ident` and the mode
+    # ident in `task_id`, so every lookup here resolved a molecule instead of a
+    # mode -- and `prank`, keyed on that, collapsed a molecule's several modes
+    # onto whichever pose_rank happened to be last. The symptom was "no
+    # finished run" for all 474 molecules while 16 trajectories sat on disk.
+    #
+    # Prefer `task_id`; fall back to `ident` so the old worklists still work.
+    key = "task_id" if "task_id" in wl.columns else "ident"
+    idents = list(wl[key].astype(str))[:args.limit]
+    # mode ident -> pose_rank, so each mode's OWN trajectory is found. Keyed on
+    # the MODE: keying on the molecule is what #23 was, and it handed every mode
+    # of a molecule the same trajectory.
+    prank = dict(zip(wl[key].astype(str), wl.pose_rank.astype(int))) \
         if "pose_rank" in wl.columns else {}
     n_mov = n_png = 0
     miss: dict = {}
@@ -208,7 +268,7 @@ def main() -> None:
         # WHICH trajectory drew the asset, not merely on the asset existing.
         rep = rep_dir(parent, prank.get(ident))
         if rep is None:
-            miss[parent] = "no finished 10 ns run"
+            miss[parent] = f"no finished {_sweep_ps(ident)/1000:.1f} ns run"
             continue
         # THE STALENESS BUG. Assets built before `rep_dir` took `pose_rank`
         # came from whichever run sorted first, so a multi-mode molecule's
@@ -228,7 +288,15 @@ def main() -> None:
             continue
         try:
             if want_mov and (args.force or stale or not pdb.is_file()):
-                mov.build_movie_pdb(rep, pdb, total_ps=10_000.0)
+                # THE SWEEP'S OWN LENGTH, NOT A LITERAL. This was
+                # `total_ps=10_000.0`, written when the triage sweep was 10 ns.
+                # The triage is 1.2 ns now (config `md.sweep_ps`), so every
+                # movie built for this campaign would have carried a timeline
+                # 8x too long -- frame 100 labelled 6.7 ns when it is 0.8 ns.
+                # A number that was right when written and cannot announce that
+                # it is not: `how_this_project_breaks` disguise #3, the same
+                # shape as the timeout sized for a smaller pool (#19).
+                mov.build_movie_pdb(rep, pdb, total_ps=_sweep_ps(ident))
                 n_mov += 1
             if args.force or args.plots_only or stale or not png.is_file():
                 b64 = plots(rep, ident)

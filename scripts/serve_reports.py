@@ -205,7 +205,16 @@ class MultiRun(NoCache):
             self.wfile.write(body)
             return
         roots = run_roots()
-        if parts[0] in roots and len(parts) == 1:
+        # THE TRAILING SLASH IS THE WHOLE POINT OF THIS BRANCH, AND `_split`
+        # THROWS IT AWAY. `[p for p in path.split("/") if p]` gives the same
+        # `["nac_v8"]` for `/nac_v8` and for `/nac_v8/`, so the redirect that
+        # exists to ADD the slash also fired when the slash was already
+        # present -- pointing at the request's own URL. Browsers follow that
+        # until they give up: ERR_TOO_MANY_REDIRECTS on every run's landing
+        # page, while `/nac_v8/index.html` served fine and every check I ran
+        # used the explicit filename.
+        raw = self.path.split("?", 1)[0].split("#", 1)[0]
+        if parts[0] in roots and len(parts) == 1 and not raw.endswith("/"):
             # A bare run name must gain its trailing slash, or every RELATIVE
             # link inside the run's pages resolves one level too high.
             self.send_response(301)

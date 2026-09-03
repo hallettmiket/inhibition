@@ -131,6 +131,152 @@ def _episodes(ready: np.ndarray) -> list[tuple[int, int]]:
     return out
 
 
+def attack_ready_max_a() -> float:
+    """Upper distance bound for "attack ready", from config.
+
+    NOT `nac.NAC_DIST_MAX`. That is the near-attack WINDOW (4.2 A) and using it
+    here meant a mode whose warhead sat at a trajectory median of 3.6 A scored
+    93% "attack ready" -- true by that definition, and not what the number is
+    read as. The worklist selects modes at < 3.0 A; the readout now agrees with
+    the selection (@twu383, 2026-09-02).
+    """
+    try:
+        from shared import target_config as _tc
+        v = _tc.get("md.attack_ready_max_a", default=None)
+        if v:
+            return float(v)
+    except Exception:                                      # noqa: BLE001
+        pass
+    return float(nac.NAC_DIST_MAX)
+
+
+def _cfg(key: str, default):
+    """One config read, failing to the value that reproduces the old behaviour."""
+    try:
+        from shared import target_config as _tc
+        v = _tc.get(f"md.{key}", default=None)
+        if v is not None:
+            return v
+    except Exception:                                      # noqa: BLE001
+        pass
+    return default
+
+
+def attack_ready_use_angle() -> bool:
+    """Whether the angular criterion is part of "attack ready".
+
+    FALSE since 2026-09-02 (@twu383). Not because the angle is meaningless --
+    it is measured and reported either way -- but because it is not what limits
+    the answer: at a 3.0 A cutoff, adding it moved the count of discriminating
+    modes from 1 to 0. And on a set already selected on distance it is the term
+    D0110 showed is not class-neutral, so gating on it re-weights the campaign
+    towards BDHI for a steric reason rather than a chemical one.
+
+    Defaults TRUE so a caller with no config reproduces the previous numbers.
+    """
+    return bool(_cfg("attack_ready_use_angle", True))
+
+
+def elevation_thresholds() -> dict:
+    """The 100 ns gate, from config. One place, so the GUI cannot drift from it."""
+    return {
+        "occupancy_min": float(_cfg("elevate_occupancy_min", 0.60)),
+        "rmsd_max_a": float(_cfg("elevate_rmsd_max_a", 3.5)),
+        "rmsd_mean_a": float(_cfg("elevate_rmsd_mean_a", 3.0)),
+    }
+
+
+def rmsd_stats(rep: Path) -> dict:
+    """Ligand RMSD over the production run, in ANGSTROM, from `rmsd.xvg`.
+
+    ALREADY ON DISK for every completed sweep -- `attack_sweep` runs `gmx rms`
+    beside the trajectory -- so this is arithmetic over existing files, not a
+    reason to re-simulate anything.
+
+    UNITS ARE THE TRAP. GROMACS writes nm and every threshold the user states is
+    in Angstrom; a missing factor of 10 makes every run pass a 3.5 bar by a mile
+    and reads as a spectacular result. The conversion happens HERE, once, and
+    the columns are named `_a` so a nm value cannot be mistaken for one.
+
+    Returns {} when the file is absent or unparseable -- an ABSENT reading, not
+    a passing one. `elevation_verdict` refuses to elevate on a missing RMSD
+    rather than treating it as zero.
+    """
+    f = Path(rep) / "rmsd.xvg"
+    if not f.is_file():
+        return {}
+    ys = []
+    try:
+        for ln in f.read_text(errors="replace").splitlines():
+            ln = ln.strip()
+            if not ln or ln[0] in "#@":
+                continue
+            parts = ln.split()
+            if len(parts) >= 2:
+                ys.append(float(parts[1]))
+    except (OSError, ValueError):
+        return {}
+    if not ys:
+        return {}
+    a = np.asarray(ys, dtype=float) * 10.0                 # nm -> Angstrom
+    return {
+        "rmsd_max_a": float(a.max()),
+        "rmsd_mean_a": float(a.mean()),
+        "rmsd_median_a": float(np.median(a)),
+        "rmsd_final_a": float(a[-1]),
+        "rmsd_frames": int(a.size),
+    }
+
+
+def elevation_verdict(rec: dict) -> dict:
+    """Does this mode earn a 100 ns run? (@twu383, 2026-09-02.)
+
+    Two independent conditions, BOTH required:
+
+      1. the pose held      -- rmsd_max_a < 3.5 OR rmsd_mean_a < 3.0
+      2. the warhead stayed -- frac_attack_ready >= 0.60 within 3.5 A
+
+    The OR in (1) is the spike allowance the request asked for: a run that
+    touches 4 A briefly and sits low otherwise passes on the mean; one that
+    never exceeds 3.5 passes without it.
+
+    They are separate because they can disagree. Occupancy is about the WARHEAD
+    reaching Cys113; RMSD is about the whole LIGAND staying where it was docked.
+    A molecule can pivot its warhead into place while its scaffold walks off,
+    and a molecule can sit perfectly still facing the wrong way. Either alone
+    would elevate one of those.
+
+    A MISSING READING NEVER ELEVATES. If `rmsd_max_a` is absent the verdict is
+    "unknown", not "pass" -- the failure mode this project keeps producing is a
+    guard that passes because the thing it inspects is not there.
+    """
+    th = elevation_thresholds()
+    occ = rec.get("frac_attack_ready")
+    mx, mn = rec.get("rmsd_max_a"), rec.get("rmsd_mean_a")
+
+    out = {"elevate_occupancy_min": th["occupancy_min"],
+           "elevate_rmsd_max_a": th["rmsd_max_a"],
+           "elevate_rmsd_mean_a": th["rmsd_mean_a"]}
+    if occ is None or mx is None or mn is None:
+        out.update({"elevate": False, "elevate_why": "no reading",
+                    "pose_held": None, "warhead_engaged": None})
+        return out
+
+    held = (float(mx) < th["rmsd_max_a"]) or (float(mn) < th["rmsd_mean_a"])
+    engaged = float(occ) >= th["occupancy_min"]
+    if held and engaged:
+        why = "pass"
+    elif not held and not engaged:
+        why = "pose left and warhead not engaged"
+    elif not held:
+        why = f"pose left (max {float(mx):.2f} A, mean {float(mn):.2f} A)"
+    else:
+        why = f"warhead engaged {float(occ)*100:.0f}% < {th['occupancy_min']*100:.0f}%"
+    out.update({"elevate": bool(held and engaged), "elevate_why": why,
+                "pose_held": bool(held), "warhead_engaged": bool(engaged)})
+    return out
+
+
 def geometry_stats(dist: np.ndarray, angle: np.ndarray, kind: str,
                    frame_ps: float) -> dict:
     """Geometry readings for one trajectory.
@@ -145,8 +291,20 @@ def geometry_stats(dist: np.ndarray, angle: np.ndarray, kind: str,
         # `ready[0]` from deep inside a worker, where it reads as a crash rather
         # than as "there is no trajectory here".
         raise ValueError("empty trajectory: no frames to score")
-    inw = (dist >= nac.NAC_DIST_MIN) & (dist <= nac.NAC_DIST_MAX)
-    ready = inw & competent(angle, kind)
+    # THE FLOOR IS THE PHYSICAL ONE, THE CEILING IS THE CAMPAIGN'S.
+    # Below NAC_DIST_MIN the two atoms overlap (PoseBusters' C...S clash
+    # threshold is 2.625 A), so a closer frame is a clash and not a better
+    # approach. The ceiling comes from config, defaulting to the old window so
+    # a run that does not set it reproduces the previous numbers exactly.
+    hi = attack_ready_max_a()
+    inw = (dist >= nac.NAC_DIST_MIN) & (dist < hi)
+    # DISTANCE ONLY by default since 2026-09-02 (see `attack_ready_use_angle`).
+    # The angular term is still computed and reported as
+    # `frac_attack_ready_angle`, so dropping it from the gate does not drop it
+    # from the record and the two can be compared on any finished run.
+    comp = competent(angle, kind)
+    use_ang = attack_ready_use_angle()
+    ready = (inw & comp) if use_ang else inw
     # An excursion is a rising edge: not-ready -> ready. The first frame counts
     # as a visit if it is already ready, otherwise a pose that starts competent
     # and never leaves would be recorded as zero visits.
@@ -166,6 +324,20 @@ def geometry_stats(dist: np.ndarray, angle: np.ndarray, kind: str,
         "frame_ps": float(frame_ps),
         "median_episode_ps": float(np.median([ln for _, ln in eps]) * frame_ps)
                              if eps else 0.0,
+        # STAMPED ON EVERY ROW, so a `frac_attack_ready` computed under one
+        # definition can never be silently compared with one computed under
+        # another. This is the column that says what the number means.
+        "attack_ready_max_a": float(hi),
+        "attack_ready_min_a": float(nac.NAC_DIST_MIN),
+        "attack_ready_angle_deg": float(nac.PERPENDICULAR_MAX_OFF_NORMAL),
+        # WHICH DEFINITION PRODUCED THE NUMBER, on the row itself. Without this
+        # a distance-only fraction and a distance+angle one are two plausible
+        # floats in the same column -- the exact shape this project keeps being
+        # bitten by.
+        "attack_ready_uses_angle": bool(use_ang),
+        # The other definition, always measured. Free, and it is what makes the
+        # choice reviewable later without re-reading 4,000 trajectories.
+        "frac_attack_ready_angle": float((inw & comp).mean()),
         "start_dist_a": float(dist[0]),
         "start_angle_deg": float(angle[0]),
         "start_attack_ready": bool(ready[0]),
@@ -649,10 +821,18 @@ def main() -> None:
         n_fr = max(1, len(s["dist"]))
         rec.update(geometry_stats(s["dist"], s["angle"], s["kind"],
                                   frame_ps=float(args.sweep_ps) / n_fr))
+        # POSE STABILITY, from the `rmsd.xvg` this sweep already wrote. Half of
+        # the 100 ns gate, and it costs a file read -- computing it here rather
+        # than at elevation time means the verdict travels with the row instead
+        # of being re-derived by whoever reads it next.
+        rec.update(rmsd_stats(rep))
+        rec.update(elevation_verdict(rec))
         rows.append(rec)
-        log.info("%s: attack-ready %.3f over %d visits (start ready=%s)",
-                 cand, rec["frac_attack_ready"], rec["n_visits"],
-                 rec["start_attack_ready"])
+        log.info("%s: engaged %.1f%% within %.1f A, rmsd max %s mean %s -> %s",
+                 cand, rec["frac_attack_ready"] * 100, attack_ready_max_a(),
+                 f"{rec['rmsd_max_a']:.2f}" if "rmsd_max_a" in rec else "?",
+                 f"{rec['rmsd_mean_a']:.2f}" if "rmsd_mean_a" in rec else "?",
+                 "ELEVATE" if rec.get("elevate") else rec.get("elevate_why"))
 
     t = pd.DataFrame(rows)
     ok = t[t.status == "ok"] if "status" in t.columns else t

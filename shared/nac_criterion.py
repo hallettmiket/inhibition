@@ -75,6 +75,35 @@ log = logging.getLogger(__name__)
 NAC_DIST_MIN = 2.8
 NAC_DIST_MAX = 4.2
 
+
+def attack_ready_window() -> tuple[float, float]:
+    """The band a trajectory must sit in to count as engaged: (lo, hi) in A.
+
+    DISTINCT FROM THE NAC WINDOW ABOVE, deliberately. `NAC_DIST_MIN` ..
+    `NAC_DIST_MAX` (2.8-4.2 A) is the near-attack criterion the SCREEN scores
+    poses with, and it is unchanged. This is the narrower bar the 1.2 ns sweep
+    is judged against -- 2.8 to `md.attack_ready_max_a`, 3.5 A since D0111.
+
+    IT EXISTS SO THE PLOTS CANNOT DISAGREE WITH THE GATE. The RMSD/distance
+    figure, the 3Dmol viewer's "in attack window" readout and the elevation
+    decision each had their own copy of the upper bound, and two of them said
+    4.2 while the gate said 3.5 -- a green zone that a mode could sit inside
+    while failing the criterion the same page ranked it on.
+
+    The floor stays `NAC_DIST_MIN`: below it the two atoms overlap
+    (PoseBusters' C...S clash threshold is 2.625 A), so a closer frame is a
+    clash rather than a better approach.
+    """
+    hi = NAC_DIST_MAX
+    try:
+        from shared import target_config as _tc
+        v = _tc.get("md.attack_ready_max_a", default=None)
+        if v:
+            hi = float(v)
+    except Exception:                                      # noqa: BLE001
+        pass
+    return float(NAC_DIST_MIN), float(hi)
+
 # SN2 at sp3 carbon: backside attack, collinear with the C-LG bond. 180 deg is
 # ideal; 150 deg is the generous end of what is usually accepted as near-attack.
 # Deliberately generous -- a criterion that is too strict cannot be

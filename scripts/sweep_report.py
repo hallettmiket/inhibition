@@ -117,7 +117,21 @@ def main() -> None:
             # is coloured and fitted identically -- it lives in
             # scripts/elevation_report, which is where mdprio_report gets it.
             import elevation_report as er
-            pdb_txt, dsg, labels, lpos = er.surface_payload(pdb)
+            import mdprio_report as mp
+            import sweep_assets as sa
+            # THE REACTIVE ATOM COMES FROM THE MOLECULE, not from an atom name.
+            # `pose_rank` is on the sweep row, so the trajectory this movie was
+            # built from is resolvable without guessing a sibling directory.
+            _parent = ident.rsplit("_m", 1)[0]
+            _pr = s.get("pose_rank")
+            _rep = sa.rep_dir(_parent, None if pd.isna(_pr) else int(_pr))
+            _ra = mp.reactive_atom(_parent, _rep) if _rep is not None else None
+            if _ra is None:
+                raise ValueError(
+                    f"{ident}: cannot resolve the reactive atom; refusing to "
+                    f"label an arbitrary atom as the warhead")
+            pdb_txt, dsg, labels, lpos = er.surface_payload(
+                pdb, reactive_idx=_ra["heavy_idx"])
             three = (REPO / "scripts/.cache_3dmol-min.js").read_text()
             movie_block = mov.viewer_html(pdb_txt, dsg, labels, lpos, three)
         except Exception as exc:                           # noqa: BLE001

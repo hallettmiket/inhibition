@@ -537,6 +537,76 @@ md:
   # down at the 0.5 bar), and past 10 ns the curve declines on sweep cost alone.
   # The exchange rate is why the gate should be generous rather than short: one
   # 100 ns run costs as much as 66 ns of sweeping one mode.
+  # WHAT "ATTACK READY" MEANS IN A SWEEP FRAME (@twu383, 2026-09-02:
+  # "we need to clearly establish that attack ready means within angle and
+  # under 3 A at any time").
+  #
+  # It used `nac_criterion.NAC_DIST_MAX` = 4.2 A, the near-attack WINDOW, so a
+  # mode sitting at a trajectory median of 3.6 A scored 93% attack-ready -- true
+  # by that definition and not what anyone reading the number assumed. The
+  # worklist selects on < 3.0 A and the readout accepted up to 4.2, so the two
+  # halves of the same campaign meant different things by "close".
+  #
+  # THE FLOOR IS UNCHANGED at `NAC_DIST_MIN` (2.8 A). Removing it would count a
+  # clash as attack-ready: PoseBusters' own C...S clash threshold is 2.625 A,
+  # below the window floor, so anything under 2.8 is closer than the two atoms
+  # can sit without overlapping. "Under 3 A" therefore means 2.8 <= d < 3.0.
+  #
+  # Rows carry `attack_ready_max_a` so a number computed under one definition is
+  # never compared with one computed under the other.
+  #
+  # SETTLED AT 3.5 A, DISTANCE ONLY (@twu383, 2026-09-02, "okay 3.5 then").
+  # Measured over the first 93 completed 1.2 ns sweeps before choosing:
+  #
+  #   cutoff   modes >1% ready (distance only)   (distance + angle)
+  #     3.0            1 / 93                       0 / 93
+  #     3.2           15 / 93                       7 / 93
+  #     3.4           39 / 93                      31 / 93
+  #     3.6           64 / 93                      46 / 93
+  #     4.2           78 / 93                      58 / 93
+  #
+  # THE ANGLE TERM WAS DROPPED because it is not what limits the answer here:
+  # at 3.0 A it moves the count from 1 to 0. The distance is the binding
+  # constraint -- median closest approach across the 93 is 3.37 A -- so gating
+  # on the angle as well removes modes without changing the conclusion, and it
+  # is the term D0110 showed is NOT class-neutral on a distance-selected set
+  # (BDHI's off-normal collapses to 9 deg inside 3 A by sterics, acrylamide's
+  # does not). The angle is still MEASURED and reported as
+  # `frac_attack_ready_angle` beside it -- dropped from the gate, not from the
+  # record.
+  attack_ready_max_a: 3.5
+  attack_ready_use_angle: false
+
+  # ELEVATION TO 100 ns (@twu383, 2026-09-02):
+  #   "<3.5 max RMSD or mean RMSD 3.0 (need to account for quick spikes but
+  #    overall low rmsd) + 60%+ warhead within 3.5 A goes to 100 ns"
+  #
+  # Two independent things must both hold. They are independent on purpose:
+  # occupancy says the WARHEAD stayed in reach of Cys113; RMSD says the whole
+  # LIGAND stayed put. A molecule can pivot its warhead into place while the
+  # scaffold walks away, and it can sit rock-still in the wrong orientation.
+  #
+  #   1. POSE STABILITY, either of:
+  #        rmsd_max_a  < 3.5   -- never spikes
+  #        rmsd_mean_a < 3.0   -- spikes, but returns; "overall low rmsd"
+  #      The OR is the spike allowance: a run that touches 4 A for 20 ps and
+  #      sits at 2 A otherwise passes on the mean, and one that never exceeds
+  #      3.5 passes without needing the mean. 3.5 A = 0.35 nm, the same bar the
+  #      triage sweep has used since D0087.
+  #   2. ENGAGEMENT: frac_attack_ready >= 0.60 -- the warhead within 3.5 A for
+  #      at least 60% of the production run. "At any time" was rejected: a
+  #      single qualifying frame out of 121 is noise, and 2 of the 3 modes that
+  #      ever reached 3.0 A did so for exactly one frame.
+  #
+  # NOT YET REACHED BY ANYTHING. Over the 93 sweeps finished when this was
+  # written the best occupancy at 3.5 A is 0.339 and the median is 0.017, so
+  # this gate currently elevates ZERO modes. That is a real reading of 2% of
+  # the campaign, not a calibration -- the bar was set from the chemistry, and
+  # whether anything clears it is the experiment.
+  elevate_occupancy_min: 0.60
+  elevate_rmsd_max_a: 3.5
+  elevate_rmsd_mean_a: 3.0
+
   # TRIAGE LENGTH: 5 ns (@tt8804, 2026-08-19), down from 8. See D0087.
   #
   # SAFE IN THE DIRECTION THAT MATTERS. D0085 measured the optimum as a PLATEAU

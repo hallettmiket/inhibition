@@ -377,8 +377,71 @@ def build_workdir(smiles: str, pose: Path, wd: Path, *,
     for f in ("ligand.mol2", "ligand.frcmod", "receptor_cys.pdb"):
         if not (wd / f).is_file():
             raise ResidenceError(f"workdir incomplete: missing {f}")
+
+    # THE MOL2 MUST HOLD THE POSE WE ASKED FOR.
+    #
+    # `tleap` takes the ligand's starting COORDINATES from `ligand.mol2`
+    # (`LIG = loadmol2`), and antechamber writes that mol2 from whatever SDF it
+    # was handed. So anything that supplies a mol2 from elsewhere -- a cache
+    # keyed on the molecule rather than the pose, a stale workdir, a copied
+    # directory -- starts the simulation from a DIFFERENT pose of the right
+    # molecule and reports a perfectly plausible stability for it.
+    #
+    # Nothing checked this. It is checked now, cheaply, against the SDF this
+    # build was given, because the failure is silent by construction: both
+    # poses are real, both are of this molecule, and every downstream artefact
+    # would look normal.
+    _assert_mol2_matches_pose(wd / "ligand.mol2", sdf)
     log.info("  parameterised: %s, %s", mol2.name, frcmod.name)
     return wd
+
+
+def _assert_mol2_matches_pose(mol2: Path, sdf: Path, tol_a: float = 0.05) -> None:
+    """Heavy-atom coordinates in the mol2 must be the pose's, within `tol_a`.
+
+    Compared as SORTED coordinate rows rather than by atom index: antechamber
+    may reorder atoms, and an index-wise comparison would fail for a correct
+    build. What must hold is that the SET of heavy-atom positions is the pose's.
+
+    Raises rather than warning. A wrong pose here is not a degraded result, it
+    is a different experiment wearing this one's name.
+    """
+    from rdkit import Chem as _Chem
+    import numpy as _np
+
+    mols = [m for m in _Chem.SDMolSupplier(str(sdf), removeHs=False) if m]
+    if not mols:
+        raise ResidenceError(f"cannot verify pose: no molecule in {sdf.name}")
+    conf = mols[0].GetConformer()
+    want = _np.array([[conf.GetAtomPosition(i).x, conf.GetAtomPosition(i).y,
+                       conf.GetAtomPosition(i).z]
+                      for i, a in enumerate(mols[0].GetAtoms())
+                      if a.GetAtomicNum() > 1])
+
+    got, in_atoms = [], False
+    for ln in mol2.read_text(errors="replace").splitlines():
+        if ln.startswith("@<TRIPOS>ATOM"):
+            in_atoms = True; continue
+        if ln.startswith("@<TRIPOS>"):
+            in_atoms = False; continue
+        if in_atoms and len(ln.split()) >= 6:
+            f = ln.split()
+            if not f[5].upper().startswith("H"):          # gaff2 type, not element
+                got.append([float(f[2]), float(f[3]), float(f[4])])
+    got = _np.array(got)
+
+    if len(got) != len(want):
+        raise ResidenceError(
+            f"{mol2.name} has {len(got)} heavy atoms, the pose {sdf.name} has "
+            f"{len(want)} — the mol2 was not built from this pose")
+    a = want[_np.lexsort(want.T)]
+    b = got[_np.lexsort(got.T)]
+    worst = float(_np.abs(a - b).max())
+    if worst > tol_a:
+        raise ResidenceError(
+            f"{mol2.name} coordinates differ from {sdf.name} by up to "
+            f"{worst:.2f} A — the simulation would start from a DIFFERENT pose "
+            f"of this molecule than the one requested. Refusing to run.")
 
 
 def measure_residence(rep_wd: Path) -> dict:

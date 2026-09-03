@@ -162,8 +162,17 @@ def gather() -> pd.DataFrame:
     sweep = (pd.concat([pd.read_csv(x) for x in sf], ignore_index=True)
              .drop_duplicates("ident", keep="last") if sf else pd.DataFrame())
     if not sweep.empty:
+        # THE GATE'S OWN COLUMNS TRAVEL WITH THE READING. Without them this page
+        # shows a bare "% ready" whose threshold the reader has to guess, beside
+        # a sweep page that states it -- and the two definitions in play differ
+        # by 4.2 vs 3.5 A (D0111). `attack_ready_max_a` is what makes the number
+        # self-describing; `elevate`/`pose_held` are the verdict the 1.2 ns run
+        # exists to produce.
         keep = [c for c in ("ident", "parent_ident", "mode", "frac_attack_ready",
-                            "n_visits", "status") if c in sweep.columns]
+                            "n_visits", "status", "attack_ready_max_a",
+                            "rmsd_max_a", "rmsd_mean_a", "elevate",
+                            "pose_held", "warhead_engaged")
+                if c in sweep.columns]
         # ATTEMPTED is not SUCCEEDED. A row exists for every mode sent;
         # frac_attack_ready is null when the run failed. Counting only the
         # successful ones as "swept" would report a mode that was tried and
@@ -192,6 +201,68 @@ def gather() -> pd.DataFrame:
         r = mk.join(r, sw.drop(columns=[c for c in ("parent_ident", "mode")
                                         if c in sw.columns]),
                     suffixes=("", "_sw"))
+
+    # ---- THE CRITERIA THE SWEEP IS ACTUALLY SELECTED ON --------------------
+    #
+    # @twu383, 2026-09-02: "the ranking gui still shows these old parameters
+    # when now we are just doing basic distance and angle".
+    #
+    # The rail carried `viable_fraction`, `enrichment`, `conditional_eb`,
+    # `spread` and `dir_coherence` -- the docking-era aggregates -- and NOT the
+    # warhead-SG distance or the off-normal angle, which are what put a mode in
+    # the sweep worklist. A page whose facts are all quantities nobody selects
+    # on invites the reader to think they are the ones that matter.
+    #
+    # These come from the PER-POSE table, medianed over the mode's analysed
+    # poses -- the same basis the worklist used, so the number on the page is
+    # the number the selection saw.
+    r["median_dist_a"] = pd.NA
+    r["median_angle_deg"] = pd.NA
+    pf = sorted(glob.glob(str(_rp().BLACKSMITH / _rp().topic() / "poses_s*.csv")))
+    if pf:
+        try:
+            pp = pd.concat([pd.read_csv(x, usecols=["ident", "mode", "distance",
+                                                    "angle", "pb_kept"])
+                            for x in pf], ignore_index=True)
+            pp = pp[pp.pb_kept]
+            g = (pp.groupby(["ident", "mode"])
+                   .agg(median_dist_a=("distance", "median"),
+                        median_angle_deg=("angle", "median")).reset_index()
+                   .rename(columns={"ident": "parent_ident"}))
+            r = r.drop(columns=["median_dist_a", "median_angle_deg"]).merge(
+                g, on=["parent_ident", "mode"], how="left")
+        except Exception as exc:                          # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "per-mode distance/angle unavailable (%s); the rail will show "
+                "them as missing rather than as something else", exc)
+
+    # WHICH MODES ARE IN THE SWEEP WORKLIST. "never sent" is true of 99.99% of
+    # modes and says nothing; what a reader needs is whether this mode was
+    # CHOSEN and is waiting, or was never in scope at all.
+    r["queued"] = False
+    wl = sorted(glob.glob(str(_rp().BLACKSMITH /
+                              f"sweep_worklist_{_rp().topic()}" /
+                              "worklist_*.csv")))
+    if wl:
+        try:
+            _cols = ["ident", "mode"] + (
+                ["seq"] if "seq" in pd.read_csv(wl[-1], nrows=0).columns else [])
+            w = pd.read_csv(wl[-1], usecols=_cols).rename(
+                columns={"ident": "parent_ident", "seq": "_seq"})
+            w["_q"] = True
+            r = r.drop(columns=["queued"]).merge(
+                w, on=["parent_ident", "mode"], how="left")
+            r["queued"] = r.pop("_q").fillna(False).astype(bool)
+            # THE WORKLIST'S OWN ORDER. The page ranks on `engagement`, but the
+            # sweep is selected and run in worklist order -- so a reader looking
+            # for "what is being worked on" was shown, at the top, the modes
+            # that were DROPPED. @twu383: "I dont want to see mols that are
+            # being dropped ... or at least dont want to see them first".
+            r["wl_seq"] = r["_seq"] if "_seq" in r.columns else pd.NA
+            if "_seq" in r.columns:
+                r = r.drop(columns=["_seq"])
+        except Exception as exc:                          # noqa: BLE001
+            logging.getLogger(__name__).warning("worklist unreadable (%s)", exc)
 
     md_ids: set[str] = set()
     for f in glob.glob(str(_rp().residence_dir() / "*.csv")):
@@ -289,7 +360,18 @@ def _rows_json(r: pd.DataFrame) -> str:
             "sc": num("_score", 3),
             "eb": num("conditional_eb", 3), "en": num("enrichment", 2),
             "sp": num("spread_a", 2), "dc": num("dir_coherence", 3),
+            # THE SELECTION CRITERIA, on the same basis the worklist used.
+            "md": num("median_dist_a", 2), "ma": num("median_angle_deg", 1),
+            "q": bool(x.get("queued", False)), "sq": num("wl_seq"),
             "fa": num("frac_attack_ready", 4), "s": st,
+            # The gate, so the rail can say what the sweep decided rather than
+            # only how it scored.
+            "arx": num("attack_ready_max_a", 2),
+            "rmx": num("rmsd_max_a", 2), "rmn": num("rmsd_mean_a", 2),
+            "ev": (None if pd.isna(x.get("elevate"))
+                   else bool(x.get("elevate"))),
+            "ph": (None if pd.isna(x.get("pose_held"))
+                   else bool(x.get("pose_held"))),
             # `mode_label` is 1a / 1b when a first-stage mode was subdivided
             # (#61) and a plain number otherwise. Absent on every frame screened
             # before sub-splitting existed, so it falls back to the number.
@@ -464,6 +546,20 @@ __STEPCSS__
  <span class="msep"></span>
  <select id="scope" onchange="setScope(this.value)"
    title="rank within one warhead class, within every class, or across all of them"></select>
+ <span class="msep"></span>
+ <!-- 132,027 modes and 4,295 of them queued: without this the selected set is
+      unfindable, and every mode a reader happens to click says "never sent". -->
+ <select id="stage" onchange="setStage(this.value)"
+   title="show every mode, only those chosen for the 1.2 ns sweep, or only those with a result">
+   <option value="queued">in the sweep worklist</option>
+   <option value="swept">swept — has a result</option>
+   <option value="all">all modes (including dropped)</option>
+ </select>
+ <select id="order" onchange="setOrder(this.value)"
+   title="worklist order is the order the sweep will actually run them">
+   <option value="worklist">worklist order</option>
+   <option value="score">score order</option>
+ </select>
  <span class="mhint" id="mhint"></span>
  <span class="msep"></span>
  <a class="mbtn lnk" href="pipeline.html" title="how a molecule becomes a row">how this works &#8599;</a>
@@ -575,6 +671,8 @@ function carbonScheme(col){
   return {prop:'elem',
           map: Object.assign({}, (M.elementColors||{}).defaultColors||{}, {C: col})};
 }
+let STAGE = 'queued';     // dropped modes are not what anyone opens this for
+let ORDER = 'worklist';
 // SCOPE is one control: a warhead class name, '*' for every class ranked within
 // itself, or '__global__' for one order across all of them. Two orthogonal
 // toggles let a reader combine "global" with a class filter, which is a
@@ -628,12 +726,45 @@ function matches(x){
   const id = x.p + '_m' + x.m;
   return (id + ' ' + x.c + ' ' + (x.ml || '')).toLowerCase().indexOf(QUERY) !== -1;
 }
+function restoreStage(){
+  // The GUI is rebuilt every few minutes while the campaign runs; a filter that
+  // reset on every rebuild would be unusable.
+  try {
+    const v = localStorage.getItem('modes.stage');
+    if (v) { STAGE = v; const el = document.getElementById('stage');
+             if (el) el.value = v; }
+    const o = localStorage.getItem('modes.order');
+    if (o) { ORDER = o; const el2 = document.getElementById('order');
+             if (el2) el2.value = o; }
+  } catch (e) {}
+}
+function setOrder(v){
+  ORDER = v;
+  try { localStorage.setItem('modes.order', v); } catch (e) {}
+  render();
+}
+function setStage(v){
+  STAGE = v;
+  try { localStorage.setItem('modes.stage', v); } catch (e) {}
+  render();
+}
 function visible(){
   let r = ROWS.slice();
   if (SCOPE !== '*' && !isGlobal()) r = r.filter(x => x.c === SCOPE);
+  // STAGE is independent of SCOPE: "which modes are in play" is a different
+  // question from "which class am I ranking within".
+  if (STAGE === 'queued') r = r.filter(x => x.q);
+  else if (STAGE === 'swept') r = r.filter(x => x.fa !== null);
   if (QUERY) r = r.filter(matches);
   const K = x => (x === null || x === undefined) ? 1e9 : x;   // unranked sorts last
-  if (isGlobal()) r.sort((a,b) => K(a.gr) - K(b.gr));
+  if (ORDER === 'worklist'){
+    // QUEUED FIRST, IN THE ORDER THEY WILL BE RUN. Modes not in the worklist
+    // keep their score order but sit after everything queued, so the top of
+    // the page is what the campaign is actually working on.
+    r.sort((a,b) => (b.q?1:0) - (a.q?1:0)
+                 || K(a.sq) - K(b.sq)
+                 || a.c.localeCompare(b.c) || K(a.cr) - K(b.cr));
+  } else if (isGlobal()) r.sort((a,b) => K(a.gr) - K(b.gr));
   else r.sort((a,b) => a.c.localeCompare(b.c) || K(a.cr) - K(b.cr));
   return r;
 }
@@ -828,14 +959,30 @@ async function pick(id){
     ['class rank', x.cr === null ? 'unranked' : x.cr],
     ['global rank', x.gr === null ? '—' : x.gr],
     ['poses in mode', x.n === null ? '—' : x.n + ' of ' + (x.np === null ? '?' : x.np)],
+    // THE TWO CRITERIA THE SWEEP IS SELECTED ON, FIRST. The list is still
+    // ORDERED by SCORE_NAME, and that is stated -- but a reader asking "why is
+    // this mode queued and that one not" needs distance and angle, which the
+    // rail did not carry at all.
+    ['warhead–SG distance', x.md === null ? '—' : x.md.toFixed(2) + ' Å'],
+    ['off-normal angle', x.ma === null ? '—' : x.ma.toFixed(1) + '°'],
+    ['in sweep worklist', x.q ? 'yes' : 'no'],
+    [SCORE_NAME + ' (ranks this list)', fmt(x.sc, 3)],
     ['viable fraction', x.vf === null ? '—' : (x.vf*100).toFixed(1) + '%'],
     ['enrichment', fmt(x.en, 2)],
-    [SCORE_NAME + ' (ranks this list)', fmt(x.sc, 3)],
-    ['conditional_eb', fmt(x.eb, 3)],
-    ['spread', fmt(x.sp, 2) + ' Å'],
-    ['direction coherence', fmt(x.dc, 3)],
-    ['__SWEEPLABEL__ sweep', x.fa === null ? (x.s === 'none' ? 'never sent' : 'no score')
-                                  : (x.fa*100).toFixed(1) + '% ready'],
+    // THE NUMBER CARRIES ITS OWN THRESHOLD. "42% ready" meant one thing under
+    // the 4.2 A window and another under the 3.5 A bar the campaign now uses,
+    // and a bare percentage cannot tell you which produced it (D0111).
+    ['__SWEEPLABEL__ sweep' + (x.arx !== null ? ' — warhead within ' + x.arx.toFixed(1) + ' Å' : ''),
+       x.fa !== null ? (x.fa*100).toFixed(1) + '% of the run'
+       : (x.s !== 'none' ? 'no score'
+       : (x.q ? 'queued — not run yet' : 'not in the worklist'))],
+    ['ligand RMSD (max / mean)',
+       x.rmx !== null ? x.rmx.toFixed(2) + ' / ' + (x.rmn === null ? '—' : x.rmn.toFixed(2)) + ' Å' : '—'],
+    ['100 ns gate',
+       x.ev === null ? '—'
+       : (x.ev ? 'ELEVATE'
+       : (x.ph === false ? 'no — pose left the site'
+                         : 'no — under the engagement bar'))],
   ].map(kv => '<div class="fact"><b>' + kv[1] + '</b><span>' + kv[0] + '</span></div>').join('');
 
   const g = document.getElementById('gwarn');
@@ -1034,6 +1181,7 @@ document.getElementById('c-surf').addEventListener('change', function(){ if (SEL
   }, {passive: true});
   window.addEventListener('resize', function(){ renderRail(); });
 })();
+restoreStage();
 buildScope();
 railHTML();
 // The rail's clientHeight is 0 until layout settles, so the first window would

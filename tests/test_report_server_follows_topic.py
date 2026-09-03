@@ -23,6 +23,7 @@ tested directly with the topic faked at the `run_paths` boundary.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import sys
 from pathlib import Path
 
@@ -222,3 +223,33 @@ def test_the_chooser_is_generated_not_stored(m):
     src = inspect.getsource(m.MultiRun.do_GET)
     assert "_chooser_html()" in src, \
         "the chooser must be produced per request, not read from a file"
+
+
+def test_a_run_landing_url_does_not_redirect_to_itself():
+    """`/nac_v8/` must serve the page, not 301 to `/nac_v8/`.
+
+    THE DEFECT (2026-09-02). `MultiRun._split` drops empty path segments, so
+    `/nac_v8` and `/nac_v8/` both reduce to `["nac_v8"]`. The branch that exists
+    to ADD a trailing slash therefore fired when the slash was already there and
+    redirected to the request's own URL -- ERR_TOO_MANY_REDIRECTS on every run's
+    landing page, reported by @twu383.
+
+    It survived my verification because I only ever fetched
+    `/<run>/index.html`, which never enters that branch. The URL a person types
+    is the one that has to be tested.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "serve_reports_redirect", REPO / "scripts" / "serve_reports.py")
+    m = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = m
+    spec.loader.exec_module(m)
+
+    src = inspect.getsource(m.MultiRun.do_GET)
+    assert "endswith" in src, (
+        "MultiRun.do_GET no longer distinguishes `/run` from `/run/`; the "
+        "trailing-slash redirect can point at its own URL again")
+    # and the branch must be guarded by the RAW path, not the split parts
+    assert "raw" in src and "self.path" in src, (
+        "the trailing-slash test is not reading the raw request path, so it "
+        "cannot tell `/run` from `/run/`")

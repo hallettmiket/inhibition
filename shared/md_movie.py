@@ -160,7 +160,8 @@ SURF_SHELL_A = 14
 
 
 def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
-                three_js: str, nac_lo: float = 2.8, nac_hi: float = 4.2,
+                three_js: str, nac_lo: float | None = None,
+                nac_hi: float | None = None,
                 elem_id: str = "gl") -> str:
     """A self-contained 3Dmol block: surface, charge colouring, labels, slider.
 
@@ -170,6 +171,16 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
     sliders drive the first movie and the rest are inert. The shortlist report
     puts four viewers on one page, so the ids have to be unique per viewer.
     """
+    # THE BAND COMES FROM THE GATE, not from defaults in this signature.
+    # `nac_lo=2.8, nac_hi=4.2` were keyword defaults no caller ever overrode --
+    # a pin that could not announce itself (catalogue #32/#35) -- so the viewer
+    # said "(in attack window)" for a pose at 4.0 A that the sweep page scored
+    # as not engaged. Passing an explicit value still works; passing nothing now
+    # means "ask the criterion" rather than "assume the screen's window".
+    from shared import nac_criterion as _nac
+    _dlo, _dhi = _nac.attack_ready_window()
+    _lo = _dlo if nac_lo is None else float(nac_lo)
+    _hi = _dhi if nac_hi is None else float(nac_hi)
     return f"""
 <div class="glwrap">
   <div class="glbox"><div id="{elem_id}"></div></div>
@@ -191,7 +202,7 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
   const M = window.$3Dmol || window['3Dmol'];
   const DSG = {json.dumps(dist)}, LABELS = {json.dumps(labels)},
         LPOS = {json.dumps(positions)};
-  const LO = {nac_lo}, HI = {nac_hi};
+  const LO = {_lo}, HI = {_hi};
   const box = document.getElementById('{elem_id}');
   const raw = document.getElementById('pdbdata-{elem_id}').textContent;
   let viewer = null, frame = 0, timer = null, surf = null, surfFrame = -1;
@@ -280,7 +291,7 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
       document.getElementById('{elem_id}-ftxt').textContent =
         frame + ' / ' + (DSG.length - 1) + '   warhead\\u2192SG ' +
         (d == null ? '\\u2014' : d.toFixed(2) + ' \\u00c5' +
-          (d >= LO && d <= HI ? '  (in attack window)' : ''));
+          (d >= LO && d < HI ? '  (attack ready)' : ''));
       viewer.render();
     }});
   }}

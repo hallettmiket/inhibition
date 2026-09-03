@@ -87,6 +87,13 @@ ROW_CSS = """\
    accent and a monospace badge instead of a structure thumbnail, because the
    thing to notice is where they land in the ranking, not what they look like. */
 .t-ctl{background:#fdf0dc;color:#8a5a00}
+/* A mode that CLEARS the 100 ns gate. Distinct from `.ctl` (a control) and
+   from `.left` (departed) because it is the only class that means "act on
+   this" -- the rail is otherwise an ordering, not a verdict. */
+.row.pass{background:#f2fbf4;box-shadow:inset 3px 0 0 #2e9e57}
+.row.pass:hover{background:#e6f7ec}
+:root[data-theme="dark"] .row.pass{background:#121c15}
+:root[data-theme="dark"] .row.pass:hover{background:#17241b}
 .row.ctl{background:#fffaf2;box-shadow:inset 3px 0 0 #d99a2b}
 .row.ctl:hover{background:#fdf3e4}
 .thumb.tctl{display:flex;align-items:center;justify-content:center;

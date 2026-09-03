@@ -132,15 +132,70 @@ def parameterize_ligand(pose_sdf: Path, workdir: Path,
     silently redistributes a whole electron across the molecule.
     """
     mol2 = workdir / "ligand.mol2"
-    mg._run([mg._amber("antechamber"),
-             "-i", str(pose_sdf), "-fi", "sdf",
-             "-o", str(mol2), "-fo", "mol2",
-             "-c", "bcc", "-nc", str(int(net_charge)), "-s", "2",
-             "-at", "gaff2", "-pf", "y"],
-            workdir, "antechamber.log", timeout=3600)
+
+    # ---- AM1-BCC CHARGES ARE CACHED PER MOLECULE; COORDINATES NEVER ARE ----
+    #
+    # MEASURED 2026-09-02: this call is 98-134 s of a 256-286 s sweep, ~40%.
+    # It runs once per (molecule, MODE) and the campaign has ~9 modes per
+    # molecule, so the AM1 semi-empirical step is being redone ~9x for an
+    # answer that does not depend on which mode is being simulated.
+    #
+    # WHAT IS SAFE TO REUSE AND WHAT IS NOT. `tleap` takes the ligand's
+    # starting COORDINATES from this mol2 (`LIG = loadmol2`), so caching the
+    # mol2 itself would start every mode of a molecule from whichever mode
+    # populated the cache -- a different pose of the right molecule, silently,
+    # with a plausible stability reported for it. Only the CHARGES are reused:
+    # `-c rc` reads them from a file while the geometry still comes from THIS
+    # pose's SDF.
+    #
+    # THE KEY IS THE MOLECULE'S IDENTITY AND ITS CHARGE STATE, and what it
+    # omits is stated because this repo has been bitten five times by caches
+    # keyed on less than their inputs (catalogue 8, 9, 18, 22, and the
+    # `lru_cache` on nothing at all). It omits the CONFORMER, deliberately:
+    # AM1-BCC charges are conformation-dependent in principle, and reusing one
+    # conformer's charges across a molecule's poses is the standard practice
+    # this trades a second-order effect for a 40% saving. It does NOT omit the
+    # net charge, which changes the charges outright.
+    #
+    # And the element sequence is verified on every hit, because a charge file
+    # is a bare list in atom order: if the order differed, every atom would get
+    # someone else's charge and nothing would raise.
+    key = _charge_cache_key(pose_sdf, net_charge)
+    cached = _charge_cache_dir() / key
+    charges = cached / "charges.dat"
+    elements = cached / "elements.txt"
+    want_elems = _element_sequence(pose_sdf)
+
+    hit = (charges.is_file() and elements.is_file()
+           and elements.read_text().split() == want_elems)
+    if hit:
+        log.info("charges from cache %s (skipping AM1-BCC)", key[:12])
+        mg._run([mg._amber("antechamber"),
+                 "-i", str(pose_sdf), "-fi", "sdf",
+                 "-o", str(mol2), "-fo", "mol2",
+                 "-c", "rc", "-cf", str(charges),
+                 "-nc", str(int(net_charge)), "-s", "2",
+                 "-at", "gaff2", "-pf", "y"],
+                workdir, "antechamber.log", timeout=3600)
+    else:
+        if elements.is_file():
+            log.warning("charge cache %s has a different atom order; "
+                        "recomputing rather than mis-assigning", key[:12])
+        mg._run([mg._amber("antechamber"),
+                 "-i", str(pose_sdf), "-fi", "sdf",
+                 "-o", str(mol2), "-fo", "mol2",
+                 "-c", "bcc", "-nc", str(int(net_charge)), "-s", "2",
+                 "-at", "gaff2", "-pf", "y"],
+                workdir, "antechamber.log", timeout=3600)
     if not mol2.is_file() or mol2.stat().st_size == 0:
         raise mg.MMGBSAError(
             f"antechamber produced no mol2; see {workdir/'antechamber.log'}")
+
+    if not hit:
+        # Populate the cache only from a real AM1-BCC run, never from a `-c rc`
+        # one -- that would re-store the charges it just read, and a corrupted
+        # entry would then look self-consistent forever.
+        _store_charges(mol2, pose_sdf, net_charge)
 
     frcmod = workdir / "ligand.frcmod"
     mg._run([mg._amber("parmchk2"), "-i", str(mol2), "-f", "mol2",
@@ -148,6 +203,61 @@ def parameterize_ligand(pose_sdf: Path, workdir: Path,
             workdir, "parmchk2.log")
     log.info("ligand parameterised (non-covalent), net charge %+d", net_charge)
     return mol2, frcmod
+
+
+def _charge_cache_dir():
+    """Scratch, never the append-only root -- this is a derived convenience."""
+    from pathlib import Path as _P
+    d = _P("/data/lab_vm/modifiable/inhibition/ligand_param_cache")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _element_sequence(sdf) -> list[str]:
+    """Element symbols in the SDF's atom order -- what a charge file indexes."""
+    from rdkit import Chem as _C
+    mols = [m for m in _C.SDMolSupplier(str(sdf), removeHs=False) if m]
+    if not mols:
+        raise mg.MMGBSAError(f"no readable molecule in {sdf}")
+    return [a.GetSymbol() for a in mols[0].GetAtoms()]
+
+
+def _charge_cache_key(sdf, net_charge: int) -> str:
+    """Identity of the MOLECULE plus its charge state -- never the pose.
+
+    From the canonical SMILES, so two conformers of one molecule key the same
+    and two different molecules cannot collide however similar their poses.
+    """
+    import hashlib
+    from rdkit import Chem as _C
+    mols = [m for m in _C.SDMolSupplier(str(sdf), removeHs=False) if m]
+    if not mols:
+        raise mg.MMGBSAError(f"no readable molecule in {sdf}")
+    smi = _C.MolToSmiles(_C.RemoveHs(mols[0]))
+    return hashlib.sha256(f"{smi}|{int(net_charge)}".encode()).hexdigest()[:24]
+
+
+def _store_charges(mol2, sdf, net_charge: int) -> None:
+    """Write this molecule's AM1-BCC charges to the cache, in atom order."""
+    key = _charge_cache_key(sdf, net_charge)
+    d = _charge_cache_dir() / key
+    d.mkdir(parents=True, exist_ok=True)
+    q, in_atoms = [], False
+    for ln in mol2.read_text(errors="replace").splitlines():
+        if ln.startswith("@<TRIPOS>ATOM"):
+            in_atoms = True; continue
+        if ln.startswith("@<TRIPOS>"):
+            in_atoms = False; continue
+        f = ln.split()
+        if in_atoms and len(f) >= 9:
+            q.append(float(f[8]))
+    if not q:
+        return
+    # antechamber's -cf format: whitespace-separated, 8 per line.
+    (d / "charges.dat").write_text(
+        "\n".join(" ".join(f"{x:10.6f}" for x in q[i:i + 8])
+                   for i in range(0, len(q), 8)) + "\n")
+    (d / "elements.txt").write_text(" ".join(_element_sequence(sdf)))
 
 
 def build_topologies(workdir: Path, mol2: Path, frcmod: Path, receptor_pdb: Path

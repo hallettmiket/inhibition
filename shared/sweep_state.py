@@ -130,9 +130,17 @@ def state(worklist: Path | None = None) -> pd.DataFrame:
         base = pd.concat([base, pd.DataFrame({"ident": sorted(missing)})],
                          ignore_index=True)
 
-    rescols = [c for c in ("ident", "status", "frac_attack_ready", "n_visits",
-                           "frac_in_window", "median_dist_a", "median_angle_deg",
-                           "min_dist_a", "sweep_ps", "_t") if c in res.columns]
+    # DERIVED FROM THE RESULTS TABLE, NOT LISTED BY HAND. This was an allowlist
+    # of nine column names, so every measurement added to a sweep row after it
+    # was written -- `rmsd_max_a`, `rmsd_mean_a`, `elevate`, `pose_held`,
+    # `attack_ready_max_a` -- was silently dropped on the way to the page, and
+    # the page then RECOMPUTED one of them by a second route (catalogue #5, and
+    # the reason `sweep_combine` was reading RMSD off the wrong trajectory).
+    # Carry everything the results table has; drop only what `base` already
+    # provides, so the merge cannot produce `_x`/`_y` pairs.
+    _own = set(base.columns) - {"ident"}
+    rescols = ["ident"] + [c for c in res.columns
+                           if c != "ident" and c not in _own]
     d = base.merge(res[rescols], on="ident", how="left") if not res.empty else base
     if not wl.empty:
         d = d.merge(wl[["ident", "_queued"]], on="ident", how="left")
@@ -149,6 +157,18 @@ def state(worklist: Path | None = None) -> pd.DataFrame:
         s = "" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v).strip()
         if s == "ok":
             return "ok"
+        # A GIVE-UP IS A RESULT, NOT A FAILURE. The pose was measured after
+        # equilibration and had left; that is the campaign's own triage working,
+        # and counting it as a failure makes a deliberate saving look like a
+        # crash. It is reported separately.
+        if s.startswith("aborted"):
+            return "left early"
+        # A PLACEHOLDER IS NOT AN ATTEMPT. `stage0 only` rows carry no
+        # measurement -- they are the free geometry probe -- and `invalidated`
+        # rows were withdrawn on purpose. Both were counted as `failed`, which
+        # is how Home came to read "failed: 16" on a run with zero failures.
+        if s.startswith("stage0") or s.startswith("invalidated"):
+            return "not sent"
         if s:                       # any recorded non-ok status is an attempt
             return "failed"
         return "pending" if r["_queued"] else "not sent"
@@ -203,9 +223,11 @@ def predicts(d: pd.DataFrame) -> dict:
 def summary(d: pd.DataFrame) -> dict:
     """Counts by state, for the step nav and the page header."""
     if d.empty:
-        return {"ok": 0, "failed": 0, "pending": 0, "not sent": 0, "productive": 0}
+        return {"ok": 0, "failed": 0, "pending": 0, "not sent": 0,
+                "left early": 0, "productive": 0}
     c = d.sweep_state.value_counts().to_dict()
-    out = {k: int(c.get(k, 0)) for k in ("ok", "failed", "pending", "not sent")}
+    out = {k: int(c.get(k, 0))
+           for k in ("ok", "failed", "pending", "not sent", "left early")}
     ok = d[d.sweep_state == "ok"]
     out["productive"] = (int((ok.frac_attack_ready > 0.01).sum())
                          if "frac_attack_ready" in ok.columns else 0)

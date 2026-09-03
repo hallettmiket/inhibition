@@ -394,13 +394,44 @@ def _charge(resn: str) -> float:
     return -1.0 if resn in ACIDIC else (1.0 if resn in BASIC else 0.0)
 
 
-def surface_payload(pdb: Path) -> tuple[str, list, list, list]:
+def surface_payload(pdb: Path, *, reactive_idx: int | None = None,
+                    reactive_name: str | None = None
+                    ) -> tuple[str, list, list, list]:
     """Multi-model PDB carrying formal charge in the B-factor, plus overlays.
 
     Returns (pdb_text, warhead_sg_distance_per_frame, label_defs,
     label_positions_per_frame). Distance and label anchors are computed from the
     SAME coordinates that get rendered, so no readout can disagree with what is
     on screen.
+
+    `reactive_idx` indexes the MOL residue's atoms in frame order (equivalently,
+    the ligand's heavy atoms in sdf order) -- get it from
+    `mdprio_report.reactive_atom`. `reactive_name` selects by PDB atom name and
+    exists only so the old behaviour can be asked for explicitly. One of the two
+    is REQUIRED.
+
+    WHY THERE IS NO DEFAULT ANY MORE
+    --------------------------------
+    This function used to hardcode::
+
+        i_c10 = next(i for i, a in enumerate(f0) if a[0] == "MOL" and a[2] == "C10")
+
+    C10 is sulfopin's name for its reactive carbon in 6VAJ, which is the one
+    molecule this report was written for. `tests/test_crystal_pose_audit.py`
+    already said what that costs, in as many words: *"6VAJ calls it C10; the
+    other five covalent Pin1 entries call the equivalent atom C19, C14, C24, C12
+    and C3. Anything that selected it by name would pass on 6VAJ and quietly
+    pick a different atom on the next structure."*
+
+    Measured on the nac_v8 sweep, 2026-09-02: in **98 of 98** modes the atom
+    named C10 was NOT the reactive atom. The viewer's "warhead->SG" readout was
+    a median of **3.11 A** away from the real one and up to **10.08 A**, sitting
+    directly under a plot of the correct quantity. That is what a molecule
+    selected at under 3 A looked like when its movie opened at 5.35 A.
+
+    Note the irony this function contained: forty lines above, it *raises* if a
+    protein residue does not match the name it is about to be labelled with.
+    The protein's identity was checked and the ligand's was assumed.
     """
     frames, cur, out, block = [], [], [], []
     for l in pdb.read_text().splitlines():
@@ -440,12 +471,33 @@ def surface_payload(pdb: Path) -> tuple[str, list, list, list]:
     cys = 113 - PIN1_OFFSET
     i_sg = next(i for i, a in enumerate(f0)
                 if a[1] == cys and a[2] == "SG")
-    i_c10 = next(i for i, a in enumerate(f0) if a[0] == "MOL" and a[2] == "C10")
+
+    if reactive_idx is None and reactive_name is None:
+        raise ValueError(
+            "surface_payload needs the reactive atom: pass reactive_idx (from "
+            "mdprio_report.reactive_atom) or, to select by PDB atom name as "
+            "this used to do implicitly, reactive_name. There is no default -- "
+            "the previous one was 'C10', sulfopin's name for it, and it was "
+            "wrong for 98 of 98 molecules in the nac_v8 sweep.")
+
+    mol_atoms = [i for i, a in enumerate(f0) if a[0] == "MOL"]
+    if reactive_idx is not None:
+        if not 0 <= int(reactive_idx) < len(mol_atoms):
+            raise ValueError(
+                f"reactive_idx {reactive_idx} is outside the {len(mol_atoms)} "
+                f"MOL atoms in {pdb.name}; the ligand in this movie is not the "
+                f"molecule the index was resolved against")
+        i_wh = mol_atoms[int(reactive_idx)]
+    else:
+        i_wh = next((i for i in mol_atoms if f0[i][2] == reactive_name), None)
+        if i_wh is None:
+            raise ValueError(
+                f"no MOL atom named {reactive_name!r} in {pdb.name}")
 
     dist, positions = [], []
     for f in frames:
         sg = np.array(f[i_sg][3:])
-        dist.append(round(float(np.linalg.norm(np.array(f[i_c10][3:]) - sg)), 2))
+        dist.append(round(float(np.linalg.norm(np.array(f[i_wh][3:]) - sg)), 2))
         positions.append([[round(f[d["atom"]][3 + k], 2) for k in range(3)]
                           for d in labels])
     return "\n".join(out), dist, labels, positions
@@ -1106,6 +1158,18 @@ window.addEventListener('DOMContentLoaded', () => {{
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--movie", required=True, help="multi-model PDB from gmx trjconv")
+    # THE REACTIVE ATOM IS NOW STATED, NOT ASSUMED. One of these is required.
+    # `--reactive-atom-name C10` reproduces exactly what this script did
+    # implicitly for its whole life -- correct for sulfopin, wrong for 98 of 98
+    # nac_v8 candidates. Making it an argument turns a pin that could not
+    # announce itself into a choice that appears in the command line.
+    g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument("--reactive-idx", type=int, default=None,
+                   help="index of the reactive atom among the MOL residue's "
+                        "atoms (from mdprio_report.reactive_atom)")
+    g.add_argument("--reactive-atom-name", default=None,
+                   help="PDB atom name of the reactive atom, e.g. C10 for "
+                        "sulfopin in 6VAJ")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -1125,7 +1189,12 @@ def main() -> None:
         figs[f"t1_{name}"] = fig_tier1(s1, theme)
     log.info("figures built for both themes")
 
-    pdb, dist, labels, positions = surface_payload(Path(args.movie))
+    pdb, dist, labels, positions = surface_payload(
+        Path(args.movie), reactive_idx=args.reactive_idx,
+        reactive_name=args.reactive_atom_name)
+    log.info("warhead atom: %s", f"MOL index {args.reactive_idx}"
+             if args.reactive_idx is not None
+             else f"named {args.reactive_atom_name!r}")
     log.info("movie: %d frames", len(dist))
 
     html = build_html(s1, pre, anchor, m1, t2, m2, md, figs, pdb, dist,

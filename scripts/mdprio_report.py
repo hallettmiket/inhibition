@@ -184,6 +184,92 @@ def residence(s: dict) -> dict:
             "left_at_ns": left, "dissociated": left is not None}
 
 
+def reactive_atom(cand: str, rep: Path) -> dict | None:
+    """The candidate's reactive atom, BY THE CLASS THE MOLECULE IS RECORDED AS.
+
+    Returns {"heavy_idx", "match", "mechanism", "class_id", "n_heavy"} where
+    `heavy_idx` indexes the ligand's HEAVY atoms in sdf order -- which is the
+    order the MOL residue appears in a movie frame.
+
+    TWO SELECTION BUGS LIVE HERE AND BOTH ARE FIXED BY ASKING THE MOLECULE.
+
+    1. This used to walk `warhead_classes_10.csv` and take the FIRST class whose
+       SMARTS matched. Measured 2026-09-02 over 98 finished nac_v8 sweeps: 62
+       acrylamides were reported as `naphthoquinone_c2` (row 5 beats row 7) and
+       34 `bdhi_c4` as `bdhi_c5` (row 3 beats row 4). It happened to be harmless
+       -- the same reactive ATOM in 98 of 98, and the paired classes share a
+       mechanism, so every distance and angle was identical -- but it is
+       selection by file order, and the next class added to that CSV decides
+       silently whether it stays harmless.
+    2. `elevation_report.surface_payload` selected the reactive atom as the one
+       NAMED `C10`, which is sulfopin's name for it in 6VAJ and nothing else's.
+       `tests/test_crystal_pose_audit.py` already says so in as many words:
+       "6VAJ calls it C10; the other five covalent Pin1 entries call the
+       equivalent atom C19, C14, C24, C12 and C3."
+
+    Falls back to a first-match scan ONLY when the candidate's own class cannot
+    be resolved, and says so in the log rather than doing it silently.
+    """
+    from rdkit import Chem, RDLogger
+    RDLogger.DisableLog("rdApp.*")
+
+    sdf = rep.parent.parent / "ligand_pose.sdf"
+    if not sdf.is_file():
+        return None
+    mol = Chem.SDMolSupplier(str(sdf), removeHs=False)[0]
+    if mol is None:
+        return None
+    heavy = [a.GetIdx() for a in mol.GetAtoms() if a.GetAtomicNum() > 1]
+    pos = {old_i: new_i for new_i, old_i in enumerate(heavy)}
+
+    wh = pd.read_csv(REPO / "data/reference/warhead_classes_10.csv")
+
+    # THE MOLECULE'S OWN CLASS FIRST, from the candidate frame that defines it.
+    recorded = None
+    try:
+        frames = sorted((rp.DATA / "04_t4_combinatorial").glob("D4_*.parquet"),
+                        key=lambda f: int(f.stem.split("_")[1]))
+        if frames:
+            df = pd.read_parquet(frames[-1], columns=["candidate_id",
+                                                      "warhead_class"])
+            hit = df[df.candidate_id == cand]
+            if len(hit):
+                recorded = str(hit.iloc[0].warhead_class)
+    except Exception as exc:                              # noqa: BLE001
+        log.debug("%s: could not read the recorded warhead class (%s)", cand, exc)
+
+    order = []
+    if recorded is not None:
+        order = [r for r in wh.itertuples() if r.class_id == recorded]
+        if not order:
+            log.warning("%s: recorded warhead class %r is not in the library",
+                        cand, recorded)
+    if not order:
+        log.warning("%s: falling back to a first-SMARTS-match scan; the class "
+                    "this reports is the first one that matched, not the "
+                    "molecule's own", cand)
+        order = list(wh.itertuples())
+
+    for r in order:
+        patt = Chem.MolFromSmarts(r.reactive_atom_smarts)
+        if patt is None:
+            continue
+        ms = mol.GetSubstructMatches(patt)
+        if not ms:
+            continue
+        match = ms[0]
+        if any(i not in pos for i in match):
+            continue
+        return {"heavy_idx": pos[match[0]],
+                "match": tuple(pos[i] for i in match),
+                "mechanism": r.mechanism, "class_id": r.class_id,
+                "n_heavy": len(heavy)}
+    if recorded is not None:
+        log.warning("%s: recorded as %r but its SMARTS does not match the MD "
+                    "ligand", cand, recorded)
+    return None
+
+
 def nac_series(cand: str, rep: Path, movie: Path,
                total_ns: float = 100.0) -> dict | None:
     """Warhead->Cys113 SG distance AND the near-attack angle, per frame.
@@ -203,32 +289,18 @@ def nac_series(cand: str, rep: Path, movie: Path,
     stripped from both sides before pairing, because the movie carries heavy
     atoms only.
     """
-    from rdkit import Chem, RDLogger
-    RDLogger.DisableLog("rdApp.*")
     import shared.nac_criterion as nac
 
-    sdf = rep.parent.parent / "ligand_pose.sdf"
-    if not (sdf.is_file() and movie.is_file()):
+    if not movie.is_file():
         return None
-    mol = Chem.SDMolSupplier(str(sdf), removeHs=False)[0]
-    if mol is None:
-        return None
-    heavy = [a.GetIdx() for a in mol.GetAtoms() if a.GetAtomicNum() > 1]
-    pos = {old: new for new, old in enumerate(heavy)}     # sdf idx -> heavy idx
-
-    wh = pd.read_csv(REPO / "data/reference/warhead_classes_10.csv")
-    match = mech = None
-    for r in wh.itertuples():
-        patt = Chem.MolFromSmarts(r.reactive_atom_smarts)
-        if patt is None:
-            continue
-        ms = mol.GetSubstructMatches(patt)
-        if ms:
-            match, mech = ms[0], r.mechanism
-            break
-    if match is None or any(i not in pos for i in match):
+    # ONE RESOLVER, shared with the movie payload. Two implementations of "the
+    # reactive atom" is how a plot and the structure beneath it came to disagree
+    # by a median of 3.11 A while both looked right.
+    ra = reactive_atom(cand, rep)
+    if ra is None:
         log.warning("%s: no reactive SMARTS match on the MD ligand", cand)
         return None
+    match, mech = ra["match"], ra["mechanism"]
 
     # walk the movie: MOL heavy atoms in order, and Cys113's SG
     frames_lig, frames_sg, cur_lig, sg = [], [], [], None
@@ -243,12 +315,19 @@ def nac_series(cand: str, rep: Path, movie: Path,
             xyz = [float(ln[30:38]), float(ln[38:46]), float(ln[46:54])]
             if resn == "MOL":
                 cur_lig.append(xyz)
-            elif resn == "CYS" and name == "SG":
+            # BY RESIDUE NUMBER. 3IKD has Cys57 as well as Cys113, so matching
+            # on the residue NAME alone took whichever CYS SG appeared last in
+            # the frame. It is Cys113 today only because 63 sorts after 7 --
+            # correct by file order, which is exactly the guarantee catalogue
+            # #38 says not to rely on. `surface_payload` selects by number and
+            # this now agrees with it.
+            elif (resn == "CYS" and name == "SG"
+                  and int(ln[22:26]) == 113 - mov.PIN1_OFFSET):
                 sg = np.array(xyz)
     if not frames_lig:
         return None
 
-    idx = [pos[i] for i in match]
+    idx = list(match)                                    # already heavy indices
     dist, ang = [], []
     for lig, s_ in zip(frames_lig, frames_sg):
         if max(idx) >= len(lig):
@@ -361,8 +440,16 @@ def figure(ident: str, s: dict, res: dict, er, nacs: dict | None = None) -> str:
         if k == "nac_dist":
             # The attack window, so "close enough to react" is on the plot
             # rather than in the reader's head.
-            ax.axhspan(nac_lo(), nac_hi(), color=rt.SERIES["ref"], alpha=0.13)
-            ax.text(0.995, nac_hi(), " attack window", va="bottom", ha="right",
+            # The GATE's band, not the screen's window -- see
+            # nac_criterion.attack_ready_window.
+            ax.axhspan(*nacm.attack_ready_window(), color=rt.SERIES["ref"],
+                       alpha=0.15)
+            if nacm.NAC_DIST_MAX > nacm.attack_ready_window()[1]:
+                ax.axhline(nacm.NAC_DIST_MAX, color=rt.SERIES["ref"], ls=":",
+                           lw=0.8, alpha=0.55)
+            ax.text(0.995, nacm.attack_ready_window()[1],
+                    f" attack ready ≤{nacm.attack_ready_window()[1]:.1f} Å",
+                    va="bottom", ha="right",
                     transform=ax.get_yaxis_transform(), fontsize=8,
                     color=rt.SERIES["ref"])
         if k == "nac_angle":
@@ -523,7 +610,13 @@ def main() -> None:
             mov.build_movie_pdb(rep, mpdb, total_ps=res["length_ns"] * 1000.0)
         if mpdb.is_file():
             try:
-                pdb_txt, dsg, labels, lpos = er.surface_payload(mpdb)
+                _ra = reactive_atom(cand, rep)
+                if _ra is None:
+                    raise ValueError(
+                        f"{cand}: cannot resolve the reactive atom for the "
+                        f"movie; refusing to label an arbitrary atom")
+                pdb_txt, dsg, labels, lpos = er.surface_payload(
+                    mpdb, reactive_idx=_ra["heavy_idx"])
                 three = (REPO / "scripts/.cache_3dmol-min.js").read_text()
                 movie_block = mov.viewer_html(pdb_txt, dsg, labels, lpos, three)
                 log.info("movie embedded: %d frames", len(dsg))
