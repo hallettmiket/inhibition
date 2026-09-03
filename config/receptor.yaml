@@ -1,4 +1,22 @@
-# Shared receptor + docking boxes — the load-bearing artifact for the join.
+# Shared receptor + docking boxes.
+#
+# SUPERSEDED FOR "WHICH RECEPTOR", STILL LIVE FOR EVERYTHING ELSE (2026-09-03).
+# The receptor is 3IKD, not 6VAJ: D0059, shipped in 2.0.0 and kept by 2.1.0,
+# 2.2.0 and 3.0.0. `config/target.yaml` (`target.pdb: 3IKD`) is what production
+# reads, through `shared/run_paths.receptor_prep()`. The `receptor:` block below
+# describes the 6VAJ era and its paths, boxes and coordinates are in 6VAJ's
+# frame, which is a different site: the two structures place the pocket 48.6 A
+# apart. Do not carry any number from this file onto a 3IKD run.
+#
+# It is NOT dead, which is why it is annotated rather than deleted. Live
+# readers: `shared/receptor_prep.py` (DEFAULT_CONFIG) and
+# `shared/covalent_protocol.receptor_atom()`, whose value feeds the T_3/T_4
+# protocol fingerprint. That one value, `covalent_attachment.receptor_atom`,
+# is consumed by current 3IKD work and has never been checked against 3IKD's
+# own chain and residue numbering, because the chemist-prepared file is
+# unreadable to everyone but its owner (see docs/branch_3ikd_receptor.md).
+# Verify it before trusting a covalent run, and do not assume "A:113:SG"
+# transfers just because Pin1 numbering usually does.
 #
 # Purpose: one prepared receptor and two boxes, used unchanged by all four
 #          approaches. Switching receptors mid-choreography invalidates every

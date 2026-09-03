@@ -38,9 +38,23 @@ claims and the prepared file should state which it is.
 
 ## Status
 
-- [ ] **File not yet on the server.** It is at `/home/tt/Downloads/3ikd_well_prepared.pdb`
-      on @tt8804's own machine. Transfer:
-      `scp /home/tt/Downloads/3ikd_well_prepared.pdb twu383@129.100.24.200:/data/lab_vm/immutable/inhibition/receptor/`
+- [x] **File is on the server.** `/data/lab_vm/immutable/inhibition/receptor/3ikd_well_prepared.pdb`,
+      149,060 bytes, owner `twu383`, written 2026-08-05 20:07. This box was left
+      open after the transfer had already happened.
+- [ ] **Nobody but its owner can read it, which blocks every box below.**
+      Verified 2026-09-03: the file is mode `770`, group `ssmd-ud-vmlab`, and
+      `mhallet` is a member of that group per `getent group`, yet `cat` returns
+      `Permission denied`. Every other file in `immutable/inhibition` is owned
+      by `mhallet` and reads normally; this is the only file in the tree owned
+      by another account, and it is the receptor the whole choreography docks
+      into. `/data` is NFS from `gnome-nfs.schulich.uwo.ca` (Isilon), where the
+      mode bits shown over NFS are a synthetic approximation of the real ACL,
+      so a file can display group `rwx` while the ACL grants the owner only.
+      Until this is fixed, the receptor cannot be hashed for
+      `config/sources.lock.json`, its Cys113 chain and numbering cannot be
+      checked against `covalent_attachment.receptor_atom`, and no reviewer can
+      reproduce anything from it. Fix from `twu383`'s account or an admin, then
+      re-check by reading one line as another lab member.
 - [ ] **Provenance unrecorded.** A chemist-modified PDB is not a deposited
       structure. Needed before it becomes load-bearing: what changed relative to
       deposited 3IKD (ligand stripped? waters? protonation and at what pH?
