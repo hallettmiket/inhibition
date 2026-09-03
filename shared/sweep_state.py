@@ -45,8 +45,7 @@ def results() -> pd.DataFrame:
     tables were a flat directory shared by every screen, so a freshly bumped
     topic still listed 554 rows from three superseded runs.
     """
-    fs = sorted(glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")),
-                key=os.path.getmtime)
+    fs = [str(f) for f in rp.sweep_result_files()]
     if not fs:
         return pd.DataFrame()
     out = []
@@ -63,6 +62,31 @@ def results() -> pd.DataFrame:
     # A LATER ATTEMPT SUPERSEDES AN EARLIER ONE. A mode that failed, was
     # unblocked and re-run must read as ok, not carry its old failure.
     d = d.sort_values("_t").drop_duplicates("ident", keep="last")
+
+    # BACKFILL THE COMPARABLE COLUMN FOR PRE-ADAPTIVE ROWS.
+    #
+    # `frac_attack_ready_common` (engagement over the first 1.2 ns, whatever the
+    # run length) exists so variable-length adaptive rows can be ranked against
+    # the fixed-length ones. Rows written before it existed do not carry it --
+    # but for a run that IS exactly one common window long the two figures are
+    # the same number by construction, so it can be filled rather than left
+    # null and treated as missing data.
+    #
+    # ONLY where the length matches. A row from some other fixed length is left
+    # NaN: inventing a common-window value for a window that was never observed
+    # is exactly the kind of plausible-but-unmeasured number this project keeps
+    # being bitten by.
+    if "frac_attack_ready" in d.columns:
+        try:
+            import attack_sweep as _asw
+            win = float(_asw.COMMON_WINDOW_PS)
+        except Exception:                                 # noqa: BLE001
+            win = 1200.0
+        if "frac_attack_ready_common" not in d.columns:
+            d["frac_attack_ready_common"] = float("nan")
+        exact = d.get("sweep_ps", pd.Series(index=d.index, dtype=float)) == win
+        fill = d.frac_attack_ready_common.isna() & exact
+        d.loc[fill, "frac_attack_ready_common"] = d.loc[fill, "frac_attack_ready"]
     return d
 
 

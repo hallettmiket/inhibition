@@ -277,6 +277,13 @@ def elevation_verdict(rec: dict) -> dict:
     return out
 
 
+#: The window every run reports engagement over IN ADDITION to its full length,
+#: so variable-length runs stay comparable with each other and with the 676
+#: fixed 1.2 ns rows already collected. A fraction is only meaningful beside the
+#: window it was taken over, and adaptive runs do not share one.
+COMMON_WINDOW_PS = 1200.0
+
+
 def geometry_stats(dist: np.ndarray, angle: np.ndarray, kind: str,
                    frame_ps: float) -> dict:
     """Geometry readings for one trajectory.
@@ -338,6 +345,14 @@ def geometry_stats(dist: np.ndarray, angle: np.ndarray, kind: str,
         # The other definition, always measured. Free, and it is what makes the
         # choice reviewable later without re-reading 4,000 trajectories.
         "frac_attack_ready_angle": float((inw & comp).mean()),
+        # THE COMPARABLE FIGURE. `frac_attack_ready` above is over whatever this
+        # run actually ran, which under --adaptive-max-ps differs per molecule;
+        # this is always over the first COMMON_WINDOW_PS. For a fixed 1.2 ns
+        # sweep the two are identical, so existing rows are unaffected and the
+        # column means the same thing on every row ever written.
+        "frac_attack_ready_common": float(
+            ready[:max(1, int(round(COMMON_WINDOW_PS / frame_ps)))].mean()),
+        "common_window_ps": COMMON_WINDOW_PS,
         "start_dist_a": float(dist[0]),
         "start_angle_deg": float(angle[0]),
         "start_attack_ready": bool(ready[0]),
@@ -487,8 +502,13 @@ def _gro_resids(gro: Path, n_atoms: int) -> list[int] | None:
 
 
 def _equil_distance(cand: str, rep: Path, pose: Path,
-                    pose_rank: int) -> float | None:
-    """Warhead-SG distance in the equilibrated frame, or None if not certain.
+                    pose_rank: int, gro: Path | None = None) -> float | None:
+    """Warhead-SG distance in a saved frame, or None if not certain.
+
+    `gro` defaults to `npt.gro` (the equilibrated frame, for the pre-production
+    give-up) and is passed `prod.gro` by the adaptive loop to ask the same
+    question of the LAST production frame. One implementation, so "has it left"
+    cannot come to mean two different things at two points in the same run.
 
     RETURNS None RATHER THAN A GUESS, and the caller then runs production. An
     abort must be taken only on a distance we are sure of: skipping work on a
@@ -503,9 +523,9 @@ def _equil_distance(cand: str, rep: Path, pose: Path,
     is required to be orthorhombic, and a result beyond half the box diagonal is
     refused outright as still-suspect.
     """
-    gro = rep / "npt.gro"
+    gro = Path(gro) if gro is not None else rep / "npt.gro"
     if not gro.is_file():
-        log.warning("%s: no npt.gro to measure; running production", cand)
+        log.warning("%s: no %s to measure; running production", cand, gro.name)
         return None
     try:
         E = _elev()
@@ -665,6 +685,79 @@ def run_sweep(cand: str, pose: Path, pose_rank: int, gpu: int,
     return rep
 
 
+def adaptive_extend(cand: str, rep: Path, pose: Path, pose_rank: int, gpu: int,
+                    *, start_ps: float, max_ps: float, chunk_ps: float,
+                    leave_a: float) -> dict:
+    """Keep extending production until the molecule leaves, or `max_ps`.
+
+    @twu383, 2026-09-03: *"we can just make the runs longer until the mol leaves
+    or reaches 10 ns max"*.
+
+    WHY THIS IS WORTH DOING. The one 100 ns run measured so far held for ~5 ns
+    and only crossed the 0.35 nm bar at 7.6 ns, so a fixed 1.2 ns sweep may be
+    observing a window in which nothing has had time to move -- which would
+    explain both the flat ~34-41% engagement ceiling and the null correlation
+    between the docked ranking and the sweep outcome. Spending the time only on
+    molecules that are still there inverts the cost: a pose that leaves at 2 ns
+    costs 2 ns, and only the survivors are carried to 10.
+
+    "LEFT" IS THE SAME TEST USED BEFORE PRODUCTION. `_equil_distance` on the
+    last saved frame, against the same `leave_a` the pre-production give-up
+    uses. Two definitions of "left" in one run is how the abort and the readout
+    come to disagree; there is one, and it is loose (6 A is well past the 4.2 A
+    window) because it must only catch the unambiguous cases.
+
+    AN UNCERTAIN MEASUREMENT KEEPS GOING. `_equil_distance` returns None when it
+    cannot be sure -- missing frame, triclinic box, ambiguous sulfur -- and the
+    fail-safe direction here is to CONTINUE, because stopping early throws the
+    molecule away while carrying on costs a chunk of GPU.
+
+    Returns {"total_ps", "left", "left_at_ps", "last_dist_a", "chunks"}, all of
+    which land on the row: a variable-length run whose length is not recorded is
+    a fraction computed over an unknown window.
+    """
+    total = float(start_ps)
+    chunks, left, left_at, last_d = 0, False, None, None
+    while total < max_ps - 1e-6:
+        d = _equil_distance(cand, rep, pose, pose_rank, gro=rep / "prod.gro")
+        last_d = d
+        if d is not None and d > leave_a:
+            left, left_at = True, total
+            log.info("%s: left at %.0f ps (warhead %.2f A > %.1f) — not extending",
+                     cand, total, d, leave_a)
+            break
+        add = min(chunk_ps, max_ps - total)
+        log.info("%s: still present at %.0f ps (warhead %s) — extending %.0f ps",
+                 cand, total, f"{d:.2f} A" if d is not None else "not measurable",
+                 add)
+        try:
+            total = _ge().extend_production(rep, add, gpu_id=gpu)
+        except Exception as exc:                              # noqa: BLE001
+            # A FAILED EXTENSION IS NOT A DEPARTURE. Keep what has been run and
+            # say so; reporting it as "left" would invent a result.
+            log.warning("%s: extension failed at %.0f ps (%s); keeping what ran",
+                        cand, total, exc)
+            break
+        chunks += 1
+    else:
+        log.info("%s: reached the %.0f ps cap still present", cand, max_ps)
+    if not left:
+        d = _equil_distance(cand, rep, pose, pose_rank, gro=rep / "prod.gro")
+        if d is not None:
+            last_d = d
+            if d > leave_a:
+                left, left_at = True, total
+    return {"total_ps": float(total), "left": bool(left),
+            "left_at_ps": (float(left_at) if left_at is not None else None),
+            "last_dist_a": (float(last_d) if last_d is not None else None),
+            "extensions": int(chunks)}
+
+
+def _ge():
+    from shared import gromacs_explicit as ge
+    return ge
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--candidates", nargs="+", required=True)
@@ -695,6 +788,23 @@ def main() -> None:
     # periodic images, and it wrongly aborted t4_b49ffa60a11a_m113 at a reported
     # 56.6 A -- the box length minus the real distance. An abort DISCARDS work,
     # so it stays opt-in: the caller asks for it, having read this.
+    # ---- ADAPTIVE LENGTH (@twu383, 2026-09-03) -----------------------------
+    # "make the runs longer until the mol leaves or reaches 10 ns max".
+    #
+    # OFF BY DEFAULT, because turning it on changes what `frac_attack_ready`
+    # is a fraction OF. A run that leaves at 2 ns and one capped at 10 ns do not
+    # share a denominator, and the 676 rows already collected are all 1.2 ns.
+    # `frac_attack_ready_common` (below) is what stays comparable across all of
+    # them; `sweep_ps` on every row says which window the full-run figure used.
+    ap.add_argument("--adaptive-max-ps", type=float, default=0.0, metavar="PS",
+                    help="extend production in chunks while the molecule is "
+                         "still present, up to this total (0 = off)")
+    ap.add_argument("--adaptive-chunk-ps", type=float, default=2000.0,
+                    metavar="PS", help="how much to add per extension")
+    ap.add_argument("--adaptive-leave-a", type=float, default=6.0, metavar="A",
+                    help="warhead further than this from Cys113 SG in the last "
+                         "saved frame counts as left; same test as "
+                         "--abort-above-a, deliberately")
     ap.add_argument("--abort-above-a", type=float, default=0.0, metavar="A",
                     help="after equilibration, if the warhead is further than "
                          "this from Cys113 SG, skip production and record the "
@@ -802,9 +912,32 @@ def main() -> None:
             rec["status"] = "sweep failed"
             rows.append(rec); continue
 
+        # ---- ADAPTIVE LENGTH: keep going while the molecule is still there --
+        run_ps = float(args.sweep_ps)
+        if args.adaptive_max_ps and args.adaptive_max_ps > run_ps:
+            ad = adaptive_extend(cand, rep, pose, args.pose_rank, args.gpu,
+                                 start_ps=run_ps,
+                                 max_ps=float(args.adaptive_max_ps),
+                                 chunk_ps=float(args.adaptive_chunk_ps),
+                                 leave_a=float(args.adaptive_leave_a))
+            run_ps = ad["total_ps"]
+            rec.update({"sweep_ps": run_ps, "adaptive": True,
+                        "left_site": ad["left"], "left_at_ps": ad["left_at_ps"],
+                        "final_dist_a": ad["last_dist_a"],
+                        "extensions": ad["extensions"],
+                        "adaptive_max_ps": float(args.adaptive_max_ps),
+                        "adaptive_leave_a": float(args.adaptive_leave_a)})
+
         dense = rep / "sweep_dense.pdb"
+        # REBUILT WHENEVER THE TRAJECTORY IS LONGER THAN THE MOVIE. `prod.xtc`
+        # is APPENDED by an extension, so a `sweep_dense.pdb` left from the
+        # first chunk covers only its own window while every downstream number
+        # would be reported against the full length -- a fraction over a window
+        # that is not the one named on the row.
+        if dense.is_file() and dense.stat().st_mtime < (rep / "prod.xtc").stat().st_mtime:
+            dense.unlink()
         if not dense.is_file():
-            mov.build_movie_pdb(rep, dense, n_frames=FRAMES)
+            mov.build_movie_pdb(rep, dense, n_frames=FRAMES, total_ps=run_ps)
         s = mp.nac_series(cand, rep, dense)
         if s is None:
             rec["status"] = "no attack-geometry series"
@@ -819,8 +952,11 @@ def main() -> None:
         # frames than asked for and a stale divisor would silently rescale every
         # dwell time.
         n_fr = max(1, len(s["dist"]))
+        # `run_ps`, NOT `args.sweep_ps`: under --adaptive-max-ps the run is
+        # longer than the request, and dividing by the request would compress
+        # every dwell time and visit count by the extension factor.
         rec.update(geometry_stats(s["dist"], s["angle"], s["kind"],
-                                  frame_ps=float(args.sweep_ps) / n_fr))
+                                  frame_ps=run_ps / n_fr))
         # POSE STABILITY, from the `rmsd.xvg` this sweep already wrote. Half of
         # the 100 ns gate, and it costs a file read -- computing it here rather
         # than at elevation time means the verdict travels with the row instead

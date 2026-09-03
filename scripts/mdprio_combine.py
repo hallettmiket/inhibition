@@ -91,8 +91,11 @@ REPORTS = rp.reports_dir()
 
 
 def _sweep() -> pd.DataFrame:
-    fs = sorted(glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")),
-                key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
+    # ONE RESOLVER (run_paths.sweep_result_files). This parsed the version
+    # integer out of the filename and RAISED on `attack_sweep_21_corrected.csv`
+    # -- a superseded row that had to be written under a new name because the
+    # outputs root is append-only -- so this whole page stopped building.
+    fs = [str(f) for f in rp.sweep_result_files()]
     if not fs:
         return pd.DataFrame()
     d = pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)
@@ -286,8 +289,11 @@ def _sweep_all() -> pd.DataFrame:
     the interesting part. Keeps the ok row per molecule when there is one, so a
     control that succeeded on a re-run is not represented by its earlier failure.
     """
-    fs = sorted(glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")),
-                key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
+    # ONE RESOLVER (run_paths.sweep_result_files). This parsed the version
+    # integer out of the filename and RAISED on `attack_sweep_21_corrected.csv`
+    # -- a superseded row that had to be written under a new name because the
+    # outputs root is append-only -- so this whole page stopped building.
+    fs = [str(f) for f in rp.sweep_result_files()]
     if not fs:
         return pd.DataFrame()
     d = pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)

@@ -340,6 +340,28 @@ def launch(row, gpu: int, topic: str, logs: Path):
            # on every completed row, so this can be re-derived from hundreds of
            # sweeps rather than the handful it rests on now.
            "--abort-above-a", "6.0",
+           # ---- ADAPTIVE LENGTH (@twu383, 2026-09-03) ---------------------
+           # "make the runs longer until the mol leaves or reaches 10 ns max".
+           #
+           # The molecule is checked after each chunk and the run stops the
+           # moment the warhead is past the SAME 6.0 A used above -- one
+           # definition of "left" for the whole run, not two.
+           #
+           # WHY THIS IS NOT SIMPLY 8x THE BILL. 44% of tasks already give up
+           # before production and are unaffected; of the rest, only the ones
+           # still in the site pay for more. The cost therefore lands somewhere
+           # between the 1.2 ns campaign (if everything leaves immediately) and
+           # the 10 ns one (if nothing does) -- it is the survival curve that
+           # decides, and that curve is the thing being measured.
+           #
+           # COMPARABILITY IS HANDLED ON THE ROW, NOT HERE:
+           # `frac_attack_ready_common` is always over the first 1.2 ns, so
+           # these rows rank against the 676 fixed-length ones already
+           # collected, while `sweep_ps`, `left_site` and `left_at_ps` carry
+           # what actually happened.
+           "--adaptive-max-ps", "10000",
+           "--adaptive-chunk-ps", "2000",
+           "--adaptive-leave-a", "6.0",
            "--gpu", str(gpu)]
     return subprocess.Popen(cmd, cwd=str(REPO),
                             stdout=log.open("w"), stderr=subprocess.STDOUT,

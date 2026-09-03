@@ -123,6 +123,35 @@ def sweep_dir(t: str | None = None) -> Path:
     return BLACKSMITH / sweep_topic(t)
 
 
+def sweep_result_files(t: str | None = None) -> list[Path]:
+    """This run's sweep tables, OLDEST FIRST, so `keep="last"` means newest.
+
+    ONE RESOLVER, because ten readers had four different answers and two of
+    them were wrong:
+
+    * mtime-sorted (right): `sweep_state.results`, `mode_ranking.gather`,
+      `mdprio_report`
+    * `int(stem.split("_")[-1])` -- **raises** on any stem that is not a bare
+      integer. `attack_sweep_21_corrected.csv` (a deliberately superseded row,
+      written under the append-only rule because the original could not be
+      deleted) crashed `mdprio_combine` outright, so the MD results page
+      stopped building and said nothing about why.
+    * plain lexicographic `sorted()` -- no crash, but `_10` sorts before `_9`,
+      so with `keep="last"` the OLDER measurement of a mode wins. That is the
+      defect `mode_ranking`'s own comment warns about.
+    * unsorted `glob` -- order is filesystem-dependent, i.e. undefined.
+
+    Sorting on mtime rather than on the version integer is deliberate: it needs
+    nothing from the filename, so a corrected, re-scored or otherwise
+    non-conforming stem orders correctly instead of crashing or silently
+    landing in the wrong place.
+    """
+    import glob as _glob
+    import os as _os
+    fs = _glob.glob(str(sweep_dir(t) / "attack_sweep_*.csv"))
+    return [Path(f) for f in sorted(fs, key=_os.path.getmtime)]
+
+
 def residence_dir(t: str | None = None) -> Path:
     return BLACKSMITH / residence_topic(t)
 

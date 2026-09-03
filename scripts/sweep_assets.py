@@ -205,7 +205,7 @@ def _sweep_ps(ident: str, default: float = 1200.0) -> float:
     try:
         import glob as _g
         import pandas as _pd
-        fs = _g.glob(str(rp.BLACKSMITH / rp.sweep_topic() / "attack_sweep_*.csv"))
+        fs = [str(f) for f in rp.sweep_result_files()]   # ordered, one resolver
         if fs:
             d = _pd.concat([_pd.read_csv(f) for f in fs], ignore_index=True)
             hit = d[d.ident.astype(str) == ident]

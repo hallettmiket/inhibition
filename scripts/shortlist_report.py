@@ -670,7 +670,7 @@ def md_row(ident: str):
 
 def sweep_row(ident: str):
     parts = []
-    for f in sorted(glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv"))):  # (#74)
+    for f in rp.sweep_result_files():                 # (#74), mtime-ordered
         try:
             parts.append(pd.read_csv(f))
         except Exception:                                # noqa: BLE001

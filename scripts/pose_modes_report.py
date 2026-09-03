@@ -85,7 +85,7 @@ def sweep_rows(ident: str) -> pd.DataFrame:
     """The triage sweep, per mode. Scored PER MODE, so it is joined per mode."""
     # THIS RUN'S SWEEP (#74). Unscoped, `attack_sweep/` is every screen ever
     # run, so a mode would carry a previous campaign's trajectory numbers.
-    fs = sorted(glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")))
+    fs = [str(f) for f in rp.sweep_result_files()]   # mtime order, not lexicographic
     if not fs:
         return pd.DataFrame()
     d = pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)

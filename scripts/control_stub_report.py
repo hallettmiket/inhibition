@@ -73,7 +73,7 @@ def md_row(ident: str) -> pd.Series | None:
 
 def sweep_row(ident: str) -> pd.Series | None:
     parts = []
-    for f in sorted(glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv"))):  # this run only (#74)
+    for f in rp.sweep_result_files():                 # this run only (#74)
         try:
             parts.append(pd.read_csv(f))
         except Exception:                                # noqa: BLE001

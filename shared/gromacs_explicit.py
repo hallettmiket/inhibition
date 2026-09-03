@@ -495,6 +495,67 @@ def _stage(wd: Path, name: str, mdp: str, start_gro: str, start_cpt: str | None,
     return StageResult(name=name, seconds=round(secs, 1), ns_per_day=nsday)
 
 
+def extend_production(rep: Path, add_ps: float, gpu_id: int | None = None,
+                      threads: int = 8) -> float:
+    """Continue an existing `prod` run by `add_ps` more picoseconds.
+
+    ONE CONTINUOUS TRAJECTORY, not a second run stitched on. `convert-tpr
+    -extend` moves the finish line on the existing tpr and `mdrun -cpi` picks up
+    from the checkpoint, so `prod.xtc`, `prod.edr` and `prod.log` are APPENDED:
+    velocities, thermostat and barostat state all carry over, and the result is
+    indistinguishable from having asked for the longer run at the start. A fresh
+    `mdrun` from `prod.gro` would instead restart the thermostat and reset the
+    clock, which shows up as an artificial settling transient at every join.
+
+    Returns the new total production length in ps, read back from the tpr rather
+    than assumed -- if the extension did not take, the caller must not go on
+    believing the trajectory is longer than it is.
+
+    Requires `prod.cpt`. A sweep run under `--keep` has one; a cleaned workdir
+    does not, and that is a hard error rather than a silent restart.
+    """
+    tpr, cpt = rep / "prod.tpr", rep / "prod.cpt"
+    for f in (tpr, cpt):
+        if not f.is_file():
+            raise GromacsError(
+                f"cannot extend {rep.name}: {f.name} is missing. Production can "
+                f"only be continued from its own checkpoint -- re-running from "
+                f"prod.gro would restart the thermostat and put a settling "
+                f"transient at the join.")
+    _run([_bin(GMX_ENV, "gmx"), "convert-tpr", "-s", "prod.tpr",
+          "-extend", str(float(add_ps)), "-o", "prod.tpr"],
+         rep, "convert_tpr_extend.log", timeout=1800)
+    mdrun = [_bin(GMX_ENV, "gmx"), "mdrun", "-deffnm", "prod",
+             "-cpi", "prod.cpt", "-ntmpi", "1", "-ntomp", str(threads)]
+    if gpu_id is not None:
+        mdrun += ["-gpu_id", str(gpu_id)]
+    _run(mdrun, rep, "mdrun_prod_extend.log")
+    return production_ps_of(rep)
+
+
+def production_ps_of(rep: Path) -> float:
+    """Production length the tpr actually specifies, in ps.
+
+    READ BACK, NEVER ACCUMULATED. Adding up what was requested is how a run
+    whose extension silently failed goes on being reported at the length nobody
+    verified -- the same shape as every pinned constant in this project.
+    """
+    out = _run([_bin(GMX_ENV, "gmx"), "dump", "-s", "prod.tpr"],
+               rep, "dump_prod_tpr.log", timeout=600)
+    nsteps = dt = None
+    for ln in out.splitlines():
+        s = ln.strip()
+        if nsteps is None and s.startswith("nsteps"):
+            nsteps = int(s.split("=")[1].strip())
+        elif dt is None and s.startswith("dt "):
+            dt = float(s.split("=")[1].strip())
+        if nsteps is not None and dt is not None:
+            break
+    if nsteps is None or dt is None:
+        raise GromacsError(f"could not read nsteps/dt from {rep}/prod.tpr")
+    return nsteps * dt
+
+
 def run_pipeline(src: Path, wd: Path, gpu_id: int | None = None,
                  threads: int = 8, production_ps: float = PRODUCTION_PS,
                  replicate: int = 1, candidate_id: str | None = None,

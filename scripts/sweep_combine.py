@@ -256,6 +256,28 @@ def main() -> None:
     n_left = int((ok.gate_tier == 2).sum())
     n_ok = len(ok)
 
+    # A PAGE THAT CANNOT BE READ IS NOT A SWEEP THAT DID NOT RUN.
+    #
+    # `tabs` only collects idents whose `sweep_pages/<ident>.html` exists, so if
+    # those are absent, being rewritten, or unreadable (the Isilon ACL does not
+    # honour the POSIX mode it advertises -- see CLAUDE.md), this rendered "No
+    # sweep has finished yet" over a run with hundreds of results. That is the
+    # catalogue's disguise #4: a message naming the wrong cause, and it is the
+    # same shape as `seed_status` reporting "no frame written yet" for a
+    # permission error.
+    #
+    # Refusing to write is the right answer: the LAST GOOD page stays up, and
+    # the exception says what is actually wrong. Writing a claim that the
+    # campaign has produced nothing is the worst thing this page can get wrong.
+    if not tabs and not ok.empty:
+        missing = [str(r.ident) for r in ok.itertuples()
+                   if not (PAGES / f"{str(r.ident)}.html").is_file()][:5]
+        raise SystemExit(
+            f"{len(ok)} completed sweeps but 0 readable per-mode pages in "
+            f"{PAGES} — refusing to write 'no sweep has finished yet' over the "
+            f"existing page. Check that the pages exist and are readable "
+            f"(test -r), then re-run. First few expected but absent: {missing}")
+
     first = tabs[0] if tabs else ""
     # AN EMPTY RAIL MUST NOT PRODUCE AN IFRAME. With no finished sweep the src
     # interpolated to `sweep_pages/.html` -- a request for the empty ident --

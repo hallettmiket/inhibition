@@ -232,7 +232,14 @@ def reactive_atom(cand: str, rep: Path) -> dict | None:
         if frames:
             df = pd.read_parquet(frames[-1], columns=["candidate_id",
                                                       "warhead_class"])
-            hit = df[df.candidate_id == cand]
+            # THE CANDIDATE FRAME IS KEYED ON THE MOLECULE. `cand` arrives as
+            # a MODE ident (`t4_x_m184`) from every caller that runs one mode,
+            # so an exact match found nothing and this silently fell back to a
+            # first-SMARTS-match scan -- the very thing the fallback warns
+            # about. Strip the `_m<N>` suffix; that is what names the molecule.
+            import re as _re
+            mol_id = _re.sub(r"_m\d+$", "", str(cand))
+            hit = df[df.candidate_id == mol_id]
             if len(hit):
                 recorded = str(hit.iloc[0].warhead_class)
     except Exception as exc:                              # noqa: BLE001
@@ -357,6 +364,12 @@ def figure(ident: str, s: dict, res: dict, er, nacs: dict | None = None) -> str:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     plt.rcParams.update(rt.MPL)
+    # HOISTED. This was imported inside the angle-panel branch further down,
+    # which makes `nacm` a local for the WHOLE function -- so the distance
+    # panel's band, added above it, raised UnboundLocalError. It stayed hidden
+    # because `mdprio_combine` was crashing earlier in the chain on a filename
+    # it could not parse, so this path never ran.
+    import shared.nac_criterion as nacm
 
     panels = [k for k in ("rmsd", "mindist", "contacts") if k in s]
     extra = ["nac_dist", "nac_angle"] if nacs else []
@@ -458,7 +471,6 @@ def figure(ident: str, s: dict, res: dict, er, nacs: dict | None = None) -> str:
             # backside approach at >=150 deg, the perpendicular mechanisms want
             # <=30 deg off the sp2 plane normal. Read from the criterion rather
             # than hardcoded per panel.
-            import shared.nac_criterion as nacm
             if "anti" in (nacs.get("kind") or ""):
                 ax.axhspan(nacm.SN2_ANGLE_MIN, 180, color=rt.SERIES["ref"], alpha=0.13)
                 lbl, at = f" ≥{nacm.SN2_ANGLE_MIN:.0f}° backside", nacm.SN2_ANGLE_MIN
@@ -571,8 +583,7 @@ def main() -> None:
     sweep_ar = sweep_v = None
     # THIS RUN'S SWEEP. The unscoped `attack_sweep/` here put a previous
     # screen's triage readings on this run's report page.
-    _fs = sorted(_g.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")),
-                 key=os.path.getmtime)
+    _fs = [str(f) for f in rp.sweep_result_files()]
     if _fs:
         _sw = pd.concat([pd.read_csv(f) for f in _fs], ignore_index=True)
         _sw = _sw[(_sw.get("sweep_ps", 0) > 1000) & (_sw.status == "ok")
@@ -610,11 +621,11 @@ def main() -> None:
             mov.build_movie_pdb(rep, mpdb, total_ps=res["length_ns"] * 1000.0)
         if mpdb.is_file():
             try:
-                _ra = reactive_atom(cand, rep)
+                _ra = reactive_atom(args.candidate, rep)
                 if _ra is None:
                     raise ValueError(
-                        f"{cand}: cannot resolve the reactive atom for the "
-                        f"movie; refusing to label an arbitrary atom")
+                        f"{args.candidate}: cannot resolve the reactive atom "
+                        f"for the movie; refusing to label an arbitrary atom")
                 pdb_txt, dsg, labels, lpos = er.surface_payload(
                     mpdb, reactive_idx=_ra["heavy_idx"])
                 three = (REPO / "scripts/.cache_3dmol-min.js").read_text()

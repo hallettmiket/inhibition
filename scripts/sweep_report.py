@@ -54,7 +54,7 @@ def sweep_row(ident: str):
     """This mode's sweep result, newest attempt wins."""
     import pandas as pd
     best, best_t = None, -1.0
-    for f in glob.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")):
+    for f in rp.sweep_result_files():                 # ordered, not raw glob
         try:
             d = pd.read_csv(f)
         except Exception:                                  # noqa: BLE001

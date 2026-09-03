@@ -570,8 +570,7 @@ def _run_counts() -> dict:
     out = {"swept": 0, "survivors": 0, "md": 0, "held": 0}
     try:
         import pandas as _pd
-        sw = _pd.concat([_pd.read_csv(f) for f in
-                         sorted(_g.glob(str(rp.sweep_dir() / "attack_sweep_*.csv")))],
+        sw = _pd.concat([_pd.read_csv(f) for f in rp.sweep_result_files()],
                         ignore_index=True)
         sw = sw[(sw.get("sweep_ps", 0) > 1000) & (sw.status == "ok")]
         out["swept"] = int(sw.parent_ident.nunique())
@@ -1024,11 +1023,25 @@ def build(title: str = "DWI Derivative Screen", built: str = "") -> str:
     except Exception:                                      # noqa: BLE001
         _p = []
     if _p:
-        _order = [m for m, _ in sorted(
+        # THE PALETTE LENGTH IS THE LIMIT, and the code has to say so.
+        # `zip(_order, PALETTE)` truncates silently, so with more modes than
+        # colours `_cols` was short and the `_cols[m]` below raised
+        # `KeyError: '101'` -- which killed `pipeline.html` outright and, with
+        # it, `mdprio_combine`, so the MD results page stopped building. Same
+        # family as catalogue #19: a fixed-size constant sized for a smaller
+        # workload, failing by breaking rather than by raising anything legible.
+        #
+        # Five overlaid clouds is already the readable maximum, so the fix is to
+        # take the five MOST POPULATED modes rather than to cycle colours and
+        # produce twenty indistinguishable layers. The count is reported below
+        # so the panel never implies it is showing every mode.
+        _PALETTE = ["#0072ce", "#7b5ea7", "#c2703d", "#0f7a54", "#b3261e"]
+        _all_modes = [m for m, _ in sorted(
             collections.Counter(q["mode"] for q in _p).items(),
             key=lambda kv: -kv[1])]
-        _cols = {m: c for m, c in zip(_order, ["#0072ce", "#7b5ea7", "#c2703d",
-                                               "#0f7a54", "#b3261e"])}
+        _n_modes = len(_all_modes)
+        _order = _all_modes[:len(_PALETTE)]
+        _cols = dict(zip(_order, _PALETTE))
         _b = _basis(_p)
         real_all = "".join(
             _pose_svg(_p, _b, only=m, colour=_cols[m], w=430, h=300,
@@ -1063,7 +1076,11 @@ def build(title: str = "DWI Derivative Screen", built: str = "") -> str:
                                    stroke=0.55, op=0.35, pocket=True, highlight=_mm)
             real_med[m] = _pose_svg(_p, _b, colour=_cols[m], w=200, h=150,
                                     stroke=1.6, op=1.0, pocket=True, one=_mm)
-        real = {"n": len(_p), "modes": len(_order),
+        # `modes` is what is DRAWN; `modes_total` is what exists. They differed
+        # silently once the palette cap bit, and a panel that says "modes: 5"
+        # for a molecule with 213 of them is a number computed from the display
+        # rather than from the data.
+        real = {"n": len(_p), "modes": len(_order), "modes_total": _n_modes,
                 "counts": dict(collections.Counter(q["mode"] for q in _p)),
                 "order": _order}
     # Built outside the f-string: a dict literal inside an f-string expression is

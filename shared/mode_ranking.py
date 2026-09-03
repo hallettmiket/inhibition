@@ -157,8 +157,7 @@ def gather() -> pd.DataFrame:
     # Sorted by MTIME, not lexicographically: `keep="last"` over a lexicographic
     # sort makes `_10` older than `_9`, which decides which of two measurements
     # of the same mode is believed by string order.
-    sf = sorted(glob.glob(str(_rp().sweep_dir() / "attack_sweep_*.csv")),
-                key=os.path.getmtime)
+    sf = [str(f) for f in _rp().sweep_result_files()]
     sweep = (pd.concat([pd.read_csv(x) for x in sf], ignore_index=True)
              .drop_duplicates("ident", keep="last") if sf else pd.DataFrame())
     if not sweep.empty:
