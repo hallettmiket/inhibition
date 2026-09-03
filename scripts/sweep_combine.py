@@ -267,7 +267,12 @@ def main() -> None:
                '<div class="legend" style="margin:22px">No sweep has finished '
                'yet, so there is no report to show. Modes appear in the rail as '
                'they come back, and this panel loads the one you select.</div>')
-    n_pri = int((ok.rmsd_max < bound).sum())
+    # QUALIFY MEANS THE GATE, not one half of it. This counted modes under the
+    # 0.35 nm RMSD bar -- the pose-stability term -- and printed it in the header
+    # as "N qualify" beside a rail ranked on the full gate: 62 qualify against 0
+    # that actually clear it. A header that contradicts the order beneath it is
+    # worse than no header.
+    n_pri = int((ok.gate_tier == 0).sum())
     rho = pred.get("rho")
     note = (f"Spearman(enrichment, attack-ready) = {rho:+.3f}, p = {pred['p']:.3f} "
             f"over {pred['n']} finished modes — the docked ranking does not "

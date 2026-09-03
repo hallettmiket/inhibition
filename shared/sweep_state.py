@@ -79,6 +79,16 @@ def state(worklist: Path | None = None) -> pd.DataFrame:
     wl = pd.DataFrame()
     if worklist and Path(worklist).is_file():
         wl = pd.read_csv(worklist)
+        # `ident` IN A WORKLIST IS THE MOLECULE; `task_id` IS THE MODE, and every
+        # result is keyed on the mode. Merging on `ident` therefore matched
+        # NOTHING: 4,295 worklist rows and 261 result rows produced 4,556 rows
+        # with zero overlap, so the whole worklist read as `pending` however many
+        # sweeps had finished, and not one finished mode carried `_queued` --
+        # which is the flag `sweep_combine` uses to mean "this campaign".
+        # Same defect as catalogue #23, one file further along; `sweep_assets`,
+        # `sweep_combine` and `recompute_attack_ready` already key on `task_id`.
+        if "task_id" in wl.columns:
+            wl = wl.assign(ident=wl["task_id"].astype(str))
         wl["_queued"] = True
 
     # A ROW FOR A MODE NOBODY SELECTED IS NOT A RESULT OF THIS CAMPAIGN.

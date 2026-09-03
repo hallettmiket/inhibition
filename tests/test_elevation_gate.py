@@ -234,3 +234,67 @@ def test_no_plot_hardcodes_the_wider_window_as_the_ready_band():
     assert not offenders, (
         "a band is drawn from NAC_DIST_MAX rather than attack_ready_window():\n  "
         + "\n  ".join(offenders))
+
+
+# ---------------------------- the worklist key, in the third file to get it ---
+def test_sweep_state_keys_the_worklist_on_the_mode(tmp_path, monkeypatch):
+    """`ident` in a worklist is the MOLECULE; every result is keyed on the mode.
+
+    Merging on `ident` matched nothing: 4,295 worklist rows and 261 result rows
+    made 4,556 rows with zero overlap, so the page reported the ENTIRE worklist
+    as pending however many sweeps had finished, and no finished mode carried
+    `_queued` -- the flag `sweep_combine` uses to mean "this campaign".
+
+    Catalogue #23, in the third file to have it. `sweep_assets`, `sweep_combine`
+    and `recompute_attack_ready` were each fixed separately; this asserts the
+    rule rather than the instance.
+    """
+    import pandas as pd
+    from shared import sweep_state as ss
+
+    wl = tmp_path / "worklist_1.csv"
+    pd.DataFrame({
+        "seq": [1, 2, 3],
+        "task_id": ["t4_aaa_m1", "t4_aaa_m7", "t4_bbb_m3"],
+        "parent_ident": ["t4_aaa", "t4_aaa", "t4_bbb"],
+        "ident": ["t4_aaa", "t4_aaa", "t4_bbb"],     # the MOLECULE, thrice
+        "mode": [1, 7, 3],
+        "pose_rank": [2, 8, 4],
+    }).to_csv(wl, index=False)
+
+    res = pd.DataFrame({
+        "ident": ["t4_aaa_m1"], "parent_ident": ["t4_aaa"],
+        "pose_rank": [2], "status": ["ok"], "frac_attack_ready": [0.4],
+    })
+    monkeypatch.setattr(ss, "results", lambda *a, **k: res)
+
+    import shared.mode_ranking as mr
+    monkeypatch.setattr(mr, "gather", lambda *a, **k: pd.DataFrame())
+
+    d = ss.state(wl)
+    assert len(d) == 3, (
+        f"expected one row per MODE (3), got {len(d)} -- the worklist and the "
+        f"results are being keyed on different things")
+    states = dict(zip(d.ident.astype(str), d.sweep_state))
+    assert states["t4_aaa_m1"] == "ok", (
+        f"the finished mode is {states['t4_aaa_m1']!r}, not 'ok' -- its result "
+        f"did not join to its worklist row")
+    assert states["t4_aaa_m7"] == "pending"
+    assert bool(d.loc[d.ident == "t4_aaa_m1", "_queued"].iloc[0]), (
+        "the finished mode is not flagged _queued, so sweep_combine's "
+        "this-campaign filter would drop it")
+
+
+def test_the_header_qualify_count_is_the_gate():
+    """A header that contradicts the order beneath it is worse than none.
+
+    `n_pri` counted modes under the 0.35 nm RMSD bar -- the pose-stability half
+    -- and printed it as "N qualify" beside a rail ranked on the full gate: 62
+    qualify against 0 that clear it.
+    """
+    src = (REPO / "scripts" / "sweep_combine.py").read_text()
+    import re
+    m = re.search(r"n_pri = (.+)", src)
+    assert m, "n_pri is gone"
+    assert "gate_tier" in m.group(1), (
+        f"the header's qualify count is not the gate: n_pri = {m.group(1)}")

@@ -225,6 +225,31 @@ def n_stale(topic: str) -> int:
     return n
 
 
+def repo_mid_operation() -> str | None:
+    """Is the repo mid-rebase / merge / bisect? Returns the operation, else None.
+
+    THE REFRESHER READS CODE FROM A LIVE WORKING TREE. During a rebase that tree
+    is at an INTERMEDIATE commit -- older code, briefly, with no warning -- and a
+    rebuild that lands in that window regenerates every page from it. Measured
+    2026-09-02: a `git pull --rebase` mid-session had the refresher rebuild
+    `sweep.html` from the pre-change `sweep_combine`, and the GUI went to
+    "No sweep has finished yet · 0 modes" on a run with 139 finished sweeps.
+
+    Nothing was lost -- the next rebuild after the rebase restored it -- but the
+    page said the campaign had produced nothing, which is the worst thing this
+    page can say incorrectly. Skipping the rebuild leaves the LAST GOOD page in
+    place, which is always a better answer than one built from code that is
+    halfway between two commits.
+    """
+    g = REPO / ".git"
+    for name, op in (("rebase-merge", "rebase"), ("rebase-apply", "rebase"),
+                     ("MERGE_HEAD", "merge"), ("CHERRY_PICK_HEAD", "cherry-pick"),
+                     ("BISECT_LOG", "bisect")):
+        if (g / name).exists():
+            return op
+    return None
+
+
 def rebuild(topic: str, wl: Path, state: Path) -> None:
     """Assets, reports, counts, then the index. Order is load-bearing.
 
@@ -305,7 +330,14 @@ def main() -> None:
         wl = newest_worklist(topic) or wl
         n = n_finished(topic)
         stale = n_stale(topic)
-        if n != last or stale:
+        op = repo_mid_operation()
+        if op:
+            # Do NOT touch `last`: the rebuild still owes to be done once the
+            # tree settles, and clearing it here would skip it for good.
+            log.warning("repo is mid-%s — skipping this rebuild; the current "
+                        "page stays up rather than being rebuilt from a "
+                        "half-applied tree", op)
+        elif n != last or stale:
             why = (f"{n} finished sweeps (was {'?' if last < 0 else last})"
                    if n != last else f"{stale} page(s) stale")
             log.info("%s — rebuilding", why)
