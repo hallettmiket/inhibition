@@ -188,11 +188,73 @@ def plots(rep: Path, ident: str) -> str:
     for a in ax:
         for s in ("top", "right"):
             a.spines[s].set_visible(False)
-    fig.suptitle(ident, fontsize=8, color="#5b6b80", y=0.995)
+    # THE LENGTH AND THE FATE, ON THE FIGURE. Two traces that both end are not
+    # the same result if one stopped because the molecule left at 5.2 ns and the
+    # other because it was still there at the 10 ns cap.
+    fate = _sweep_fate(ident)
+    ttl = ident
+    if fate.get("sweep_ps"):
+        ns = fate["sweep_ps"] / 1000.0
+        if fate.get("left") is True:
+            ttl = f"{ident}  —  left the site at {ns:.1f} ns"
+        elif fate.get("left") is False:
+            ttl = f"{ident}  —  held to the {ns:.0f} ns cap"
+        else:
+            ttl = f"{ident}  —  {ns:.1f} ns"
+    fig.suptitle(ttl, fontsize=8, color="#5b6b80", y=0.995)
+    # And mark WHERE it stopped on the distance panel, so the end of the trace
+    # reads as an event rather than as the edge of the plot.
+    if fate.get("sweep_ps") and t_d is not None and len(t_d):
+        end = float(t_d[-1])
+        left = fate.get("left")
+        if left is not None:
+            col = "#b3261e" if left else "#0f7a54"
+            ax[1].axvline(end, color=col, ls="--", lw=0.9, alpha=0.75)
+            ax[1].text(end, 0.02, (" left " if left else " held "),
+                       ha="right" if left else "right", va="bottom",
+                       fontsize=6.5, color=col, rotation=90,
+                       transform=ax[1].get_xaxis_transform(),
+                       bbox=dict(fc="white", ec="none", alpha=0.75, pad=0.8))
     fig.tight_layout()
     buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode()
 
+
+
+def _sweep_fate(ident: str) -> dict:
+    """How long this mode ran and whether it left, from its own row.
+
+    UNDER ADAPTIVE LENGTH THE RUN LENGTH IS A RESULT. A sweep now continues
+    while the molecule is in the site and stops when it leaves, capped at 10 ns
+    -- so "5.2 ns, left" and "10 ns, held" are different findings about
+    different molecules, and a plot that shows only a trace makes them look like
+    the same experiment run for different amounts of time by accident.
+
+    Returns {} when the row says nothing, and the caller then annotates nothing
+    rather than asserting a fate it does not have.
+    """
+    try:
+        import pandas as _pd
+        fs = [str(f) for f in rp.sweep_result_files()]
+        if not fs:
+            return {}
+        d = _pd.concat([_pd.read_csv(f) for f in fs], ignore_index=True)
+        hit = d[d.ident.astype(str) == ident]
+        if not len(hit):
+            return {}
+        r = hit.iloc[-1]
+        out = {}
+        if _pd.notna(r.get("sweep_ps")):
+            out["sweep_ps"] = float(r["sweep_ps"])
+        if "left_site" in r.index and _pd.notna(r.get("left_site")):
+            out["left"] = bool(r["left_site"])
+        if "left_at_ps" in r.index and _pd.notna(r.get("left_at_ps")):
+            out["left_at_ps"] = float(r["left_at_ps"])
+        if "adaptive" in r.index and _pd.notna(r.get("adaptive")):
+            out["adaptive"] = bool(r["adaptive"])
+        return out
+    except Exception:                                      # noqa: BLE001
+        return {}
 
 
 def _sweep_ps(ident: str, default: float = 1200.0) -> float:

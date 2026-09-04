@@ -108,6 +108,18 @@ def main() -> None:
     ar = float(s.frac_attack_ready) if not pd.isna(s.get("frac_attack_ready")) else None
     vis = int(s.n_visits) if not pd.isna(s.get("n_visits")) else 0
     verdict = ("Reaches attack geometry" if (ar or 0) > 0.01 else "Never in position")
+    # THE RUN LENGTH IS PART OF THE VERDICT NOW. "Never in position" over 1.2 ns
+    # and over 10 ns are different statements about a molecule, and under
+    # adaptive length the page cannot assume which one it is looking at.
+    _sps = s.get("sweep_ps")
+    _left = s.get("left_site")
+    if _sps is not None and not pd.isna(_sps):
+        _ns = float(_sps) / 1000.0
+        if _left is not None and not pd.isna(_left):
+            verdict += (f" — left the site at {_ns:.1f} ns" if bool(_left)
+                        else f" — held to the {_ns:.0f} ns cap")
+        else:
+            verdict += f" — {_ns:.1f} ns"
 
     # ---- the movie, from the asset the sweep build wrote --------------------
     movie_block = ""
@@ -133,7 +145,20 @@ def main() -> None:
             pdb_txt, dsg, labels, lpos = er.surface_payload(
                 pdb, reactive_idx=_ra["heavy_idx"])
             three = (REPO / "scripts/.cache_3dmol-min.js").read_text()
-            movie_block = mov.viewer_html(pdb_txt, dsg, labels, lpos, three)
+            # THE VIEWER IS TOLD HOW LONG THE RUN WAS AND HOW IT ENDED.
+            # Without it the slider reads "60 / 120" on a 1.2 ns sweep and on a
+            # 10 ns one identically, and every movie ends the same way whether
+            # the molecule left or was still there at the cap.
+            _fate_txt = None
+            _sps = s.get("sweep_ps")
+            _left = s.get("left_site")
+            if _left is not None and not pd.isna(_left):
+                _fate_txt = ("left the site" if bool(_left)
+                             else "still present at the cap")
+            movie_block = mov.viewer_html(
+                pdb_txt, dsg, labels, lpos, three,
+                total_ps=(None if _sps is None or pd.isna(_sps) else float(_sps)),
+                fate=_fate_txt)
         except Exception as exc:                           # noqa: BLE001
             movie_block = rt.callout(
                 "Movie unavailable",

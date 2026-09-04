@@ -685,6 +685,31 @@ def run_sweep(cand: str, pose: Path, pose_rank: int, gpu: int,
     return rep
 
 
+def _rmsd_window_ps(rep: Path) -> float | None:
+    """Simulation time the `rmsd.xvg` trace actually spans, in ps.
+
+    READ BACK, NEVER ASSUMED. `rmsd_max_a` and `rmsd_mean_a` are half the 100 ns
+    gate; if the trace covers a different window from the engagement figure
+    beside it, the row must say so rather than presenting two windows as one.
+    """
+    f = Path(rep) / "rmsd.xvg"
+    if not f.is_file():
+        return None
+    last = None
+    try:
+        for ln in f.read_text(errors="replace").splitlines():
+            ln = ln.strip()
+            if not ln or ln[0] in "#@":
+                continue
+            parts = ln.split()
+            if len(parts) >= 2:
+                last = float(parts[0])
+    except (OSError, ValueError):
+        return None
+    # `gmx rms -tu ns` writes nanoseconds.
+    return None if last is None else float(last) * 1000.0
+
+
 def adaptive_extend(cand: str, rep: Path, pose: Path, pose_rank: int, gpu: int,
                     *, start_ps: float, max_ps: float, chunk_ps: float,
                     leave_a: float) -> dict:
@@ -921,6 +946,22 @@ def main() -> None:
                                  chunk_ps=float(args.adaptive_chunk_ps),
                                  leave_a=float(args.adaptive_leave_a))
             run_ps = ad["total_ps"]
+            # THE ANALYSIS FILES ARE STALE AFTER AN EXTENSION AND MUST BE REDONE.
+            # `rmsd.xvg` / `mindist.xvg` are written when `md_residence` returns,
+            # which is BEFORE any extension happens -- so a 5.2 ns run kept a
+            # 1.2 ns rmsd trace. Engagement was then measured over the full run
+            # (rebuilt movie) while the pose-stability half of the same gate came
+            # from the first 1.2 ns, inside one row, with nothing saying so. It
+            # also made every adaptive plot stop at 1.2 ns on the x-axis.
+            if run_ps > float(args.sweep_ps):
+                try:
+                    from shared import gromacs_analysis as _ga
+                    _ga.analyse(rep)
+                except Exception as exc:                   # noqa: BLE001
+                    log.warning("%s: could not re-analyse the extended "
+                                "trajectory (%s); RMSD stays over the first "
+                                "%.0f ps and the row says so",
+                                cand, exc, args.sweep_ps)
             rec.update({"sweep_ps": run_ps, "adaptive": True,
                         "left_site": ad["left"], "left_at_ps": ad["left_at_ps"],
                         "final_dist_a": ad["last_dist_a"],
@@ -962,6 +1003,10 @@ def main() -> None:
         # than at elevation time means the verdict travels with the row instead
         # of being re-derived by whoever reads it next.
         rec.update(rmsd_stats(rep))
+        # WHICH WINDOW THE RMSD COVERS, READ BACK FROM THE TRACE ITSELF rather
+        # than assumed to equal the run. If a re-analysis failed, this says so
+        # on the row instead of leaving two windows in one record.
+        rec["rmsd_window_ps"] = _rmsd_window_ps(rep)
         rec.update(elevation_verdict(rec))
         rows.append(rec)
         log.info("%s: engaged %.1f%% within %.1f A, rmsd max %s mean %s -> %s",

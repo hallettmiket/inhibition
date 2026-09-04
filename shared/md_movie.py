@@ -162,6 +162,7 @@ SURF_SHELL_A = 14
 def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
                 three_js: str, nac_lo: float | None = None,
                 nac_hi: float | None = None,
+                total_ps: float | None = None, fate: str | None = None,
                 elem_id: str = "gl") -> str:
     """A self-contained 3Dmol block: surface, charge colouring, labels, slider.
 
@@ -203,6 +204,11 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
   const DSG = {json.dumps(dist)}, LABELS = {json.dumps(labels)},
         LPOS = {json.dumps(positions)};
   const LO = {_lo}, HI = {_hi};
+  // SIMULATION TIME PER FRAME. A frame index says nothing about when in the run
+  // it happened, and runs are no longer the same length -- frame 60 of a 1.2 ns
+  // sweep and frame 60 of a 10 ns one are 8 ns apart.
+  const TOTAL_PS = {("null" if total_ps is None else float(total_ps))};
+  const FATE = {json.dumps(fate) if fate else "null"};
   const box = document.getElementById('{elem_id}');
   const raw = document.getElementById('pdbdata-{elem_id}').textContent;
   let viewer = null, frame = 0, timer = null, surf = null, surfFrame = -1;
@@ -289,9 +295,17 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
       }}
       const d = DSG[frame];
       document.getElementById('{elem_id}-ftxt').textContent =
-        frame + ' / ' + (DSG.length - 1) + '   warhead\\u2192SG ' +
+        (TOTAL_PS == null || DSG.length < 2
+           ? frame + ' / ' + (DSG.length - 1)
+           : (TOTAL_PS * frame / (DSG.length - 1) / 1000).toFixed(2) + ' ns'
+             + ' / ' + (TOTAL_PS / 1000).toFixed(TOTAL_PS >= 10000 ? 0 : 1) + ' ns')
+        + '   warhead\\u2192SG ' +
         (d == null ? '\\u2014' : d.toFixed(2) + ' \\u00c5' +
-          (d >= LO && d < HI ? '  (attack ready)' : ''));
+          (d >= LO && d < HI ? '  (attack ready)' : '')) +
+        // WHY THE MOVIE ENDS. On the last frame, say whether the run stopped
+        // because the molecule left or because it reached the cap -- otherwise
+        // the end of every movie looks identical.
+        (FATE && frame === DSG.length - 1 ? '   \\u2014 ' + FATE : '');
       viewer.render();
     }});
   }}

@@ -162,3 +162,54 @@ def test_adaptive_is_off_by_default():
                         "--help"], capture_output=True, text=True)
     assert "--adaptive-max-ps" in h.stdout
     assert "0 = off" in h.stdout, "the default must be stated as off"
+
+
+# --------------------- the analysis files must track the trajectory ---------
+def test_the_rmsd_window_is_read_back_not_assumed(tmp_path):
+    """Half the gate comes from `rmsd.xvg`; the row must say what it covers.
+
+    THE DEFECT (found 2026-09-03, by @twu383 asking whether the viewer showed
+    how long a run held). `rmsd.xvg` is written when `md_residence` returns,
+    which is BEFORE any adaptive extension. A 5.2 ns run therefore kept a 1.2 ns
+    RMSD trace, so `frac_attack_ready` covered the full run while `rmsd_max_a`
+    beside it covered the first quarter -- two windows inside one row, with
+    nothing saying so. It also made every adaptive plot stop at 1.2 ns.
+
+    `t4_b00da4134a24_m50` read rmsd_max 0.224 nm on the stale trace and
+    0.810 nm over its real 5.2 ns, which flips the pose-held half of the gate.
+    """
+    a = _asw()
+    (tmp_path / "rmsd.xvg").write_text(
+        "# c\n@ t\n0.0 0.10\n2.5 0.30\n5.2 0.81\n")     # gmx writes ns
+    assert a._rmsd_window_ps(tmp_path) == pytest.approx(5200.0), (
+        "the window is not read back from the trace itself")
+    assert a._rmsd_window_ps(tmp_path / "nope") is None
+
+
+def test_the_protein_rmsd_cache_is_keyed_on_currency(tmp_path):
+    """A cache keyed on EXISTENCE cannot notice a longer trajectory.
+
+    `protein_rmsd` returned its output whenever the file merely existed, so
+    after an extension rewrote `whole.xtc` the protein trace still covered the
+    first 1.2 ns while the ligand trace covered the whole run -- one line
+    stopping a quarter of the way across the plot, which reads as a deliberate
+    choice rather than a stale file.
+    """
+    import inspect
+    from shared import gromacs_analysis as ga
+    src = inspect.getsource(ga.protein_rmsd)
+    assert "st_mtime" in src, (
+        "protein_rmsd does not compare its output against the trajectory; a "
+        "stale trace will be served after every extension")
+    assert "whole" in src
+
+
+def test_a_stale_analysis_is_refreshed_after_an_extension():
+    """The extension path must redo the analysis, not just the movie."""
+    src = (REPO / "scripts" / "attack_sweep.py").read_text()
+    i = src.find("adaptive_extend(cand, rep")
+    assert i > 0, "the adaptive call site moved"
+    seg = src[i:i + 1500]
+    assert "gromacs_analysis" in seg and "analyse" in seg, (
+        "attack_sweep does not re-analyse after extending; rmsd.xvg and "
+        "mindist.xvg would keep covering only the first chunk")

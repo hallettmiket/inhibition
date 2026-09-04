@@ -230,9 +230,20 @@ def protein_rmsd(wd: Path) -> Path | None:
     trace should degrade the plot, not fail the report.
     """
     out = wd / PROT_RMSD_XVG
-    if out.is_file() and out.stat().st_size > 0:
-        return out
     tpr, whole, ndx = wd / "prod.tpr", wd / "whole.xtc", wd / "analysis.ndx"
+    # THE CACHE IS KEYED ON CURRENCY, NOT ON EXISTENCE. This returned the file
+    # whenever it merely existed, so after an adaptive extension -- which
+    # rewrites `whole.xtc` over the longer trajectory -- the protein trace kept
+    # covering the first 1.2 ns while the ligand trace beside it covered 5.2.
+    # The plot then showed one line stopping a quarter of the way across and the
+    # other continuing, which reads as the protein having been measured for less
+    # time on purpose. Same shape as every pinned default in this project: right
+    # when written, unable to announce that it no longer is.
+    if out.is_file() and out.stat().st_size > 0:
+        if not whole.is_file() or out.stat().st_mtime >= whole.stat().st_mtime:
+            return out
+        log.info("%s: protein RMSD is older than the trajectory; recomputing",
+                 wd.name)
     if not all(p.is_file() and p.stat().st_size for p in (tpr, whole, ndx)):
         return None
     try:

@@ -106,6 +106,7 @@ def main() -> None:
             # carry the verdict under the SAME definition rather than one having
             # it and the other not.
             st.update(asw.rmsd_stats(rep))
+            st["rmsd_window_ps"] = asw._rmsd_window_ps(rep)
         except Exception as exc:                          # noqa: BLE001
             log.warning("%s: %s", ident, exc)
             missed += 1
