@@ -167,6 +167,7 @@ def main() -> None:
     import attack_sweep as _asw
     _th = _asw.elevation_thresholds()
     occ_bar = _th["occupancy_min"]
+    occ_window = float(getattr(_asw, "COMMON_WINDOW_PS", 1200.0))
 
     def _held(r):
         mxa, mna = r.get("rmsd_max_a"), r.get("rmsd_mean_a")
@@ -183,7 +184,26 @@ def main() -> None:
     # ones at 0.189 nm. The DataFrame-side logic was right; only the
     # rendering read a name that no longer existed.
     ok["gate_held"] = ok.apply(_held, axis=1)
-    ok["gate_eng"] = ok.frac_attack_ready.fillna(0.0).astype(float)
+    # THE COMPARABLE FIGURE RANKS, ALWAYS. `frac_attack_ready` is a fraction of
+    # whatever the run actually ran, and since 2026-09-03 that varies per mode
+    # (adaptive length: stop when the molecule leaves, cap 10 ns). Ranking on it
+    # would put a 1.2 ns run's 33.9% above a 10 ns run's 26.7% as though they
+    # were the same measurement -- two populations under one column, which is
+    # the defect `frac_attack_ready_common` exists to prevent. That column is
+    # the first 1.2 ns on EVERY row, and equals the full-run figure on the 702
+    # fixed-length rows, so nothing already ranked moves for the wrong reason.
+    if "frac_attack_ready_common" in ok.columns:
+        eng = ok.frac_attack_ready_common.astype(float)
+        # A row with no common-window reading falls back to the full-run figure
+        # ONLY when the run is exactly one window long; otherwise it is left out
+        # of the ranking rather than given a number from a different window.
+        gap = eng.isna() & (ok.get("sweep_ps", pd.Series(index=ok.index)) == occ_window)
+        eng = eng.where(~gap, ok.frac_attack_ready.astype(float))
+        ok["gate_eng"] = eng.fillna(0.0)
+        ok["eng_basis"] = "first 1.2 ns"
+    else:
+        ok["gate_eng"] = ok.frac_attack_ready.fillna(0.0).astype(float)
+        ok["eng_basis"] = "full run"
     ok["gate_pass"] = ok["gate_held"] & (ok["gate_eng"] >= occ_bar)
     ok["gate_tier"] = np.where(ok["gate_pass"], 0, np.where(ok["gate_held"], 1, 2))
     ok = ok.sort_values(["gate_tier", "gate_eng", "rmsd_max"],
@@ -217,11 +237,28 @@ def main() -> None:
         # on the gate, whose leading term is engagement, so engagement is the
         # headline and stability sits beside it. Showing max RMSD here while
         # sorting on something else is how a reader infers the wrong order.
+        # The headline is the COMPARABLE figure, because that is what the rail
+        # is sorted on. Showing the full-run percentage here while ordering on
+        # the common window is how a reader infers the wrong ranking.
+        ar = float(getattr(r, "gate_eng", ar))
         headline = f"{ar*100:.0f}% engaged"
         held = bool(getattr(r, "gate_held", False))
         passes = bool(getattr(r, "gate_pass", False))
         rtxt = f"{rmx:.3f} nm max" if rmx is not None else "no trace"
-        meta = f"{'held' if held else 'left'} · {rtxt}"
+        # HOW LONG IT RAN, AND WHETHER IT LEFT. Under adaptive length the run
+        # length IS a result -- a mode that held for 10 ns and one that left at
+        # 1.2 are not the same finding, and without this the page shows two
+        # engagement figures with no way to tell which window produced them.
+        sps = getattr(r, "sweep_ps", None)
+        ltxt = ""
+        if sps is not None and not pd.isna(sps):
+            left_site = getattr(r, "left_site", None)
+            if left_site is not None and not pd.isna(left_site):
+                ltxt = (f" · left at {float(sps)/1000:.1f} ns" if bool(left_site)
+                        else f" · held {float(sps)/1000:.0f} ns")
+            elif float(sps) != occ_window:
+                ltxt = f" · {float(sps)/1000:.1f} ns"
+        meta = f"{'held' if held else 'left'} · {rtxt}{ltxt}"
         if passes:
             meta = "ELEVATE · " + meta
         cls = html.escape(str(getattr(r, "warhead_class", "") or "—"))
@@ -255,6 +292,12 @@ def main() -> None:
     n_near = int((ok.gate_tier == 1).sum())
     n_left = int((ok.gate_tier == 2).sum())
     n_ok = len(ok)
+    # HOW MANY ROWS ARE OF EACH KIND, for the legend. A page that mixes
+    # fixed-length and adaptive rows has to say so, and say how many.
+    _sps = ok.get("sweep_ps")
+    n_fixed = int((_sps == occ_window).sum()) if _sps is not None else n_ok
+    n_adaptive = int(ok.get("adaptive", pd.Series(False, index=ok.index))
+                     .fillna(False).astype(bool).sum())
 
     # A PAGE THAT CANNOT BE READ IS NOT A SWEEP THAT DID NOT RUN.
     #
@@ -328,6 +371,14 @@ def main() -> None:
    the allowance for brief spikes). Engagement is the headline because it leads
    the gate; stability sits beside it. <b>{n_pass}</b> of {n_ok} clear it,
    {n_near} held but under the engagement bar, {n_left} left the site.
+   <br><b>Engagement is measured over the first {occ_window/1000:.1f}&nbsp;ns of every
+   run</b>, not over the whole of it. Runs are no longer the same length &mdash;
+   a sweep now continues while the molecule is still in the site and stops when it
+   leaves, capped at 10&nbsp;ns &mdash; and a fraction of a 1.2&nbsp;ns run is not the
+   same quantity as a fraction of a 10&nbsp;ns one. The common window is identical
+   to the full-run figure for the {n_fixed} fixed-length rows, so nothing collected
+   earlier changed meaning. <b>{n_adaptive}</b> rows are adaptive; each says beside
+   it how long it ran and whether it left.
    <br><span class="muted">The movie's first frame is the start of
    <b>production</b>, after 300&nbsp;ps of unrestrained equilibration &mdash; not the
    docked pose. Every mode here was selected under 3.0&nbsp;&#8491; docked and the
