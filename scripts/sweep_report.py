@@ -113,13 +113,23 @@ def main() -> None:
     # adaptive length the page cannot assume which one it is looking at.
     _sps = s.get("sweep_ps")
     _left = s.get("left_site")
+    # THIS MODE'S OWN LENGTH, for every label on the page. The masthead carried
+    # a literal "10 ns" and the panel headings a module-level constant read from
+    # `md.sweep_ps`, so a 1.2 ns run was captioned "10 ns attack-geometry sweep"
+    # and so was a 5.2 ns adaptive one. Both were pins: right when written,
+    # unable to say they no longer describe the run in front of them.
+    run_ns = (float(_sps) / 1000.0 if _sps is not None and not pd.isna(_sps)
+              else float(_SWEEP_NS))
+    ns_txt = ("%.0f" % run_ns) if run_ns >= 10 else ("%.1f" % run_ns)
     if _sps is not None and not pd.isna(_sps):
         _ns = float(_sps) / 1000.0
+        # ONLY THE FATE HERE. The masthead already appends the length, so
+        # adding it again read "Reaches attack geometry — 1.2 ns · 1.2 ns
+        # attack-geometry sweep". A fixed-length run has no fate to report --
+        # it stopped because the clock ran out, which the length already says.
         if _left is not None and not pd.isna(_left):
-            verdict += (f" — left the site at {_ns:.1f} ns" if bool(_left)
-                        else f" — held to the {_ns:.0f} ns cap")
-        else:
-            verdict += f" — {_ns:.1f} ns"
+            verdict += (" — left the site" if bool(_left)
+                        else " — still in the site at the cap")
 
     # ---- the movie, from the asset the sweep build wrote --------------------
     movie_block = ""
@@ -162,7 +172,7 @@ def main() -> None:
         except Exception as exc:                           # noqa: BLE001
             movie_block = rt.callout(
                 "Movie unavailable",
-                f"The {_SWEEP_NS} ns trajectory rendered no viewer: <code>{html.escape(str(exc))}</code>. "
+                f"The {ns_txt} ns trajectory rendered no viewer: <code>{html.escape(str(exc))}</code>. "
                 "The readings below are unaffected — they come from the trajectory "
                 "directly.", "warn")
 
@@ -245,7 +255,7 @@ def main() -> None:
         struct = rt.callout("Structure unavailable",
                             f"<code>{html.escape(str(exc))}</code>", "warn")
     blocks = [
-        rt.masthead(ident, f"{verdict} &middot; 10 ns attack-geometry sweep",
+        rt.masthead(ident, f"{verdict} &middot; {ns_txt} ns attack-geometry sweep",
                     "sweep result",
                     [("attack-ready", f"{(ar or 0)*100:.1f}%"),
                      ("visits", str(vis)),
@@ -262,19 +272,19 @@ def main() -> None:
         (f'<details class="panel" open><summary>Trajectory plots'
          f'<span class="hint">ligand RMSD with its maximum, and warhead–Cys113 '
          f'distance against the attack window</span></summary><div class="pbody">'
-         f'<img src="data:image/png;base64,{img}" alt="{_SWEEP_NS} ns trajectory"></div>'
+         f'<img src="data:image/png;base64,{img}" alt="{ns_txt} ns trajectory"></div>'
          f'</details>') if img else "",
         # OPEN BY DEFAULT (@tt8804: "update the sweep results page to show the md
         # movies"). The movie was built for all 147 modes and embedded in every
         # page -- but inside a collapsed <details>, while Structure, plots and
         # readings all open. A panel nobody expands is a panel nobody knows is
         # there, which is indistinguishable from one that was never built.
-        (f'<details class="panel" open><summary>{_SWEEP_NS} ns movie'
+        (f'<details class="panel" open><summary>{ns_txt} ns movie'
          f'<span class="hint">surface by charge, ligand in yellow, CA-fitted</span>'
          f'</summary><div class="pbody">{movie_block}</div></details>')
         if movie_block else "",
         '<details class="panel" open><summary>Sweep readings'
-        f'<span class="hint">what the {_SWEEP_NS} ns run measured</span></summary>'
+        f'<span class="hint">what the {ns_txt} ns run measured</span></summary>'
         f'<div class="pbody">{sweep_tbl}</div></details>',
         '<details class="panel"><summary>How it was selected'
         '<span class="hint">the docked numbers — provenance, not evidence</span>'
