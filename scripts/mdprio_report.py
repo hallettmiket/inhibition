@@ -50,6 +50,7 @@ from shared import md_movie as mov                  # noqa: E402
 from shared import mode_key                         # noqa: E402
 from shared import run_paths as rp        # noqa: E402
 from shared import residence_tier as rtier            # noqa: E402
+from shared import nac_criterion as nac               # noqa: E402
 from shared import target_config as _tc               # noqa: E402
 
 #: The triage sweep's length, DERIVED. Every one of these strings said "10 ns"
@@ -701,16 +702,36 @@ def main() -> None:
     # site; against 0.35 alone it called a run that never left a failure.
     # shared/residence_tier owns the rule, so this page and the combined rail
     # cannot drift on what "optimal" means.
-    tier_key = rtier.tier(res.get("rmsd_max_nm"), res.get("dissociated"),
-                          res.get("residence_frac"))
-    verdict = (f"Left at {res['left_at_ns']:.0f} ns" if tier_key == "left"
-               else rtier.label(tier_key).capitalize())
-
     # The NAC series needs the fitted movie frames, so it comes after the movie.
+    # IT IS COMPUTED BEFORE THE TIER because the tier now depends on it: a run
+    # that held the pocket without ever putting its warhead in reach is `inert`,
+    # not `optimal`, and that cannot be decided without the warhead series.
     nacs = (nac_series(args.candidate, rep, mpdb, total_ns)
             if not args.no_movie else None)
     if nacs is None:
         log.warning("no warhead->SG distance/angle series for %s", args.candidate)
+
+    # ENGAGED FRACTION OVER THE WHOLE RUN, on the same criterion the sweep uses.
+    # None when the series is unavailable, and `tier` then falls back to the
+    # ligand-only verdict rather than raising -- losing a real residence reading
+    # would be worse than not upgrading it.
+    engaged_frac = None
+    if nacs is not None:
+        import numpy as _np
+        _d = _np.asarray(nacs["dist"], dtype=float)
+        _lo, _hi = nac.attack_ready_window()
+        engaged_frac = float(((_d >= _lo) & (_d < _hi)).mean())
+
+    tier_key = rtier.tier(res.get("rmsd_max_nm"), res.get("dissociated"),
+                          res.get("residence_frac"), engaged_frac)
+    verdict = (f"Left at {res['left_at_ns']:.0f} ns" if tier_key == "left"
+               else rtier.label(tier_key).capitalize())
+    if engaged_frac is not None and tier_key != "inert":
+        # THE NUMBER BESIDE THE WORD. "Optimal" and "held" are verdicts about
+        # the LIGAND; a reader takes them as verdicts about the candidate. Two
+        # 100 ns runs held the pocket with the warhead 5.7-7 A away the whole
+        # time, and one of them rendered as "Optimal".
+        verdict += f" &middot; warhead engaged {engaged_frac*100:.0f}% of the run"
     img = figure(args.candidate, s, res, er, nacs)
 
     # THE SWEEP IS NOT A RESULT AND NO LONGER SITS BESIDE ONE (#55). It is

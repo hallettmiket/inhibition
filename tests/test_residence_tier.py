@@ -26,8 +26,39 @@ from shared import run_paths as rp               # noqa: E402
 from shared import target_config as tc           # noqa: E402
 
 
-def test_four_tiers_and_nothing_else():
-    assert [k for k, _, _ in rt.TIERS] == ["optimal", "held", "unstable", "left"]
+def test_five_tiers_and_nothing_else():
+    """`inert` was added 2026-09-06 -- held the pocket, warhead never in reach.
+
+    Two 100 ns runs held beautifully and never once put their warhead near
+    Cys113. `t4_f431658edd9a_m37` had the best residence in the project (mean
+    ligand RMSD 0.124 nm, n_independent 462 -- genuinely still) with the warhead
+    engaged 0.0% of 100 ns, and rendered as "Optimal". A verdict about the
+    LIGAND was being read as a verdict about the CANDIDATE.
+    """
+    assert [k for k, _, _ in rt.TIERS] == [
+        "optimal", "held", "inert", "unstable", "left"]
+
+
+def test_a_warhead_that_never_engages_cannot_be_optimal():
+    """The whole point: in a covalent screen "optimal" means optimal to react."""
+    # perfect residence, warhead never in reach
+    assert rt.tier(0.20, False, 1.0, 0.0) == "inert"
+    assert rt.tier(0.20, False, 1.0, 0.005) == "inert"
+    # the same run WITH engagement is optimal again
+    assert rt.tier(0.20, False, 1.0, 0.40) == "optimal"
+    # and a caller that cannot measure the warhead still gets a residence
+    # verdict rather than an exception -- losing a real reading would be worse
+    assert rt.tier(0.20, False, 1.0) == "optimal"
+
+
+def test_inert_is_not_green():
+    """A molecule that cannot reach the cysteine is not a hit, however still."""
+    tone = dict((k, c) for k, _, c in rt.TIERS)
+    assert tone["inert"] == "warn"
+    assert tone["optimal"] == "good" and tone["held"] == "good"
+    # and it keeps a distinct WORD, because colour is never the only signal
+    labels = [lab for _, lab, _ in rt.TIERS]
+    assert len(set(labels)) == len(labels)
 
 
 def test_optimal_bar_is_the_production_one_not_the_sweep_bar():

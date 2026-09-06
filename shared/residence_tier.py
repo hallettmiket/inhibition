@@ -52,9 +52,24 @@ BOUND_NM = 1.0
 #: reading of the same good outcome -- and every tier still carries a distinct
 #: WORD, because report_theme's own note is that these tables are read by people
 #: with red-green deficiency and colour can never be the only signal.
+#: FIVE TIERS since 2026-09-06. `inert` was added because two 100 ns runs held
+#: the pocket beautifully and never once put their warhead in reach of Cys113:
+#: `t4_f431658edd9a_m37` scored the best residence in the project (mean ligand
+#: RMSD 0.124 nm, 6.7 contacts, n_independent 462 -- genuinely still, not slowly
+#: drifting) with the warhead engaged **0.0% of 100 ns**, parked at 5.65 A and
+#: 66 deg off-normal from the first quarter to the last. It rendered as
+#: **"Optimal"**.
+#:
+#: That is the project's signature defect in a label: a verdict about the LIGAND
+#: read as a verdict about the CANDIDATE. In a covalent screen "optimal" has to
+#: mean optimal for the reaction, not for sitting still. `inert` is yellow, not
+#: green, because a molecule that cannot reach the cysteine is not a hit however
+#: still it sits -- and it keeps its own WORD, since colour is never the only
+#: signal here.
 TIERS = (
     ("optimal", "optimal", "good"),                    # green
     ("held", "held", "good"),                          # green
+    ("inert", "held, warhead never engaged", "warn"),  # yellow
     ("unstable", "held, unstable", "warn"),            # yellow
     ("left", "left", "bad"),                           # red
 )
@@ -83,8 +98,16 @@ def residence_floor() -> float:
     return float(tc.md_held_residence_floor())
 
 
+#: A warhead engaged in less than this fraction of the run never got into
+#: position at all. Deliberately near zero: this separates "never" from "rarely",
+#: not "often" from "sometimes", and the two runs that motivated it sat at
+#: exactly 0.000 and 0.080.
+ENGAGED_FLOOR = 0.01
+
+
 def tier(rmsd_max_nm: float | None, dissociated: bool | None,
-         residence_frac: float | None = None) -> str:
+         residence_frac: float | None = None,
+         engaged_frac: float | None = None) -> str:
     """Return the tier key for one run.
 
     Raises on unusable input rather than defaulting. A missing RMSD is "not
@@ -104,6 +127,15 @@ def tier(rmsd_max_nm: float | None, dissociated: bool | None,
                          "hold from an excursion that came back")
     if float(residence_frac) < residence_floor():
         return "unstable"
+    # THE WARHEAD DECIDES WHETHER A CLEAN HOLD IS A CANDIDATE.
+    #
+    # Optional rather than required, because this function is also called on
+    # runs where the geometry series is unavailable and raising there would lose
+    # a real residence verdict. But WHEN IT IS KNOWN it outranks the RMSD: a
+    # molecule pinned 5.7 A from Cys113 for 100 ns is not "optimal", whatever
+    # its ligand RMSD says.
+    if engaged_frac is not None and float(engaged_frac) < ENGAGED_FLOOR:
+        return "inert"
     return "optimal" if float(rmsd_max_nm) < optimal_nm() else "held"
 
 
