@@ -729,3 +729,56 @@ def test_the_mode_is_stated_once_in_a_rail_row():
     for frag in ("<span class='mid-id'>{html.escape(par)}",
                  "<span class='mid-id'>{html.escape(parent)}"):
         assert frag in src, f"a rail row still prints the full ident: {frag}"
+
+
+def test_one_corrupt_row_cannot_take_down_the_whole_report(tmp_path, monkeypatch):
+    """A row that cannot identify a mode is dropped at LOAD, loudly.
+
+    THE OUTAGE (2026-09-04). One row in one results file had its columns
+    shifted -- an `elevate_why` string sitting in `pose_rank`, booleans in
+    `mode` and `parent_ident`, no `ident` at all. `int(...)` on it raised, and
+    that single record took down `build_gui` AND `sweep_combine`, so the GUI sat
+    frozen at its last good build while 1,544 sound results were on disk.
+
+    Patching each consumer separately is the wrong shape: the loader validates
+    once and everything downstream inherits it. The rule is about IDENTITY, not
+    plausibility -- a results row needs an ident, and a pose_rank/mode that is
+    present must be a number.
+    """
+    import pandas as pd
+    from shared import sweep_state as ss
+
+    d = tmp_path / "attack_sweep_zz"
+    d.mkdir()
+    pd.DataFrame({
+        "ident": ["t4_a_m1", None, "t4_b_m2"],
+        "parent_ident": ["t4_a", False, "t4_b"],
+        "pose_rank": [2, "pose left and warhead not engaged", 3],
+        "mode": [1, False, 2],
+        "status": ["ok", "ok", "ok"],
+        "frac_attack_ready": [0.4, 0.9, 0.1],
+    }).to_csv(d / "attack_sweep_1.csv", index=False)
+    monkeypatch.setattr(ss.rp, "BLACKSMITH", tmp_path)
+    monkeypatch.setattr(ss.rp, "sweep_topic", lambda t=None: "attack_sweep_zz")
+    monkeypatch.setattr(ss.rp, "sweep_result_files",
+                        lambda *a, **k: sorted(d.glob("*.csv")))
+
+    out = ss.results()
+    assert len(out) == 2, (
+        f"expected the corrupt row to be dropped, got {len(out)} rows")
+    assert set(out.ident.astype(str)) == {"t4_a_m1", "t4_b_m2"}
+    # and the surviving rows must be usable as ints, which is what crashed
+    assert out.pose_rank.astype(int).tolist() == [2, 3]
+
+
+def test_mode_key_returns_null_rather_than_raising_on_a_bad_mode():
+    """The second half of the same outage, one module along."""
+    import pandas as pd
+    from shared import mode_key as mk
+    df = pd.DataFrame({"ident": ["t4_a_m1", "t4_b_m2"],
+                       "parent_ident": ["t4_a", "t4_b"],
+                       "mode": [1, "False"]})
+    out = mk.add_key(df)
+    assert out.mode_key.iloc[0] == "t4_a|1"
+    assert pd.isna(out.mode_key.iloc[1]) or out.mode_key.iloc[1] is None, (
+        "an unparseable mode produced a key instead of being excluded")

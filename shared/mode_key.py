@@ -22,7 +22,10 @@ from __future__ import annotations
 
 import re
 
+import logging
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 #: `t4_x_m3` -> ("t4_x", 3). Anchored at the end so a molecule whose own name
 #: contains `_m` followed by digits is not truncated.
@@ -68,9 +71,32 @@ def add_key(df: pd.DataFrame, bare_is_mode_zero: bool = False) -> pd.DataFrame:
                                     pd.Series([m for _, m in parsed], index=d.index))
     if bare_is_mode_zero:
         d["mode"] = d["mode"].fillna(0)
-    d["mode_key"] = d.apply(
-        lambda r: (f"{r.parent_ident}|{int(r['mode'])}"
-                   if pd.notna(r["mode"]) else None), axis=1)
+    # A ROW THAT CANNOT BE KEYED IS DROPPED FROM THE KEY, NOT RAISED ON.
+    #
+    # `int(r["mode"])` raised ValueError on a single corrupt row whose columns
+    # had shifted (an `elevate_why` string sitting in `pose_rank`, booleans in
+    # `mode`), and that one row took down `build_gui` AND `sweep_combine` --
+    # so the whole GUI froze at its last good build while 1,544 perfectly good
+    # results sat on disk. One unparseable record must not be able to do that.
+    #
+    # It is a WARNING and a null key, not a silent zero: a row with no mode
+    # cannot be joined to anything, and giving it mode 0 would attach it to a
+    # real mode of the same molecule -- which is the failure this module exists
+    # to prevent.
+    def _key(r):
+        m = r["mode"]
+        if pd.isna(m):
+            return None
+        try:
+            return f"{r.parent_ident}|{int(m)}"
+        except (TypeError, ValueError):
+            return None
+
+    d["mode_key"] = d.apply(_key, axis=1)
+    unkeyed = int(d["mode_key"].isna().sum() - d["mode"].isna().sum())
+    if unkeyed > 0:
+        log.warning("%d row(s) have a mode that is not an integer and cannot be "
+                    "keyed; they are excluded from mode-level joins", unkeyed)
     return d
 
 

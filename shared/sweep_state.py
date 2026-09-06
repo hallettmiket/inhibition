@@ -63,6 +63,34 @@ def results() -> pd.DataFrame:
     # unblocked and re-run must read as ok, not carry its old failure.
     d = d.sort_values("_t").drop_duplicates("ident", keep="last")
 
+    # A ROW THAT CANNOT IDENTIFY A MODE IS NOT A RESULT.
+    #
+    # One corrupt row -- columns shifted, so an `elevate_why` string sat in
+    # `pose_rank` and booleans in `mode` and `parent_ident`, with no `ident` at
+    # all -- took down `build_gui` AND `sweep_combine` for hours: the GUI froze
+    # at its last good build while 1,544 sound results sat on disk. Every
+    # consumer then had to be patched separately, which is the wrong shape. The
+    # LOADER validates, once, and everything downstream inherits it.
+    #
+    # The rule is minimal and about identity, not plausibility: a results row
+    # needs an `ident`, and where `pose_rank` or `mode` are present they must be
+    # numbers. Anything else is dropped LOUDLY -- silently discarding results is
+    # how a campaign comes to under-report itself.
+    if not d.empty:
+        keep = d.get("ident", pd.Series(index=d.index, dtype=object)).notna()
+        for c in ("pose_rank", "mode"):
+            if c in d.columns:
+                v = d[c]
+                keep &= v.isna() | pd.to_numeric(v, errors="coerce").notna()
+        bad = int((~keep).sum())
+        if bad:
+            import logging as _lg
+            _lg.getLogger(__name__).warning(
+                "%d sweep row(s) cannot identify a mode (missing ident, or a "
+                "non-numeric pose_rank/mode) and are dropped; the files are "
+                "append-only so the rows remain on disk", bad)
+            d = d[keep]
+
     # BACKFILL THE COMPARABLE COLUMN FOR PRE-ADAPTIVE ROWS.
     #
     # `frac_attack_ready_common` (engagement over the first 1.2 ns, whatever the
