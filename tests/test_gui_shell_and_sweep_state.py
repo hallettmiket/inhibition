@@ -782,3 +782,42 @@ def test_mode_key_returns_null_rather_than_raising_on_a_bad_mode():
     assert out.mode_key.iloc[0] == "t4_a|1"
     assert pd.isna(out.mode_key.iloc[1]) or out.mode_key.iloc[1] is None, (
         "an unparseable mode produced a key instead of being excluded")
+
+
+def test_a_built_page_is_never_replaced_by_a_placeholder(tmp_path, monkeypatch):
+    """Size is a fact about the file; wording is a claim about it.
+
+    THE CLOBBER (2026-09-06). `build_gui` writes "awaiting stage" stubs for
+    pages whose stage has not run, skipping any file that does not look like a
+    stub -- decided by a substring in the first 2 KB. An 8 KB stub landed on top
+    of a 32 MB sweep report holding 1,544 results, so the page read "No sweep
+    has finished yet" on a campaign that was 65% done.
+
+    `build_gui` and `sweep_combine` both write sweep.html, so the race is real
+    whenever a hand-run rebuild overlaps the refresher. The size check removes
+    it: a placeholder is a few KB and a real report is megabytes.
+    """
+    import importlib.util as u
+    spec = u.spec_from_file_location("bg_under_test",
+                                     REPO / "scripts" / "build_gui.py")
+    m = u.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(m)
+    except Exception as exc:                              # noqa: BLE001
+        pytest.skip(f"build_gui not importable here: {exc}")
+
+    assert m._PLACEHOLDER_MAX_BYTES >= 16 * 1024, (
+        "the threshold is below a plausible stub size and would refresh "
+        "nothing")
+    assert m._PLACEHOLDER_MAX_BYTES <= 1024 * 1024, (
+        "the threshold is so high a genuinely stalled placeholder is never "
+        "refreshed")
+
+    src = (REPO / "scripts" / "build_gui.py").read_text()
+    i = src.find("_PLACEHOLDER_MAX_BYTES", src.find("for href, label, why in"))
+    assert i > 0, "the size guard is not inside the placeholder loop"
+    # and it must be checked BEFORE the text test, or a large file is still read
+    j = src.find('_PLACEHOLDER not in head', src.find("for href, label, why in"))
+    assert 0 < i < j, (
+        "the size check runs after the wording check; a 32 MB page would still "
+        "be parsed and could still be judged a stub")

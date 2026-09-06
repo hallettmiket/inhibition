@@ -47,6 +47,12 @@ log = logging.getLogger("build-gui")
 #: Marks a page as an awaiting-stage stand-in, so it can be refreshed
 #: with current counts and so a REAL page is never mistaken for one.
 _PLACEHOLDER = "<!--murmurent:awaiting-stage-->"
+
+#: A page bigger than this cannot be an "awaiting stage" stub. Stubs are ~8 KB;
+#: the sweep report is tens of MB. Deliberately generous -- the guard only has
+#: to separate a stub from a real report, and erring high means a genuinely
+#: stalled placeholder is still refreshed.
+_PLACEHOLDER_MAX_BYTES = 64 * 1024
 OUT = rp.reports_dir()
 
 #: The palette is the ranking view's, verbatim, because "uniform" is the whole
@@ -455,6 +461,18 @@ def main() -> None:
         # is the same disagreement this change set out to remove. The marker is
         # what the real builders overwrite, so a built page is never clobbered.
         if p.is_file():
+            # A BUILT PAGE IS NEVER A PLACEHOLDER, WHATEVER ITS TEXT SAYS.
+            #
+            # The marker test below reads the first 2 KB and decides from a
+            # substring. That is a claim about wording, and on 2026-09-06 an
+            # 8 KB "awaiting stage" stub landed on top of a 32 MB sweep report
+            # containing 1,544 results -- the page read "No sweep has finished
+            # yet" on a campaign that was 65% done. Size is a fact about the
+            # file that no wording can fake: a placeholder is a few KB and a
+            # real report is megabytes, so anything substantial is left alone
+            # before the text is even looked at.
+            if p.stat().st_size > _PLACEHOLDER_MAX_BYTES:
+                continue
             head = p.read_text(errors="replace")[:2000]
             # The title fallback catches placeholders written before the marker
             # existed. Without it those pages read as already-built and kept
