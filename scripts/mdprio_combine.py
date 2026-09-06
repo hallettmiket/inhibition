@@ -95,15 +95,51 @@ def _sweep() -> pd.DataFrame:
     # integer out of the filename and RAISED on `attack_sweep_21_corrected.csv`
     # -- a superseded row that had to be written under a new name because the
     # outputs root is append-only -- so this whole page stopped building.
-    fs = [str(f) for f in rp.sweep_result_files()]
-    if not fs:
-        return pd.DataFrame()
-    d = pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)
-    d = d[(d.get("sweep_ps", 0) > 1000) & (d.status == "ok")]
+    d = rp.read_sweep_results()
+    if d.empty:
+        return d
+    # COERCE BEFORE COMPARING, AND DROP ROWS THAT IDENTIFY NOTHING.
+    #
+    # Concatenating files whose columns have drifted leaves `sweep_ps` as an
+    # object column, and `> 1000` then raises TypeError comparing str to int --
+    # which took this whole page down. `sweep_state.results` already validates
+    # this way, but this reader goes to the raw files, so it has to apply the
+    # same rule rather than trusting them. One corrupt row (columns shifted, no
+    # ident) is enough to stop the report otherwise.
+    if "ident" in d.columns:
+        d = d[d.ident.notna()]
+    sp = pd.to_numeric(d.get("sweep_ps", pd.Series(index=d.index, dtype=float)),
+                       errors="coerce")
+    d = d[(sp > 1000) & (d.status.astype(str) == "ok")]
     # the mode that was ELEVATED is the best-scoring surviving mode, which is how
     # the worker chose it -- not necessarily mode 0
-    return d.sort_values("frac_attack_ready", ascending=False) \
-            .drop_duplicates("parent_ident")
+    d = d.assign(_fa=pd.to_numeric(d.get("frac_attack_ready"), errors="coerce"))
+    return d.sort_values("_fa", ascending=False).drop_duplicates("parent_ident")
+
+
+def _load_sweep_rows() -> pd.DataFrame:
+    """Every sweep row, coerced and validated. ONE loader for this module.
+
+    Both readers below concatenate the same files and both then compared
+    `sweep_ps > 1000`. Files whose columns have drifted leave that an OBJECT
+    column, so the comparison raises TypeError on str vs int -- and one corrupt
+    row (columns shifted, no ident) was enough to stop this whole page building.
+    Patching each comparison separately is how a third one gets written; the
+    load is the place that owes the guarantee.
+
+    Mirrors `sweep_state.results`' rule: a row needs an `ident`, and numeric
+    columns are coerced rather than trusted.
+    """
+    d = rp.read_sweep_results()
+    if d.empty:
+        return d
+    if "ident" in d.columns:
+        d = d[d.ident.notna()].copy()
+    for c in ("sweep_ps", "frac_attack_ready", "frac_attack_ready_common",
+              "pose_rank", "mode", "rmsd_max_a"):
+        if c in d.columns:
+            d[c] = pd.to_numeric(d[c], errors="coerce")
+    return d
 
 
 def _thumbs(idents) -> dict:
@@ -293,12 +329,11 @@ def _sweep_all() -> pd.DataFrame:
     # integer out of the filename and RAISED on `attack_sweep_21_corrected.csv`
     # -- a superseded row that had to be written under a new name because the
     # outputs root is append-only -- so this whole page stopped building.
-    fs = [str(f) for f in rp.sweep_result_files()]
-    if not fs:
-        return pd.DataFrame()
-    d = pd.concat([pd.read_csv(f) for f in fs], ignore_index=True)
-    d = d[d.get("sweep_ps", 0) > 1000].copy()
-    d["_ok"] = (d.status == "ok").astype(int)
+    d = _load_sweep_rows()
+    if d.empty:
+        return d
+    d = d[d.sweep_ps > 1000].copy()
+    d["_ok"] = (d.status.astype(str) == "ok").astype(int)
     return (d.sort_values(["_ok", "frac_attack_ready"], ascending=[False, False])
              .drop_duplicates("parent_ident"))
 

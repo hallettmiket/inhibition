@@ -31,7 +31,10 @@ them is archived browsable under `gui_archive/` -- they simply stop being read.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+_log = logging.getLogger(__name__)
 
 from . import target_config as tc
 
@@ -150,6 +153,53 @@ def sweep_result_files(t: str | None = None) -> list[Path]:
     import os as _os
     fs = _glob.glob(str(sweep_dir(t) / "attack_sweep_*.csv"))
     return [Path(f) for f in sorted(fs, key=_os.path.getmtime)]
+
+
+
+#: Sweep columns that must be numbers wherever they are present. Concatenating
+#: files whose columns have drifted leaves these as OBJECT columns, and every
+#: reader that compares one against a number then raises TypeError on str vs int.
+_SWEEP_NUMERIC = ("sweep_ps", "pose_rank", "mode", "frac_attack_ready",
+                  "frac_attack_ready_common", "rmsd_max_a", "rmsd_mean_a",
+                  "rmsd_window_ps", "left_at_ps", "min_dist_a",
+                  "median_dist_a", "start_dist_a", "n_visits")
+
+
+def read_sweep_results(t: str | None = None):
+    """This run's sweep rows, read once and made safe to compare against.
+
+    THE READ IS THE PLACE THAT OWES THE GUARANTEE. `sweep_result_files` fixed
+    which files and in what order; it did not fix what is IN them, and ten
+    readers then each concatenated the same files and compared `sweep_ps > 1000`
+    or `int(mode)` on their own. On 2026-09-06 a single corrupt row -- columns
+    shifted, an `elevate_why` string sitting in `pose_rank`, no `ident` -- made
+    those columns object-typed and took down `build_gui`, `sweep_combine`,
+    `mdprio_combine` and `mdprio_report` in turn. Each was patched separately,
+    which is how a fifth instance gets written.
+
+    Two rules, both about identity rather than plausibility:
+
+    * a row with no `ident` identifies nothing and is dropped;
+    * columns that must be numbers are COERCED, so a stray string becomes NaN
+      and a comparison against it is False rather than an exception.
+
+    Dropping is LOUD. Silently discarding results is how a campaign comes to
+    under-report itself. The files are append-only, so nothing is lost on disk.
+    """
+    import pandas as _pd
+    fs = sweep_result_files(t)
+    if not fs:
+        return _pd.DataFrame()
+    d = _pd.concat([_pd.read_csv(f) for f in fs], ignore_index=True)
+    if "ident" in d.columns:
+        bad = int(d.ident.isna().sum())
+        if bad:
+            _log.warning("%d sweep row(s) have no ident and are dropped", bad)
+            d = d[d.ident.notna()].copy()
+    for c in _SWEEP_NUMERIC:
+        if c in d.columns:
+            d[c] = _pd.to_numeric(d[c], errors="coerce")
+    return d
 
 
 def residence_dir(t: str | None = None) -> Path:

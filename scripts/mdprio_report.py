@@ -583,10 +583,12 @@ def main() -> None:
     sweep_ar = sweep_v = None
     # THIS RUN'S SWEEP. The unscoped `attack_sweep/` here put a previous
     # screen's triage readings on this run's report page.
-    _fs = [str(f) for f in rp.sweep_result_files()]
-    if _fs:
-        _sw = pd.concat([pd.read_csv(f) for f in _fs], ignore_index=True)
-        _sw = _sw[(_sw.get("sweep_ps", 0) > 1000) & (_sw.status == "ok")
+    # ONE VALIDATED READ. This concatenated the raw files and compared
+    # `sweep_ps > 1000`, which raises on the object column a single corrupt row
+    # produces -- the fourth place that broke the same way in one afternoon.
+    _sw = rp.read_sweep_results()
+    if len(_sw):
+        _sw = _sw[(_sw.sweep_ps > 1000) & (_sw.status.astype(str) == "ok")
                   & (_sw.parent_ident == parent)]
         if len(_sw):
             _b = _sw.sort_values("frac_attack_ready").iloc[-1]
