@@ -1,6 +1,6 @@
 # State of the project
 
-*Written 2026-07-31 at handover. Last updated 2026-09-02. Start here.*
+*Written 2026-07-31 at handover. Last updated 2026-09-06. Start here.*
 
 > **The measured numbers in §7 are generated now** — `scripts/refresh_orientation.py`,
 > and `tests/test_orientation_current.py` fails the suite if they drift (D0055,
@@ -25,6 +25,67 @@ Read alongside:
   problem, audited against the code rather than against the threads). **#4**
   remains the plan and reasoning of record. #2, #6 and #8 are closed into those
   two; read them for history, not for status.
+
+---
+
+## 0c. The sweep metric does not reproduce, and the campaign was stopped at 67%
+
+*2026-09-06. Read this before §0b and before trusting any ranking on this page.*
+
+**A single 1.2 ns engagement figure is not a measurement.** Nine modes were
+re-run independently — same molecule, same pose, same `gen-seed`/`ld-seed`
+(verified identical in the mdp files), same code path — and the median spread in
+engagement over the *same* first 1.2 ns is **18.9 percentage points**.
+`t4_2aa3875168b4_m28` read 37.2% in the campaign and **0.0% on two independent
+re-runs**. The run-to-run spread on one mode exceeds the whole population's
+median engagement of 2.5%. Seeds do not save it: a GPU trajectory is not
+bit-deterministic and MD is chaotic, so occupancy of a 2.8–3.5 Å window over
+1.2 ns is a small-sample statistic on a fast-decorrelating quantity. **D0113.**
+
+All nine re-runs came back *lower*, which is the regression-to-the-mean
+signature expected when the re-run set was chosen as the top of 683 draws. So
+**the top of the sweep ranking is largely noise.** Nothing was ever elevated on
+it, because the 60% gate was never reached — that is now fortunate rather than
+disappointing.
+
+**Two 100 ns runs, two distinct failure modes, neither supporting synthesis:**
+
+| | outcome |
+|---|---|
+| `t4_215b12bd9b34_m184` | **left the site** — mean ligand RMSD 1.854 nm, 27% of frames with zero protein contact |
+| `t4_88ae42890e2d_m239` | **held and disengaged** — mean RMSD 0.352 nm (the best in the campaign, better than sulfopin's own reactant form) while the warhead engaged only 8.0% of the run |
+
+**The rotation leads the departure by ~20 ns** (D0114). m239's off-normal angle
+by 10 ns block: 18, 18, 18, 29, 28, 54, 65°. Alignment halves at 30–40 ns while
+the warhead is still at ~4 Å; the distance does not fail until 50–60 ns. A low
+ligand RMSD with the reactive carbon 7–8 Å from the sulfur is a molecule that has
+settled into a comfortable **non-reactive** pose — the case the two readouts
+exist to separate, and the first time this campaign caught it.
+
+**Adaptive sweeps replaced the fixed 1.2 ns** (2026-09-03): production is
+extended in 2 ns chunks while the molecule is still in the site, capped at 10 ns.
+84% leave before the cap. Every row carries `frac_attack_ready_common` — always
+the first 1.2 ns — so variable-length runs stay comparable with the fixed-length
+ones, and `sweep_ps`, `left_site` and `left_at_ps` say what actually happened.
+
+**The campaign was stopped at 2,884 of 4,295 (67.1%)** — 1,599 completed, 1,285
+gave up, **0 failed**. Quality by worklist quintile shows why: engagement has no
+trend with position (ρ = +0.020), but ligand RMSD worsens steadily
+(ρ = +0.265, p = 5e-27), and the best candidates all came from the first two
+quintiles. The remaining 1,411 modes are the least promising positions. The
+supervisor resumes from `done_tasks` if that is ever wanted.
+
+**Open, and genuinely undecided: whether the angle belongs in the ranking.**
+D0111 dropped it because at a 3.0 Å cutoff it moved the *count* of discriminating
+modes from 1 to 0 — true, and a statement about the count rather than the
+ordering. It reorders enormously: across 1,597 rows the angle halves the engaged
+frames and takes modes above 30% from 17 to 3, and `t4_2bd5ba0aa666_m187` is
+**#5 of 1,597 on distance and #1257 with the angle** — close to Cys113 and never
+once in attack geometry. But D0110's objection stands: on a distance-selected set
+the angle is not class-neutral, because BDHI's off-normal collapses to ~9° inside
+3 Å for steric reasons while acrylamide's does not. Both figures are on every row
+(`frac_attack_ready`, `frac_attack_ready_angle`), so either ordering can be shown
+without recomputing anything.
 
 ---
 
@@ -473,7 +534,7 @@ within 24 h of being written.*
 <!-- AUTO:t2:END -->
 
 <!-- AUTO:decisions:BEGIN -->
-**111** decision records.
+**113** decision records.
 <!-- AUTO:decisions:END -->
 
 All six T_2 variants are ranked (size-decorrelated, D0049) and carry rebuilt
