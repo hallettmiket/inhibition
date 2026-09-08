@@ -213,3 +213,68 @@ def test_a_stale_analysis_is_refreshed_after_an_extension():
     assert "gromacs_analysis" in seg and "analyse" in seg, (
         "attack_sweep does not re-analyse after extending; rmsd.xvg and "
         "mindist.xvg would keep covering only the first chunk")
+
+
+# ------------------------------- RMSD departure, the sustained kind ---------
+def test_rmsd_departure_is_sustained_not_a_single_crossing(tmp_path, monkeypatch):
+    """@twu383: "MD until departure past 1 rmsd up to 100 ns".
+
+    CATALOGUE #34 IS THIS TEST DONE WRONG. `escaped = any(d >= 1.0 nm)` called
+    7 of 7 BPMD runs escaped INCLUDING sulfopin in its own crystal pose, because
+    a single excursion ends the verdict while the ligand comes straight back
+    (33% of post-crossing time was back inside 0.6 nm). The check here is on the
+    MINIMUM over the whole most recent chunk, so a run only stops when the
+    ligand spent an entire chunk above the bar without returning.
+    """
+    a = _asw()
+    # a ligand that spikes over 1.0 nm and comes back: NOT departed
+    (tmp_path / "rmsd.xvg").write_text(
+        "# c\n@ t\n" + "".join(f"{i*0.1:.1f} {v}\n" for i, v in enumerate(
+            [0.2, 0.3, 1.4, 0.3, 0.25, 0.2, 0.3, 0.2, 0.25, 0.3])))
+    lo, hi, last = a._ligand_rmsd_tail(tmp_path, last_ps=1000.0, total_ps=1000.0)
+    assert hi > 1.0, "the spike is not in the window; the fixture is wrong"
+    assert lo < 1.0, "the minimum should show it came back"
+
+    # a ligand that leaves and stays out: departed
+    (tmp_path / "rmsd.xvg").write_text(
+        "# c\n@ t\n" + "".join(f"{i*0.1:.1f} {v}\n" for i, v in enumerate(
+            [0.2, 0.3, 1.4, 1.6, 1.5, 1.8, 1.7, 1.9, 1.6, 1.7])))
+    lo2, _, _ = a._ligand_rmsd_tail(tmp_path, last_ps=700.0, total_ps=1000.0)
+    assert lo2 > 1.0, "a sustained departure was not detected on the minimum"
+
+
+def test_rmsd_departure_stops_the_run_and_names_its_rule(tmp_path, monkeypatch):
+    a = _asw()
+    monkeypatch.setattr(a, "_equil_distance", lambda *args, **kw: 3.0)
+    calls = []
+
+    class _FakeGE:
+        @staticmethod
+        def extend_production(rep, add, gpu_id=None, threads=8):
+            calls.append(add)
+            # after the first extension the ligand is gone and stays gone
+            (tmp_path / "rmsd.xvg").write_text(
+                "# c\n@ t\n" + "".join(f"{i*0.1:.1f} 1.8\n" for i in range(20)))
+            return 1200.0 + sum(calls)
+
+    monkeypatch.setattr(a, "_ge", lambda: _FakeGE)
+    monkeypatch.setattr(a, "_rmsd_window_ps", lambda rep: 1000.0, raising=False)
+    out = a.adaptive_extend("c", tmp_path, tmp_path / "p.sdf", 1, 0,
+                            start_ps=1200.0, max_ps=100000.0, chunk_ps=2000.0,
+                            leave_a=6.0, leave_rmsd_nm=1.0)
+    assert out["left"] is True, "a sustained RMSD departure did not stop the run"
+    assert "RMSD" in (out["leave_rule"] or ""), (
+        f"the row does not say which rule ended it: {out['leave_rule']!r}")
+    assert len(calls) < 20, "it kept extending after departure"
+
+
+def test_the_warhead_rule_still_applies_when_rmsd_is_off(tmp_path, monkeypatch):
+    """Turning one on must not silently disable the other for existing callers."""
+    a = _asw()
+    monkeypatch.setattr(a, "_equil_distance", lambda *args, **kw: 9.0)
+    monkeypatch.setattr(a, "_ge", lambda: None)
+    out = a.adaptive_extend("c", tmp_path, tmp_path / "p.sdf", 1, 0,
+                            start_ps=1200.0, max_ps=10000.0, chunk_ps=2000.0,
+                            leave_a=6.0)          # rmsd rule off
+    assert out["left"] is True
+    assert "warhead" in (out["leave_rule"] or "")

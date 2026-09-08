@@ -80,6 +80,20 @@ from shared import run_paths as rp                        # noqa: E402
 PY = Path.home() / ".micromamba/envs/dwi_reactive/bin/python"
 
 #: Never ours to take. Matches overnight.sh and elevate_queue.FORBIDDEN.
+#: Run parameters the children are launched with. Defaults reproduce the nac_v8
+#: campaign exactly; `main` overrides them from the command line so a different
+#: job (a longer cap, a different departure rule, its own results topic) reuses
+#: this supervisor's GPU politeness instead of getting a naive pool of its own.
+OPTS = {
+    "sweep_ps": 1200,
+    "adaptive_max_ps": 10000,
+    "adaptive_chunk_ps": 2000,
+    "adaptive_leave_a": 6.0,
+    "adaptive_leave_rmsd_nm": 0.0,
+    "out_topic": None,
+    "pose_dir": None,
+}
+
 FORBIDDEN_GPUS = {0, 4, 7}
 CANDIDATE_GPUS = [1, 2, 3, 5, 6]
 
@@ -325,9 +339,15 @@ def launch(row, gpu: int, topic: str, logs: Path):
            # THE POSE SET IS NAMED, not defaulted. `attack_sweep` resolves
            # `--pose-dir` from `run.topic` when omitted, so a topic bump
            # mid-campaign would silently start sweeping another run's poses.
-           "--pose-dir", str(rp.poses_dir(topic)),
+           # THE POSES CAN COME FROM ANOTHER TOPIC'S DIRECTORY.
+           # A side job needs its OWN topic for bookkeeping -- claims, STOP, and
+           # `done_tasks`, which reads attack_sweep_<topic> and would otherwise
+           # see the campaign's finished rows and skip exactly the modes the
+           # side job exists to re-run at greater length. But the poses still
+           # live under the campaign's topic, so the two are separated here.
+           "--pose-dir", str(OPTS["pose_dir"] or rp.poses_dir(topic)),
            "--pose-rank", str(int(row.pose_rank)),
-           "--sweep-ps", "1200",
+           "--sweep-ps", str(int(OPTS["sweep_ps"])),
            # EARLY GIVE-UP, passed EXPLICITLY rather than left to the script's
            # default. `attack_sweep`'s default is 0 (off) because an abort
            # discards work and must be asked for; the campaign asks for it here,
@@ -359,9 +379,14 @@ def launch(row, gpu: int, topic: str, logs: Path):
            # these rows rank against the 676 fixed-length ones already
            # collected, while `sweep_ps`, `left_site` and `left_at_ps` carry
            # what actually happened.
-           "--adaptive-max-ps", "10000",
-           "--adaptive-chunk-ps", "2000",
-           "--adaptive-leave-a", "6.0",
+           "--adaptive-max-ps", str(int(OPTS["adaptive_max_ps"])),
+           "--adaptive-chunk-ps", str(int(OPTS["adaptive_chunk_ps"])),
+           "--adaptive-leave-a", str(OPTS["adaptive_leave_a"]),]
+    if OPTS["adaptive_leave_rmsd_nm"] > 0:
+        cmd += ["--adaptive-leave-rmsd-nm", str(OPTS["adaptive_leave_rmsd_nm"])]
+    if OPTS["out_topic"]:
+        cmd += ["--out-topic", OPTS["out_topic"]]
+    cmd += [
            "--gpu", str(gpu)]
     return subprocess.Popen(cmd, cwd=str(REPO),
                             stdout=log.open("w"), stderr=subprocess.STDOUT,
@@ -376,8 +401,35 @@ def main() -> None:
     ap.add_argument("--max-workers", type=int, default=None,
                     help="hard ceiling on top of the schedule")
     ap.add_argument("--poll", type=int, default=POLL_S)
+    ap.add_argument("--sweep-ps", type=float, default=OPTS["sweep_ps"])
+    ap.add_argument("--adaptive-max-ps", type=float,
+                    default=OPTS["adaptive_max_ps"])
+    ap.add_argument("--adaptive-chunk-ps", type=float,
+                    default=OPTS["adaptive_chunk_ps"])
+    ap.add_argument("--adaptive-leave-a", type=float,
+                    default=OPTS["adaptive_leave_a"])
+    ap.add_argument("--adaptive-leave-rmsd-nm", type=float, default=0.0,
+                    help="sustained ligand-RMSD departure instead of the "
+                         "warhead test; 1.0 is the pre-registered BOUND_NM")
+    ap.add_argument("--pose-dir", default=None,
+                    help="where the representative poses live; defaults to "
+                         "<topic>_poses. Set when the job's bookkeeping topic "
+                         "differs from the run that produced its poses")
+    ap.add_argument("--out-topic", default=None,
+                    help="write rows to attack_sweep_<NAME> so a side job "
+                         "cannot pool with the campaign's results")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+
+    # THE CHILDREN'S PARAMETERS COME FROM THIS PROCESS'S ARGV, not from
+    # module defaults, so what the supervisor was asked for is what it
+    # launches -- and `ps` on any child shows the same thing.
+    OPTS.update(sweep_ps=args.sweep_ps,
+                adaptive_max_ps=args.adaptive_max_ps,
+                adaptive_chunk_ps=args.adaptive_chunk_ps,
+                adaptive_leave_a=args.adaptive_leave_a,
+                adaptive_leave_rmsd_nm=args.adaptive_leave_rmsd_nm,
+                out_topic=args.out_topic, pose_dir=args.pose_dir)
 
     # NICE OURSELVES, not just the children. The workers were launched with
     # `nice -n 19` from the start, but this process sat at 0 -- and its

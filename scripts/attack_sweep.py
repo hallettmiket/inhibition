@@ -710,9 +710,40 @@ def _rmsd_window_ps(rep: Path) -> float | None:
     return None if last is None else float(last) * 1000.0
 
 
+def _ligand_rmsd_tail(rep: Path, last_ps: float, total_ps: float):
+    """Ligand RMSD over the most recent `last_ps` of the run, in nm.
+
+    Returns (min, max, last) or None when the trace cannot be read. The MINIMUM
+    is the one that matters: a departure is a window in which the ligand never
+    came back, so the test is on the floor of the window, not on a peak.
+    """
+    f = Path(rep) / "rmsd.xvg"
+    if not f.is_file():
+        return None
+    ts, ys = [], []
+    try:
+        for ln in f.read_text(errors="replace").splitlines():
+            ln = ln.strip()
+            if not ln or ln[0] in "#@":
+                continue
+            q = ln.split()
+            if len(q) >= 2:
+                ts.append(float(q[0]) * 1000.0)   # gmx rms -tu ns
+                ys.append(float(q[1]))
+    except (OSError, ValueError):
+        return None
+    if not ys:
+        return None
+    import numpy as _np
+    a, b = _np.asarray(ts), _np.asarray(ys)
+    m = a >= (a[-1] - float(last_ps))
+    w = b[m] if m.any() else b
+    return float(w.min()), float(w.max()), float(b[-1])
+
+
 def adaptive_extend(cand: str, rep: Path, pose: Path, pose_rank: int, gpu: int,
                     *, start_ps: float, max_ps: float, chunk_ps: float,
-                    leave_a: float) -> dict:
+                    leave_a: float, leave_rmsd_nm: float = 0.0) -> dict:
     """Keep extending production until the molecule leaves, or `max_ps`.
 
     @twu383, 2026-09-03: *"we can just make the runs longer until the mol leaves
@@ -743,10 +774,33 @@ def adaptive_extend(cand: str, rep: Path, pose: Path, pose_rank: int, gpu: int,
     """
     total = float(start_ps)
     chunks, left, left_at, last_d = 0, False, None, None
+    last_rmsd = None
     while total < max_ps - 1e-6:
+        # ---- RMSD DEPARTURE, WHEN ASKED FOR (@twu383, 2026-09-06) ------------
+        # "MD until departure past 1 rmsd up to 100 ns". 1.0 nm is the
+        # pre-registered `residence_tier.BOUND_NM` -- the ligand is in the
+        # pocket at or under it -- so this is the project's existing definition
+        # of dissociation rather than a new one.
+        #
+        # SUSTAINED, NOT TOUCH-ONCE. Catalogue #34 is exactly this test done
+        # wrong: `escaped = any(d >= 1.0 nm)` called 7 of 7 BPMD runs escaped,
+        # INCLUDING sulfopin in its own crystal pose, because a single excursion
+        # ends the verdict while the ligand comes straight back. The test here is
+        # on the MINIMUM over the whole most recent chunk: the run stops only
+        # when the ligand spent an entire chunk above the bar without returning.
+        if leave_rmsd_nm > 0 and total > float(start_ps):
+            rr = _ligand_rmsd_tail(rep, chunk_ps, total)
+            if rr is not None:
+                last_rmsd = rr[2]
+                if rr[0] > leave_rmsd_nm:
+                    left, left_at = True, total
+                    log.info("%s: departed by %.0f ps — ligand RMSD stayed above "
+                             "%.2f nm for the whole last %.0f ps (min %.2f)",
+                             cand, total, leave_rmsd_nm, chunk_ps, rr[0])
+                    break
         d = _equil_distance(cand, rep, pose, pose_rank, gro=rep / "prod.gro")
         last_d = d
-        if d is not None and d > leave_a:
+        if leave_rmsd_nm <= 0 and d is not None and d > leave_a:
             left, left_at = True, total
             log.info("%s: left at %.0f ps (warhead %.2f A > %.1f) — not extending",
                      cand, total, d, leave_a)
@@ -757,6 +811,18 @@ def adaptive_extend(cand: str, rep: Path, pose: Path, pose_rank: int, gpu: int,
                  add)
         try:
             total = _ge().extend_production(rep, add, gpu_id=gpu)
+            # THE TRACE MUST BE CURRENT OR THE CHECK IS ON THE PREVIOUS CHUNK.
+            # `rmsd.xvg` is only written by `analyse`, so without this the RMSD
+            # departure test would read the file from before the extension --
+            # the same staleness that made every adaptive plot stop at 1.2 ns.
+            if leave_rmsd_nm > 0:
+                try:
+                    from shared import gromacs_analysis as _ga
+                    _ga.analyse(rep)
+                except Exception as exc2:                     # noqa: BLE001
+                    log.warning("%s: could not refresh the RMSD trace at "
+                                "%.0f ps (%s); not testing departure this "
+                                "chunk", cand, total, exc2)
         except Exception as exc:                              # noqa: BLE001
             # A FAILED EXTENSION IS NOT A DEPARTURE. Keep what has been run and
             # say so; reporting it as "left" would invent a result.
@@ -775,6 +841,10 @@ def adaptive_extend(cand: str, rep: Path, pose: Path, pose_rank: int, gpu: int,
     return {"total_ps": float(total), "left": bool(left),
             "left_at_ps": (float(left_at) if left_at is not None else None),
             "last_dist_a": (float(last_d) if last_d is not None else None),
+            "last_rmsd_nm": (float(last_rmsd) if last_rmsd is not None else None),
+            "leave_rule": ("ligand RMSD > %.2f nm sustained" % leave_rmsd_nm
+                           if leave_rmsd_nm > 0 else
+                           "warhead > %.1f A" % leave_a),
             "extensions": int(chunks)}
 
 
@@ -826,6 +896,13 @@ def main() -> None:
                          "still present, up to this total (0 = off)")
     ap.add_argument("--adaptive-chunk-ps", type=float, default=2000.0,
                     metavar="PS", help="how much to add per extension")
+    ap.add_argument("--adaptive-leave-rmsd-nm", type=float, default=0.0,
+                    metavar="NM",
+                    help="stop when the LIGAND has been above this RMSD for a "
+                         "whole chunk (sustained departure, not a single "
+                         "crossing -- catalogue #34). 1.0 is the "
+                         "pre-registered BOUND_NM. 0 = off, and the warhead "
+                         "test below is used instead")
     ap.add_argument("--adaptive-leave-a", type=float, default=6.0, metavar="A",
                     help="warhead further than this from Cys113 SG in the last "
                          "saved frame counts as left; same test as "
@@ -944,7 +1021,8 @@ def main() -> None:
                                  start_ps=run_ps,
                                  max_ps=float(args.adaptive_max_ps),
                                  chunk_ps=float(args.adaptive_chunk_ps),
-                                 leave_a=float(args.adaptive_leave_a))
+                                 leave_a=float(args.adaptive_leave_a),
+                                 leave_rmsd_nm=float(args.adaptive_leave_rmsd_nm))
             run_ps = ad["total_ps"]
             # THE ANALYSIS FILES ARE STALE AFTER AN EXTENSION AND MUST BE REDONE.
             # `rmsd.xvg` / `mindist.xvg` are written when `md_residence` returns,
@@ -967,7 +1045,10 @@ def main() -> None:
                         "final_dist_a": ad["last_dist_a"],
                         "extensions": ad["extensions"],
                         "adaptive_max_ps": float(args.adaptive_max_ps),
-                        "adaptive_leave_a": float(args.adaptive_leave_a)})
+                        "adaptive_leave_a": float(args.adaptive_leave_a),
+                        "adaptive_leave_rmsd_nm": float(args.adaptive_leave_rmsd_nm),
+                        "leave_rule": ad.get("leave_rule"),
+                        "final_rmsd_nm": ad.get("last_rmsd_nm")})
 
         dense = rep / "sweep_dense.pdb"
         # REBUILT WHENEVER THE TRAJECTORY IS LONGER THAN THE MOVIE. `prod.xtc`
