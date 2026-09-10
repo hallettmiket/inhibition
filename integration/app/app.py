@@ -1052,19 +1052,21 @@ def panel_dossier() -> None:
         st.markdown("#### Does the docked pose hold up in solvent?")
         st.caption(
             "Ligand RMSD = how far the ligand moved from its docked pose, in "
-            "nanometres, after superposing on the protein backbone so protein "
+            "Angstrom, after superposing on the protein backbone so protein "
             "tumbling is removed. Smaller = stayed put. This column IS the same "
-            "quantity in both rows and may be compared directly."
+            "quantity in both rows and may be compared directly. 'Frames "
+            "resident' is pocket CONTACT RETENTION (D0119) -- a different "
+            "question from whether the warhead reached Cys113."
         )
         rows_ = []
         if pd.notna(imp_r):
             rows_.append({
                 "solvent model": "implicit GB (no water molecules)",
                 "engine / length": "OpenMM · 2 ns · 90 frames",
-                "ligand RMSD (nm)": round(float(imp_r), 3),
-                "frames engaged": (round(float(row["frac_frames_engaged"]), 3)
-                                   if pd.notna(row.get("frac_frames_engaged"))
-                                   else None),
+                "ligand RMSD (A)": round(float(imp_r) * 10.0, 2),
+                "frames resident": (round(float(row["frac_frames_resident"]), 3)
+                                    if pd.notna(row.get("frac_frames_resident"))
+                                    else None),
                 "replicates": 1,
             })
         if pd.notna(exp_r):
@@ -1073,10 +1075,10 @@ def panel_dossier() -> None:
                 "engine / length": (
                     f"GROMACS · {row.get('ns_analysed', 10):g} ns · "
                     f"{int(row['n_frames_analysed']) if pd.notna(row.get('n_frames_analysed')) else '?'} frames"),
-                "ligand RMSD (nm)": round(float(exp_r), 3),
-                "frames engaged": (round(float(row["explicit_frac_frames_engaged"]), 3)
-                                   if pd.notna(row.get("explicit_frac_frames_engaged"))
-                                   else None),
+                "ligand RMSD (A)": round(float(exp_r) * 10.0, 2),
+                "frames resident": (round(float(row["explicit_frac_frames_resident"]), 3)
+                                    if pd.notna(row.get("explicit_frac_frames_resident"))
+                                    else None),
                 "replicates": 1,
             })
         st.dataframe(pd.DataFrame(rows_), use_container_width=True,
@@ -1959,9 +1961,12 @@ def _ref_md():
                 continue
             rows.append({"molecule": getattr(r, "reference_name", "?"),
                          "ns": getattr(r, "ns_analysed", float("nan")),
-                         "RMSD mean": getattr(r, "explicit_ligand_rmsd_nm_mean", float("nan")),
-                         "RMSD max": getattr(r, "explicit_ligand_rmsd_nm_max", float("nan")),
-                         "engaged": getattr(r, "explicit_frac_frames_engaged", float("nan"))})
+                         "RMSD mean (A)": getattr(r, "explicit_ligand_rmsd_a_mean",
+                             getattr(r, "explicit_ligand_rmsd_nm_mean", float("nan")) * 10.0),
+                         "RMSD max (A)": getattr(r, "explicit_ligand_rmsd_a_max",
+                             getattr(r, "explicit_ligand_rmsd_nm_max", float("nan")) * 10.0),
+                         # pocket residence, NOT warhead engagement -- D0119
+                         "resident": getattr(r, "explicit_frac_frames_resident", float("nan"))})
     return pd.DataFrame(rows).drop_duplicates("molecule") if rows else None
 
 
@@ -2777,7 +2782,7 @@ def panel_lookup() -> None:
         found_any = True
         cols = [c for c in hit.columns
                 if c in ("ident", "status", "production_ps", "net_charge",
-                         "pose_source", "explicit_frac_frames_engaged",
+                         "pose_source", "explicit_frac_frames_resident",
                          "residence", "mean_rmsd_nm", "max_rmsd_nm",
                          "stat_inefficiency", "explicit_rmsd_suspect")]
         st.dataframe(hit[cols].reset_index(drop=True), width="stretch",

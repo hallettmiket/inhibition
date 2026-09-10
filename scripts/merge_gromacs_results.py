@@ -50,7 +50,7 @@ EXPERIMENTS = {"t1": "01_t1_de_novo", "t2": "02_t2_atra_crem"}
 INDEX = DATA / "00_shared_substrate" / "gromacs_analysis_index.jsonl"
 
 COLS = ("explicit_ligand_rmsd_nm_mean", "explicit_ligand_rmsd_nm_final",
-        "explicit_ligand_rmsd_nm_max", "explicit_frac_frames_engaged",
+        "explicit_ligand_rmsd_nm_max", "explicit_frac_frames_resident",
         "gmx_contacts_mean", "ns_analysed", "n_frames_analysed")
 
 # The implicit-solvent counterparts, carried onto the same rows. Without them
@@ -59,7 +59,7 @@ COLS = ("explicit_ligand_rmsd_nm_mean", "explicit_ligand_rmsd_nm_final",
 # would take a solvent-model artefact for a property of the molecule.
 IMPLICIT_INDEX = DATA / "00_shared_substrate" / "md_ensemble_index.jsonl"
 IMPLICIT_COLS = ("ligand_rmsd_nm_mean", "ligand_rmsd_nm_max",
-                 "frac_frames_engaged", "mean_contacts")
+                 "frac_frames_resident", "mean_contacts")
 
 
 def implicit_residence() -> pd.DataFrame:
@@ -216,7 +216,7 @@ def main() -> None:
             agg["explicit_rmsd_replicate_max"]
             / agg["explicit_rmsd_replicate_min"].replace(0, pd.NA))
         agg["n_replicates"] = g.size().values
-        for c in ("explicit_frac_frames_engaged", "gmx_contacts_mean",
+        for c in ("explicit_frac_frames_resident", "gmx_contacts_mean",
                   "ns_analysed", "n_frames_analysed"):
             if c in reps.columns:
                 agg[c] = g[c].mean().values

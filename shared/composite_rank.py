@@ -280,7 +280,7 @@ COMPONENTS: dict[str, ComponentSpec] = {
         banded=False,
         n_bands=0,
         requires=(),
-        note="md_ensemble.residence_metrics frac_frames_engaged — occupancy, "
+        note="md_ensemble.residence_metrics frac_frames_resident — occupancy, "
              "higher is longer in the pocket.",
     ),
 }

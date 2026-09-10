@@ -52,8 +52,12 @@ def _mp():
     return m
 
 
-def engagement_for(rep: Path) -> float | None:
-    """Target engagement for THIS run, found by the directory it was measured from.
+def resident_for(rep: Path) -> float | None:
+    """Pocket residence for THIS run, found by the directory it was measured from.
+
+    NOT warhead engagement -- see gromacs_analysis.RESIDENT_CONTACT_FRACTION
+    and D0119. This answers whether the ligand stayed in the pocket, which is a
+    different question from whether the reactive atom reached Cys113.
 
     Not by filename, and not by position in a glob. Every md_residence row
     carries the directory the numbers came from -- `equilibration_dir` for a run
@@ -73,11 +77,11 @@ def engagement_for(rep: Path) -> float | None:
             continue
         cols = [c for c in ("equilibration_dir", "remeasured_from", "trajectory")
                 if c in d.columns]
-        if not cols or "explicit_frac_frames_engaged" not in d.columns:
+        if not cols or "explicit_frac_frames_resident" not in d.columns:
             continue
         for _, row in d.iterrows():
             if any(str(row[c]).rstrip("/").startswith(want) for c in cols):
-                v = row["explicit_frac_frames_engaged"]
+                v = row["explicit_frac_frames_resident"]
                 if pd.notna(v):
                     best = float(v)
     return best
@@ -114,16 +118,16 @@ def comparison(runs: list[tuple[str, Path, dict]]) -> str:
         return ('<span class="bad">left</span>' if left is not None
                 else '<span class="good">held</span>')
 
-    def eng(r):
-        v = r.get("engaged")
+    def resident(r):
+        v = r.get("resident")
         return f"{float(v) * 100:.2f}%" if v is not None else "&mdash;"
 
     body = [
-        ("target engagement, 100 ns", cells(eng)),
+        ("pocket residence, 100 ns", cells(resident)),
         ("verdict", cells(held)),
-        ("mean ligand RMSD", cells(lambda r: f"{r['rmsd_mean_nm']:.3f} nm")),
-        ("max ligand RMSD", cells(lambda r: f"{r['rmsd_max_nm']:.3f} nm")),
-        ("final ligand RMSD", cells(lambda r: f"{r['rmsd_final_nm']:.3f} nm")),
+        ("mean ligand RMSD", cells(lambda r: f"{r['rmsd_mean_a']:.2f} &Aring;")),
+        ("max ligand RMSD", cells(lambda r: f"{r['rmsd_max_a']:.2f} &Aring;")),
+        ("final ligand RMSD", cells(lambda r: f"{r['rmsd_final_a']:.2f} &Aring;")),
         ("residence fraction", cells(lambda r: f"{r['residence_frac']:.3f}")),
         ("trajectory", cells(lambda r: f"{r['length_ns']:.1f} ns, "
                                        f"{r['n_frames']:,} frames")),
@@ -161,7 +165,7 @@ def main() -> None:
         if res is None:
             log.warning("%s: skipped", lab)
             continue
-        res["engaged"] = engagement_for(rep)
+        res["resident"] = resident_for(rep)
         runs.append((lab, rep, res))
 
     if len(runs) < 2:

@@ -43,9 +43,18 @@ GMX_ENV = Path("/data/lab_vm/envs/dwi_gromacs_cuda")
 LIGAND_RESNAMES = ("MOL", "LIG")
 CONTACT_CUTOFF_NM = 0.45
 
-# The implicit-solvent run's own threshold, reused so "engaged" means the same
+# The implicit-solvent run's own threshold, reused so this means the same
 # thing in both: a frame retaining at least a quarter of the starting contacts.
-ENGAGED_FRACTION = 0.25
+#
+# NOT CALLED "engaged". This is CONTACT RETENTION -- whether the ligand is
+# still sitting in the pocket -- and it is a different question from whether
+# the WARHEAD has reached Cys113 (`frac_attack_ready` in attack_sweep.py,
+# distance- and angle-gated). A molecule can retain 99.6% of its starting
+# contacts while its reactive atom never once enters the attack window --
+# measured on `t4_88ae42890e2d_m239` (D0114) and on `t4_7b02d1dc4fd2_m50`'s
+# second replicate (D0118) -- and a name shared with "engaged" is how a 99.6%
+# residence figure gets read as a 99.6% engagement figure. D0119.
+RESIDENT_CONTACT_FRACTION = 0.25
 
 
 class AnalysisError(RuntimeError):
@@ -183,20 +192,34 @@ def analyse(wd: Path) -> dict:
                     "before reporting it.", wd.name, float(r.max()), box_half_nm)
 
     start = c[0] if c[0] > 0 else 1.0
-    engaged = float((c >= ENGAGED_FRACTION * start).mean())
+    resident = float((c >= RESIDENT_CONTACT_FRACTION * start).mean())
+
+    # UNITS ARE THE TRAP (attack_sweep.rmsd_stats' words, repeated here because
+    # this function had not followed its own rule). GROMACS writes nm; every
+    # threshold a human states, every plot axis, and every OTHER RMSD column in
+    # this project (`rmsd_max_a`, `rmsd_mean_a`) is Angstrom. The `_nm` columns
+    # below are kept for the callers already gated on them
+    # (`pipeline.md_survivor_rmsd_nm`), but nothing new should read them --
+    # the `_a` companions are the ones to report, plot, or compare against a
+    # threshold stated in Angstrom. D0119.
+    rmsd_mean_nm, rmsd_final_nm, rmsd_max_nm = (
+        float(r.mean()), float(r[-1]), float(r.max()))
 
     return {
         "ligand_resname": resname,
         "n_frames_analysed": int(rmsd.shape[0]),
         "ns_analysed": round(float(rmsd[-1, 0]), 3),
         "pbc_corrected": True,
-        "explicit_ligand_rmsd_nm_mean": round(float(r.mean()), 4),
-        "explicit_ligand_rmsd_nm_final": round(float(r[-1]), 4),
-        "explicit_ligand_rmsd_nm_max": round(float(r.max()), 4),
+        "explicit_ligand_rmsd_nm_mean": round(rmsd_mean_nm, 4),
+        "explicit_ligand_rmsd_nm_final": round(rmsd_final_nm, 4),
+        "explicit_ligand_rmsd_nm_max": round(rmsd_max_nm, 4),
+        "explicit_ligand_rmsd_a_mean": round(rmsd_mean_nm * 10.0, 3),
+        "explicit_ligand_rmsd_a_final": round(rmsd_final_nm * 10.0, 3),
+        "explicit_ligand_rmsd_a_max": round(rmsd_max_nm * 10.0, 3),
         "explicit_rmsd_suspect": bool(float(r.max()) > box_half_nm),
         "gmx_contacts_mean": round(float(c.mean()), 1),
         "gmx_contacts_start": int(c[0]),
-        "explicit_frac_frames_engaged": round(engaged, 4),
+        "explicit_frac_frames_resident": round(resident, 4),
         "contact_cutoff_nm": CONTACT_CUTOFF_NM,
         "contacts_metric": "gmx mindist -on; NOT the heavy-atom pair count "
                            "used by the implicit-solvent tier",

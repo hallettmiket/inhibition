@@ -187,7 +187,7 @@ this short` — which is the guard behaving as designed.
 
 From `gromacs_analysis.analyse`, plus an autocorrelation-corrected error bar:
 `explicit_ligand_rmsd_nm_{mean,final,max,sd,sem}`, `gmx_contacts_*`,
-`explicit_frac_frames_engaged`, `n_frames_analysed`, `ns_analysed`.
+`explicit_frac_frames_resident`, `n_frames_analysed`, `ns_analysed`.
 
 **`md_ensemble.residence_metrics` cannot be used on this tier and was not.**
 It takes an `(n_frames, n_atoms, 3)` array from an OpenMM *implicit* trajectory;

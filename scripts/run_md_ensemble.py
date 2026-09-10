@@ -177,10 +177,10 @@ def main() -> None:
                 log.error("[%d/%d] %s FAILED %s", n, len(jobs), r["id"],
                           r["md_error"][:100])
             else:
-                log.info("[%d/%d] %s rmsd %.3f nm  engaged %.2f  %s",
+                log.info("[%d/%d] %s rmsd %.2f A  resident %.2f  %s",
                          n, len(jobs), r["id"],
-                         r.get("ligand_rmsd_nm_mean", float("nan")),
-                         r.get("frac_frames_engaged", float("nan")),
+                         r.get("ligand_rmsd_a_mean", float("nan")),
+                         r.get("frac_frames_resident", float("nan")),
                          "(cached)" if r.get("cached") else "")
 
     out = Path(args.out)
@@ -206,13 +206,13 @@ def main() -> None:
                   "measured at the ensemble stage, not assumed here.")
 
     if results:
-        eng = [r["frac_frames_engaged"] for r in results
-               if "frac_frames_engaged" in r]
+        eng = [r["frac_frames_resident"] for r in results
+               if "frac_frames_resident" in r]
         rms = [r["ligand_rmsd_nm_mean"] for r in results
                if "ligand_rmsd_nm_mean" in r]
         if eng:
             print(f"\n=== pocket residence ({len(eng)} candidates) ===")
-            print(f"  frac_frames_engaged: min {min(eng):.2f} "
+            print(f"  frac_frames_resident: min {min(eng):.2f} "
                   f"median {sorted(eng)[len(eng)//2]:.2f} max {max(eng):.2f}")
             print(f"  ligand RMSD (nm):    min {min(rms):.3f} "
                   f"median {sorted(rms)[len(rms)//2]:.3f} max {max(rms):.3f}")

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 from pathlib import Path
 
@@ -43,21 +44,52 @@ log = logging.getLogger("md-movie")
 N_FRAMES = 120
 
 
-def _count_frames(rep: Path, tpr: Path, xtc: Path) -> int:
-    """How many frames the trajectory actually stored, from gmx check."""
+def traj_extent(rep: Path, xtc: Path | None = None) -> tuple[int, float | None]:
+    """(frames stored, time of the LAST frame in ps) -- read from the file.
+
+    THE TRAJECTORY IS THE AUTHORITY ON ITS OWN LENGTH. Every caller used to take
+    the length from the results table instead, and the two disagree routinely:
+    an adaptive run is extended IN PLACE, so `rank51_1200ps/` holds 100 ns and
+    the row that says so is one of three rows for that ident, selected by
+    `iloc[-1]` over a concatenation whose file order nothing pins. All 16 long
+    runs shipped a viewer whose clock came from the losing row -- a 100 ns
+    trajectory with a 10 ns time axis, and no visible symptom, because the
+    slider reads frame numbers and the frames were real.
+
+    `gmx check` already ran here to count frames; its "Last frame" line was
+    being discarded. One subprocess answers both questions.
+    """
+    xtc = xtc or (rep / "prod.xtc")
     r = subprocess.run([str(GMX), "check", "-f", str(xtc)], cwd=rep,
                        capture_output=True, text=True, timeout=900)
+    n, last = 0, None
     for ln in (r.stderr + r.stdout).splitlines():
-        if ln.strip().startswith("Step"):
-            parts = ln.split()
+        t = ln.strip()
+        if t.startswith("Step"):
+            parts = t.split()
             if len(parts) >= 2 and parts[1].isdigit():
-                return int(parts[1])
-    return 0
+                n = int(parts[1])
+        m = re.search(r"Last frame\s+(\d+)\s+time\s+([0-9.]+)", ln)
+        if m:
+            n, last = int(m.group(1)) + 1, float(m.group(2))
+    return n, last
 
 
-def build_movie_pdb(rep: Path, dest: Path, total_ps: float = 100_000.0,
+def _count_frames(rep: Path, tpr: Path, xtc: Path) -> int:
+    """How many frames the trajectory actually stored. See `traj_extent`."""
+    return traj_extent(rep, xtc)[0]
+
+
+def build_movie_pdb(rep: Path, dest: Path, total_ps: float | None = None,
                     n_frames: int = N_FRAMES) -> Path | None:
-    """PBC-corrected, CA-fitted multi-model PDB of protein + ligand."""
+    """PBC-corrected, CA-fitted multi-model PDB of protein + ligand.
+
+    `total_ps` is a CROSS-CHECK, not the source. The clock comes from the
+    trajectory (`traj_extent`); a value passed here is compared against it and a
+    disagreement is logged at ERROR with both numbers. Pass what the results
+    table claims and you find out when the table is stale, which is the case
+    this argument now exists to catch -- see `traj_extent`.
+    """
     tpr, xtc, ndx = rep / "prod.tpr", rep / "prod.xtc", rep / "fit.ndx"
     if not (tpr.is_file() and xtc.is_file()):
         log.warning("no prod.tpr/prod.xtc in %s", rep)
@@ -76,7 +108,16 @@ def build_movie_pdb(rep: Path, dest: Path, total_ps: float = 100_000.0,
     # therefore matched almost nothing and produced 31 frames instead of 150.
     # `-skip` takes every Nth stored frame and cannot fall out of step with the
     # save interval.
-    n_stored = _count_frames(rep, tpr, xtc)
+    n_stored, last_ps = traj_extent(rep, xtc)
+    if last_ps is not None:
+        if total_ps is not None and abs(last_ps - float(total_ps)) > 0.01 * last_ps:
+            log.error("%s: the table says %.0f ps, the trajectory ends at "
+                      "%.0f ps -- using the trajectory", rep, float(total_ps),
+                      last_ps)
+        total_ps = last_ps
+    elif total_ps is None:
+        log.warning("%s: gmx check reported no last-frame time; the movie will "
+                    "carry no clock", rep)
     skip = max(1, round(n_stored / n_frames)) if n_stored else 67
     r = run(["trjconv", "-s", "prod.tpr", "-f", "prod.xtc", "-o", str(tmp),
              "-pbc", "whole", "-skip", str(skip)], "System\n")
@@ -139,9 +180,44 @@ def build_movie_pdb(rep: Path, dest: Path, total_ps: float = 100_000.0,
     if r.returncode != 0 or not dest.is_file():
         log.warning("trjconv (fit) failed: %s", r.stderr[-300:])
         return None
-    n = dest.read_text().count("MODEL")
-    log.info("movie: %d frames -> %s", n, dest.name)
+    # STAMP THE CLOCK INTO THE MOVIE ITSELF.
+    #
+    # The page's time axis and the page's frames were fed from two different
+    # sources -- `viewer_html(total_ps=...)` from the results table, the models
+    # from this file -- and nothing compared them. Writing the length the frames
+    # were actually taken over into the file that holds them means a reader can
+    # ask the artefact rather than a table that may describe another run.
+    txt = dest.read_text()
+    n = txt.count("MODEL")
+    if total_ps is not None:
+        dest.write_text(f"REMARK   1 TOTAL_PS {float(total_ps):.3f}\n"
+                        f"REMARK   1 FRAMES {n}\n" + txt)
+    log.info("movie: %d frames over %s -> %s", n,
+             ("unknown length" if total_ps is None else f"{float(total_ps)/1000:.1f} ns"),
+             dest.name)
     return dest if n else None
+
+
+def movie_total_ps(pdb: Path | str) -> float | None:
+    """The length the movie in `pdb` actually covers, from its own header.
+
+    Returns None for a movie built before the stamp existed -- which is every
+    one of the 16 shipped viewers, and is the honest answer for them: their
+    length was never recorded, only asserted somewhere else. A caller that gets
+    None should rebuild rather than fall back to a table.
+    """
+    pdb = Path(pdb)
+    if not pdb.is_file():
+        return None
+    with pdb.open(errors="replace") as fh:
+        for _ in range(8):
+            ln = fh.readline()
+            if not ln:
+                break
+            m = re.match(r"REMARK\s+1\s+TOTAL_PS\s+([0-9.]+)", ln)
+            if m:
+                return float(m.group(1))
+    return None
 
 
 #: The MD system renumbers from 1, so the crystal's Cys113 is residue 63 in the
@@ -400,11 +476,24 @@ def viewer_html(pdb_text: str, dist: list, labels: list, positions: list,
   (function() {{
     var host = document.getElementById('{elem_id}');
     var det = host && host.closest ? host.closest('details') : null;
+    // `window.addEventListener('load', boot1)` LOSES THE RACE ON A LARGE PAGE.
+    // Every caller until this one wrapped the viewer in a COLLAPSED <details>,
+    // so 'load' had always already fired by the time a person opened it and
+    // the listener always had something to catch. The first caller to embed
+    // this viewer directly on the page (no <details>, open immediately) found
+    // that 'load' can fire WHILE this script is still being parsed on a
+    // multi-MB page -- attaching the listener after the event already fired
+    // means it never runs, and the viewer boots nothing, silently: no error,
+    // just an empty box the same colour as its background.
+    function armLoadBoot() {{
+      if (document.readyState === 'complete') {{ boot1(); }}
+      else {{ window.addEventListener('load', boot1); }}
+    }}
     if (det) {{
-      if (det.open) window.addEventListener('load', boot1);
+      if (det.open) armLoadBoot();
       det.addEventListener('toggle', function() {{ if (det.open) boot1(); }});
     }} else {{
-      window.addEventListener('load', boot1);
+      armLoadBoot();
     }}
   }})();
 }})();

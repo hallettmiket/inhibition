@@ -346,7 +346,7 @@ def residence_metrics(traj_nm: np.ndarray, lig_heavy: np.ndarray,
       superposing on the PROTEIN (so protein tumbling does not masquerade
       as ligand movement).
     - mean_contacts: heavy-atom pairs within POCKET_CUTOFF_NM.
-    - frac_frames_engaged: fraction of frames retaining at least a quarter of
+    - frac_frames_resident: fraction of frames retaining at least a quarter of
       the starting contacts -- the closest thing to a residence time here.
     """
     if traj_nm.ndim != 3 or traj_nm.shape[0] < 2:
@@ -374,14 +374,26 @@ def residence_metrics(traj_nm: np.ndarray, lig_heavy: np.ndarray,
     rmsds_a = np.asarray(rmsds)
     contacts_a = np.asarray(contacts, dtype=float)
     start = contacts_a[0] if contacts_a[0] > 0 else 1.0
-    engaged = float((contacts_a >= 0.25 * start).mean())
+    # NOT "engaged" -- this is CONTACT RETENTION, the implicit-solvent twin of
+    # `gromacs_analysis.RESIDENT_CONTACT_FRACTION`. See that constant's
+    # docstring and D0119: the same name on this quantity and on the
+    # warhead-to-Cys113 geometry (`frac_attack_ready`) is how a 99.6% residence
+    # figure gets read as 99.6% engagement.
+    resident = float((contacts_a >= 0.25 * start).mean())
+    rmsd_mean_nm, rmsd_final_nm, rmsd_max_nm = (
+        float(rmsds_a.mean()), float(rmsds_a[-1]), float(rmsds_a.max()))
     return {
-        "ligand_rmsd_nm_mean": round(float(rmsds_a.mean()), 4),
-        "ligand_rmsd_nm_final": round(float(rmsds_a[-1]), 4),
-        "ligand_rmsd_nm_max": round(float(rmsds_a.max()), 4),
+        "ligand_rmsd_nm_mean": round(rmsd_mean_nm, 4),
+        "ligand_rmsd_nm_final": round(rmsd_final_nm, 4),
+        "ligand_rmsd_nm_max": round(rmsd_max_nm, 4),
+        # Angstrom companions -- see gromacs_analysis.analyse()'s "UNITS ARE
+        # THE TRAP" note. Report these, not the `_nm` ones above.
+        "ligand_rmsd_a_mean": round(rmsd_mean_nm * 10.0, 3),
+        "ligand_rmsd_a_final": round(rmsd_final_nm * 10.0, 3),
+        "ligand_rmsd_a_max": round(rmsd_max_nm * 10.0, 3),
         "mean_contacts": round(float(contacts_a.mean()), 1),
         "start_contacts": int(contacts_a[0]),
-        "frac_frames_engaged": round(engaged, 4),
+        "frac_frames_resident": round(resident, 4),
         "pocket_cutoff_nm": POCKET_CUTOFF_NM,
     }
 
@@ -460,9 +472,9 @@ def run_md(workdir: Path, candidate_id: str, device_index: int | None = None,
                    residence=residence, validation=validation)
     (md_dir / "md_result.json").write_text(
         json.dumps(res.to_dict(), indent=2), encoding="utf-8")
-    log.info("%s: %d frames, %.1f ns, %.0f s wall, rmsd %.3f nm, engaged %.2f",
+    log.info("%s: %d frames, %.1f ns, %.0f s wall, rmsd %.2f A, resident %.2f",
              candidate_id, res.n_frames, res.ns_simulated, res.wall_seconds,
-             residence["ligand_rmsd_nm_mean"], residence["frac_frames_engaged"])
+             residence["ligand_rmsd_a_mean"], residence["frac_frames_resident"])
     return res
 
 

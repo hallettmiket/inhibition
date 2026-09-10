@@ -26,7 +26,7 @@ all of it had parsed.
 
 **The sort key is `explicit_ligand_rmsd_nm_max` from the 100 ns MD run, ascending**
 — the largest distance the ligand ever got from where it started (@tt8804, #55,
-2026-08-11). It replaced `explicit_frac_frames_engaged`, which is still shown on
+2026-08-11). It replaced `explicit_frac_frames_resident`, which is still shown on
 every row but no longer orders the list.
 
 The 10 ns sweep is **triage**, not a result. It decides which molecules earn a
@@ -52,7 +52,7 @@ and false claim.
 | headline number | `explicit_ligand_rmsd_nm_max` | shown as `N.NNN nm max` — **the sort key** |
 | headline (unranked) | — | an em-dash; an unranked row has no position on this axis |
 | warhead class | `rank_v2` | |
-| engagement | `explicit_frac_frames_engaged` | shown as `NN% engaged` on the meta line |
+| engagement | `explicit_frac_frames_resident` | shown as `NN% engaged` on the meta line |
 | verdict tag | `rmsd_max < 1.2 nm` | `held` / `left`, or `swept` |
 | bar | engagement | |
 

@@ -582,9 +582,9 @@ def run_one(ident: str, smiles: str, label: str, *, production_ps: float,
             row.update({f"pose_{k}" if k != "pose_sdf" else k: v
                         for k, v in json.loads(prov.read_text()).items()})
         row.update(measure_residence(rep_dir))
-        log.info("  residence: ligand RMSD %.3f nm mean, engaged in %.0f%% of frames",
-                 row["explicit_ligand_rmsd_nm_mean"],
-                 100 * row["explicit_frac_frames_engaged"])
+        log.info("  residence: ligand RMSD %.2f A mean, resident in %.0f%% of frames",
+                 row["explicit_ligand_rmsd_a_mean"],
+                 100 * row["explicit_frac_frames_resident"])
     except Exception as exc:                              # noqa: BLE001
         row["status"] = f"failed: {type(exc).__name__}: {str(exc)[:160]}"
         log.warning("  FAILED: %s", row["status"])

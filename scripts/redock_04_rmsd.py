@@ -51,6 +51,8 @@ RDLogger.DisableLog("rdApp.*")
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+from shared import outputs as sout           # noqa: E402
+
 log = logging.getLogger("redock-rmsd")
 
 # Analysis outputs live under the GOVERNED root, not in the repo

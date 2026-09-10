@@ -59,7 +59,9 @@ PY = Path.home() / ".micromamba/envs/dwi_reactive/bin/python"
 
 RMSD_MAX = "explicit_ligand_rmsd_nm_max"
 RMSD_MEAN = "explicit_ligand_rmsd_nm_mean"
-ENGAGED = "explicit_frac_frames_engaged"
+# NOT "engaged" -- pocket RESIDENCE. See
+# gromacs_analysis.RESIDENT_CONTACT_FRACTION and D0119.
+RESIDENT = "explicit_frac_frames_resident"
 
 
 def holders(bar: float, min_ps: float = 90_000.0) -> pd.DataFrame:
@@ -130,10 +132,10 @@ def main() -> None:
             log.info("no 100 ns run has cleared %.2f nm yet", args.bar)
         for r in todo:
             ident = str(r["ident"])
-            log.info("PROMOTE %s  max %.3f nm  mean %s  engaged %s",
-                     ident, r[RMSD_MAX],
-                     f"{r.get(RMSD_MEAN):.3f}" if pd.notna(r.get(RMSD_MEAN)) else "—",
-                     f"{r.get(ENGAGED):.3f}" if pd.notna(r.get(ENGAGED)) else "—")
+            log.info("PROMOTE %s  max %.2f A  mean %s A  resident %s",
+                     ident, r[RMSD_MAX] * 10.0,
+                     f"{r.get(RMSD_MEAN) * 10.0:.2f}" if pd.notna(r.get(RMSD_MEAN)) else "—",
+                     f"{r.get(RESIDENT):.3f}" if pd.notna(r.get(RESIDENT)) else "—")
             if args.dry_run:
                 seen.add(ident); continue
             cmd = [str(PY), str(REPO / "scripts/bpmd_run.py"),

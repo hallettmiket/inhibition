@@ -178,10 +178,17 @@ def residence(s: dict) -> dict:
             if not bound[i:].any():
                 left = float(t[i])
                 break
+    # Angstrom companions -- see gromacs_analysis.analyse()'s "UNITS ARE THE
+    # TRAP" note (D0119). The `_nm` keys stay for `residence_tier.tier()`,
+    # which is gated against an nm-stated config threshold; every DISPLAY site
+    # should read the `_a` ones instead.
+    rmean, rmax, rfinal = float(r.mean()), float(r.max()), float(r[-1])
     return {"status": "ok", "n_frames": int(len(r)),
             "length_ns": float(t[-1]), "residence_frac": float(bound.mean()),
-            "rmsd_mean_nm": float(r.mean()), "rmsd_max_nm": float(r.max()),
-            "rmsd_final_nm": float(r[-1]),
+            "rmsd_mean_nm": rmean, "rmsd_max_nm": rmax, "rmsd_final_nm": rfinal,
+            "rmsd_mean_a": round(rmean * 10.0, 3),
+            "rmsd_max_a": round(rmax * 10.0, 3),
+            "rmsd_final_a": round(rfinal * 10.0, 3),
             "left_at_ns": left, "dissociated": left is not None}
 
 
@@ -766,8 +773,8 @@ def main() -> None:
          + '</div></div>') if struct_svg else "",
         f'<style>{rtier.TIER_CSS}</style>'
         f'<p>{rtier.badge(tier_key)} '
-        f'Mean RMSD {res["rmsd_mean_nm"]:.3f} nm &middot; max '
-        f'{res["rmsd_max_nm"]:.3f} nm &middot; final {res["rmsd_final_nm"]:.3f} nm.</p>',
+        f'Mean RMSD {res["rmsd_mean_a"]:.2f} &Aring; &middot; max '
+        f'{res["rmsd_max_a"]:.2f} &Aring; &middot; final {res["rmsd_final_a"]:.2f} &Aring;.</p>',
         f'<details class="panel"><summary>RMSD plots'
         f'<span class="hint">RMSD, warhead&ndash;Cys113 distance, attack angle</span>'
         f'</summary><div class="pbody">'
@@ -827,6 +834,8 @@ def main() -> None:
         "label": rtier.label(tier_key), "colour": rtier.colour(tier_key),
         "rmsd_mean_nm": res.get("rmsd_mean_nm"),
         "rmsd_max_nm": res.get("rmsd_max_nm"),
+        "rmsd_mean_a": res.get("rmsd_mean_a"),
+        "rmsd_max_a": res.get("rmsd_max_a"),
         "residence_frac": res.get("residence_frac"),
         "dissociated": res.get("dissociated"),
         "left_at_ns": res.get("left_at_ns"),

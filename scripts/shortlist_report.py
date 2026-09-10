@@ -662,7 +662,7 @@ def md_row(ident: str):
     d = d[(d.ident.astype(str) == ident) & (d.get("production_ps", 0) >= 50000)]
     if "status" in d.columns:
         d = d[d.status.astype(str).str.startswith("ok")]
-    e = "explicit_frac_frames_engaged"
+    e = "explicit_frac_frames_resident"
     if e in d.columns:
         d = d[d[e].notna()]
     return None if d.empty else d.iloc[-1]
@@ -772,13 +772,17 @@ def block(ident: str, er, three: str, cls: dict,
 
     rows = [("trajectory", f"{res['length_ns']:.1f} ns, {res['n_frames']:,} frames"),
             ("warhead class", cls.get(ident, "unclassified")),
-            ("mean ligand RMSD", f"{res['rmsd_mean_nm']:.3f} nm"),
-            ("max ligand RMSD", f"{res['rmsd_max_nm']:.3f} nm"),
-            ("final ligand RMSD", f"{res['rmsd_final_nm']:.3f} nm"),
+            ("mean ligand RMSD", f"{res['rmsd_mean_a']:.2f} &Aring;"),
+            ("max ligand RMSD", f"{res['rmsd_max_a']:.2f} &Aring;"),
+            ("final ligand RMSD", f"{res['rmsd_final_a']:.2f} &Aring;"),
             ("residence fraction", f"{res['residence_frac']:.3f}")]
-    if m is not None and pd.notna(m.get("explicit_frac_frames_engaged")):
-        rows.insert(2, ("target engagement, 100 ns",
-                        f"{float(m['explicit_frac_frames_engaged'])*100:.2f}%"))
+    if m is not None and pd.notna(m.get("explicit_frac_frames_resident")):
+        # NOT "engagement" -- see gromacs_analysis.RESIDENT_CONTACT_FRACTION
+        # and D0119. This is whether the ligand stayed in the pocket, which is
+        # a different question from whether the warhead reached Cys113
+        # (the attack-ready row below, when a sweep exists).
+        rows.insert(2, ("pocket residence, 100 ns",
+                        f"{float(m['explicit_frac_frames_resident'])*100:.2f}%"))
     if res.get("left_at_ns") is not None:
         rows.append(("left the pocket at", f"{res['left_at_ns']:.1f} ns"))
     if sw is not None:

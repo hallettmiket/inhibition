@@ -145,6 +145,7 @@ def main() -> None:
 
     # ---- the movie, from the asset the sweep build wrote --------------------
     movie_block = ""
+    stale_clock = None          # set when the movie and the row disagree
     if pdb.is_file():
         try:
             # The SAME payload builder the 100 ns report uses, so the movie
@@ -177,16 +178,36 @@ def main() -> None:
             if _left is not None and not pd.isna(_left):
                 _fate_txt = ("left the site" if bool(_left)
                              else "still present at the cap")
+            # THE CLOCK COMES FROM THE MOVIE, NOT FROM THE ROW.
+            #
+            # `sweep_ps` describes the run; the file on disk holds the frames
+            # being drawn, and the two part company whenever a movie was built
+            # before its run was extended -- which was true of all 16 long-run
+            # viewers, each showing a 100 ns trajectory's frames under a 10 ns
+            # axis. The movie states its own length now (`movie_total_ps`); the
+            # row is the fallback for movies built before the stamp, and when
+            # both exist and disagree the page says so rather than picking one.
+            _stamp = mov.movie_total_ps(pdb)
+            _row_ps = None if _sps is None or pd.isna(_sps) else float(_sps)
+            _total = _stamp if _stamp is not None else _row_ps
+            if _stamp is not None and _row_ps is not None and \
+                    abs(_stamp - _row_ps) > 0.01 * _stamp:
+                stale_clock = (f"This movie covers {_stamp/1000:.1f} ns; the "
+                               f"results row says the run reached "
+                               f"{_row_ps/1000:.1f} ns. The movie is shown at "
+                               f"its own length.")
             movie_block = mov.viewer_html(
                 pdb_txt, dsg, labels, lpos, three,
-                total_ps=(None if _sps is None or pd.isna(_sps) else float(_sps)),
-                fate=_fate_txt)
+                total_ps=_total, fate=_fate_txt)
         except Exception as exc:                           # noqa: BLE001
             movie_block = rt.callout(
                 "Movie unavailable",
                 f"The {ns_txt} ns trajectory rendered no viewer: <code>{html.escape(str(exc))}</code>. "
                 "The readings below are unaffected — they come from the trajectory "
                 "directly.", "warn")
+    if stale_clock:
+        movie_block = rt.callout("This movie is not the whole run", stale_clock,
+                                 "warn") + movie_block
 
     img = base64.b64encode(png.read_bytes()).decode() if png.is_file() else ""
 

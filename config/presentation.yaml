@@ -1,0 +1,116 @@
+# The presentation set -- the poses the 2026-09-10 talk shows, and nothing else.
+#
+# @twu383, 2026-09-09: "we want a seperate presentation gui showcasing only our
+# poses of interest."
+#
+# WHAT THIS FILE IS AND IS NOT. It is the EDITORIAL list: which poses are on
+# screen, in what order, and what claim each one is there to make. It carries no
+# measurements. Every figure the GUI shows is read from the results tables at
+# build time and none is written here, because a number copied into a config is
+# catalogue #15/#19 -- right when written, unable to announce that it is not any
+# more. If a run extends overnight the page moves; this file does not.
+#
+# `movie_ps` is the ONE exception and it is a claim, not a measurement: it says
+# what length of trajectory this pose is supposed to be shown at. The builder
+# compares it against the movie's own TOTAL_PS and refuses to publish a pose
+# whose movie covers something else -- the defect that put a 10 ns movie under a
+# 100 ns headline on all 16 existing viewers.
+
+title: "Pin1 Cys113 covalent candidates — MD evidence"
+date: 2026-09-10
+receptor: 3IKD_ian
+
+sections:
+
+  - id: lead
+    heading: "The best result: equilibration finds a reactive pose docking did not"
+    blurb: >
+      Two 100 ns replicates from a byte-identical starting pose: 35.7% engaged
+      and 0.0% engaged. Both held the pocket. The divergence is complete at
+      production frame 1 (3.86 vs 5.39 Angstrom), so the EQUILIBRATION decided
+      the outcome, not the production run. Present the pair, never replicate 1
+      alone — D0118.
+    poses:
+      - ident: t4_7b02d1dc4fd2_m50
+        movie_ps: 100000
+        claim: "relocated then stable — engaged 35.7% of 100 ns"
+        show: [movie, warhead_distance, ligand_rmsd, interaction_profile]
+      - ident: t4_7b02d1dc4fd2_m50
+        replicate: 2
+        movie_ps: 100000
+        claim: "the same pose, the same code path, 0.0% engaged — D0118"
+        show: [movie, warhead_distance, ligand_rmsd]
+        status: done
+    supporting:
+      - ident: t4_7b02d1dc4fd2_m74     # 19.0% over 1.2 ns, RMSD max 3.58 A
+      - ident: t4_7b02d1dc4fd2_m200
+      - ident: t4_7b02d1dc4fd2_m193
+
+  - id: modes
+    heading: "One molecule, every mode: t4_7606519fce77"
+    blurb: >
+      19 modes swept. Ten left during equilibration and are shown as such —
+      they are the denominator, not a failure to report. Of the nine that ran,
+      m218 is the only one at 100 ns so far; three more are running tonight.
+    poses:
+      - ident: t4_7606519fce77_m218
+        movie_ps: 100000
+        claim: "held 100 ns, tightest pose of the four elevations (RMSD mean 0.386 nm)"
+        show: [movie, warhead_distance, ligand_rmsd, interaction_profile]
+      - ident: t4_7606519fce77_m186
+        movie_ps: 100000
+        claim: "highest engagement of the molecule's modes (23.97% over 1.2 ns)"
+        show: [movie, warhead_distance, ligand_rmsd]
+        status: running
+      - ident: t4_7606519fce77_m121
+        movie_ps: 100000
+        claim: "tightest short-run pose (RMSD max 2.87 A)"
+        show: [movie, warhead_distance, ligand_rmsd]
+        status: running
+      - ident: t4_7606519fce77_m216
+        movie_ps: 100000
+        claim: "reached 10 ns before departing"
+        show: [movie, warhead_distance, ligand_rmsd]
+        status: running
+    roster: t4_7606519fce77       # the GUI tabulates ALL 19, run or aborted
+
+  - id: v6_hit
+    heading: "The nac_v6 top hit: t4_716800c125a7"
+    blurb: >
+      Independently validated by the chemist in his own GROMACS run — same pose,
+      stable, warhead near Cys113. We have no 100 ns run of our own: its one
+      mode clearing the docked cut (m80) left during equilibration tonight at
+      6.09 Angstrom. Present the chemist's result and the docking score; do NOT
+      show a movie, because the trajectory behind the 98.45%/99.80% replicates
+      is not on this filesystem.
+    poses: []
+    claims:
+      - "non-covalent docking -5.99 kcal/mol vs sulfopin's -5.44, same protocol"
+      - "chemist reproduced the pose independently (MD frame, different code path)"
+    caveats:
+      - "the screen's 86% engagement is invalidated by D0109 — do not quote it"
+      - "no 100 ns trajectory exists here; on-disk lengths are 1.2, 8 and 10 ns"
+      - "m80 aborted: left during equilibration, final warhead distance 6.09 A"
+
+  - id: contrast
+    heading: "What a failure looks like"
+    blurb: >
+      Both ran the full 100 ns. Neither supports synthesis, and they fail in
+      different ways — which is the argument that the two readouts are separate.
+    poses:
+      - ident: t4_88ae42890e2d_m239
+        movie_ps: 100000
+        claim: "held the pocket while the warhead rotated away — D0114"
+        show: [movie, warhead_angle, ligand_rmsd]
+      - ident: t4_215b12bd9b34_m184
+        movie_ps: 100000
+        claim: "left the site outright — mean ligand RMSD 1.854 nm"
+        show: [movie, ligand_rmsd]
+
+# Shown on every page, because a talk that omits it overclaims.
+standing_caveats:
+  - "Ranking is not validated on this target — every shortlist is an ordering the pipeline produced, not evidence of binding."
+  - "A single 1.2 ns engagement figure does not reproduce (D0113, median spread 18.9 points). Only the 100 ns runs are quoted as results."
+  - "Engagement is distance-only (2.8-3.5 A); the with-angle figure is shown beside it, never instead of it."
+  - "Engagement does not reproduce at 100 ns either (D0118): m50 gives 35.7% and 0.0% on two replicates of one pose. Every engagement figure here is ONE DRAW."
+  - "`explicit_frac_frames_resident` (D0119, formerly misnamed `..._engaged`) is RESIDENCE, not warhead geometry. Replicate 2 scores 0.996 on it while never once reaching attack geometry."

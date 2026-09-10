@@ -73,7 +73,7 @@ def main() -> None:
         f"md_residence_rep{args.replicate}_{args.candidate}_remeasured", ".csv")
     pd.DataFrame([row]).to_csv(dest, index=False)
     print(f"\n  ok -> {dest}")
-    for k in ("ns_analysed", "explicit_frac_frames_engaged",
+    for k in ("ns_analysed", "explicit_frac_frames_resident",
               "explicit_ligand_rmsd_nm_mean", "explicit_ligand_rmsd_nm_max",
               "explicit_ligand_rmsd_nm_final"):
         if k in row:

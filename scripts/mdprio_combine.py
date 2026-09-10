@@ -291,7 +291,7 @@ def _md() -> pd.DataFrame:
     d = d[d.get("production_ps", 0) >= 50000].copy()
     if "status" in d.columns:
         d = d[d.status.astype(str).str.startswith("ok")]
-    eng = "explicit_frac_frames_engaged"
+    eng = "explicit_frac_frames_resident"
     if eng in d.columns:
         d["_has"] = d[eng].notna().astype(int)
         d = d.sort_values("_has")
@@ -583,13 +583,18 @@ def main() -> None:
         ar = None
         if s_ is not None and "frac_attack_ready" in s_ and not pd.isna(s_["frac_attack_ready"]):
             ar = float(s_["frac_attack_ready"])
-        eng = None
-        if (m_ is not None and "explicit_frac_frames_engaged" in m_
-                and not pd.isna(m_["explicit_frac_frames_engaged"])):
-            eng = float(m_["explicit_frac_frames_engaged"])
+        # NOT "engagement" -- pocket RESIDENCE. See
+        # gromacs_analysis.RESIDENT_CONTACT_FRACTION and D0119: this is
+        # whether the ligand stayed put, not whether the warhead reached
+        # Cys113, and the name collision is how a held-but-disengaged run
+        # (D0114) or a non-reproducing replicate (D0118) reads as a win.
+        resident = None
+        if (m_ is not None and "explicit_frac_frames_resident" in m_
+                and not pd.isna(m_["explicit_frac_frames_resident"])):
+            resident = float(m_["explicit_frac_frames_resident"])
         rmax = None
         if m_ is not None and "explicit_ligand_rmsd_nm_max" in m_ and not pd.isna(m_["explicit_ligand_rmsd_nm_max"]):
-            rmax = float(m_["explicit_ligand_rmsd_nm_max"])
+            rmax = float(m_["explicit_ligand_rmsd_nm_max"]) * 10.0   # -> Angstrom
         # THREE TIERS, FROM THE RUN'S OWN SIDECAR (@tt8804: "should show
         # optimal, held, left"). The rule lives in shared/residence_tier; the
         # per-run tier is written beside the report by the run that produced it.
@@ -605,12 +610,19 @@ def main() -> None:
         sc = _scored(t)
         tier_key = sc["tier"] if sc else None
         rmean = None
-        if sc is not None and sc.get("rmsd_max_nm") is not None:
-            rmax = float(sc["rmsd_max_nm"])
-        if sc is not None and sc.get("rmsd_mean_nm") is not None:
-            rmean = float(sc["rmsd_mean_nm"])
+        # PREFER THE `_a` SIDECAR FIELD; FALL BACK TO CONVERTING `_nm`. Every
+        # sidecar written before D0119 carries only the nm keys, so a rail
+        # walking a mix of old and new runs cannot assume either is present.
+        if sc is not None and sc.get("rmsd_max_a") is not None:
+            rmax = float(sc["rmsd_max_a"])
+        elif sc is not None and sc.get("rmsd_max_nm") is not None:
+            rmax = float(sc["rmsd_max_nm"]) * 10.0
+        if sc is not None and sc.get("rmsd_mean_a") is not None:
+            rmean = float(sc["rmsd_mean_a"])
+        elif sc is not None and sc.get("rmsd_mean_nm") is not None:
+            rmean = float(sc["rmsd_mean_nm"]) * 10.0
         held = tier_key in ("optimal", "held", "unstable")
-        has_md = eng is not None
+        has_md = resident is not None
         wcls = str(cls_of.get(par, cls_of.get(t, "unclassified")))
         # A molecule with no 100 ns run cannot be placed on the ranked axis at
         # all. It goes in its own band rather than being given a 0, which would
@@ -627,17 +639,17 @@ def main() -> None:
         # were never as tight. The mean is where the ligand actually spent the
         # run. Both are shown: "how far did it stray" is still worth reading, it
         # is just not the ordering.
-        headline = (f"{rmean:.3f}/{rmax:.3f} nm"
+        headline = (f"{rmean:.2f}/{rmax:.2f} &Aring;"
                     if has_md and rmean is not None and rmax is not None
-                    else (f"{rmax:.3f} nm max" if has_md and rmax is not None
-                          else ("—" if not has_md else f"{eng*100:.0f}% engaged")))
+                    else (f"{rmax:.2f} &Aring; max" if has_md and rmax is not None
+                          else ("—" if not has_md else f"{resident*100:.0f}% resident")))
         # THE SELECTOR CARRIES 100 ns FACTS ONLY (@tt8804, #55): max ligand RMSD,
         # held/left, engaged %. The triage sweep decides what earns
         # a 100 ns run -- it is not a result, and sitting in the rail beside the
         # engagement number it read as a second, competing score. It moves to a
         # table in the viewer, where it is clearly labelled as what selected the
         # molecule rather than what was found.
-        meta = (f"{eng*100:.0f}% engaged" if has_md and eng is not None
+        meta = (f"{resident*100:.0f}% resident" if has_md and resident is not None
                 else "awaiting 100 ns")
         # A CONTROL THAT NOW HAS A 100 ns RUN IS ONE ROW, NOT TWO. It was being
         # emitted here as a ranked candidate AND again in the controls block as an
@@ -649,7 +661,7 @@ def main() -> None:
             f"<button class='row{' ctl' if is_ctl else ''}' "
             f"data-cls=\"{'control' if is_ctl else html.escape(wcls)}\" "
             + ("data-ctl='1' " if is_ctl else "")
-            + f"data-eng='{(eng if has_md else -1):.6f}' "
+            + f"data-eng='{(resident if has_md else -1):.6f}' "
             # THE SORT KEY, ASCENDING -- lower is better, so an unranked row
             # cannot be given 0. It gets a sentinel that sorts last, and is in
             # the unranked band anyway.
@@ -685,7 +697,7 @@ def main() -> None:
                 "sidecar — rebuild its report page'>not scored</span>")
                if has_md else "<span class='tag t-pend'>swept</span>")
             + "</span>"
-            f"<span class='bar'><i style='width:{max(1.5,(eng if has_md else 0)*100):.1f}%'></i></span>"
+            f"<span class='bar'><i style='width:{max(1.5,(resident if has_md else 0)*100):.1f}%'></i></span>"
             f"</span></button>")
 
     # THE QUEUE, NOT ONLY THE FINISHED (@tt8804). A survivor waits hours for its
@@ -731,7 +743,8 @@ def main() -> None:
                 + f"<span class='body'><span class='l1'>"
                 f"<span class='mid-id'>{html.escape(parent)}"
                 f"<span class='mode'>m{ident.rsplit('_m',1)[-1]}</span></span>"
-                f"<span class='eng pend'>{r.rmsd_max:.3f} nm at {int(_SWEEP_NS)}&nbsp;ns</span></span>"
+                f"<span class='eng pend'>{getattr(r, 'rmsd_max_a', r.rmsd_max * 10.0):.2f} "
+                f"&Aring; at {int(_SWEEP_NS)}&nbsp;ns</span></span>"
                 f"<span class='l2'>"
                 f"<span class='wc'>{html.escape(str(cls_of.get(parent,'—')))}</span>"
                 f"<span class='meta'>{ar_s}</span>"

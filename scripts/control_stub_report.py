@@ -65,7 +65,7 @@ def md_row(ident: str) -> pd.Series | None:
     d = d[(d.ident.astype(str) == ident) & (d.get("production_ps", 0) >= 50000)]
     if "status" in d.columns:
         d = d[d.status.astype(str).str.startswith("ok")]
-    e = "explicit_frac_frames_engaged"
+    e = "explicit_frac_frames_resident"
     if e in d.columns:
         d = d[d[e].notna()]
     return None if d.empty else d.iloc[-1]
@@ -97,17 +97,23 @@ def main() -> None:
         raise SystemExit(f"{args.candidate}: no successful 100 ns row to build from")
     s = sweep_row(args.candidate)
 
-    eng = float(m["explicit_frac_frames_engaged"])
-    rmax = float(m["explicit_ligand_rmsd_nm_max"])
-    held = rmax < BOUND_NM
-    rows = [("100 ns target engagement", f"{eng * 100:.2f}%"),
-            ("max ligand RMSD", f"{rmax:.3f} nm"),
-            ("verdict", "held" if held else f"left (above the {BOUND_NM} nm bar)"),
+    # NOT "engagement" -- this is POCKET RESIDENCE, the fraction of frames
+    # retaining starting contacts. See gromacs_analysis.RESIDENT_CONTACT_FRACTION
+    # and D0119: the name collision with warhead-to-Cys113 geometry is how a
+    # held-but-disengaged run (D0114) or a non-reproducing replicate (D0118)
+    # reads as a success.
+    resident = float(m["explicit_frac_frames_resident"])
+    rmax_nm = float(m["explicit_ligand_rmsd_nm_max"])
+    rmax = rmax_nm * 10.0                        # Angstrom -- the display unit
+    held = rmax_nm < BOUND_NM
+    rows = [("100 ns pocket residence", f"{resident * 100:.2f}%"),
+            ("max ligand RMSD", f"{rmax:.2f} &Aring;"),
+            ("verdict", "held" if held else f"left (above the {BOUND_NM * 10:.0f} A bar)"),
             ("production", f"{float(m['production_ps']) / 1000:.0f} ns")]
     for k, lbl in (("explicit_ligand_rmsd_nm_mean", "mean ligand RMSD"),
                    ("explicit_ligand_rmsd_nm_final", "final ligand RMSD")):
         if k in m and pd.notna(m[k]):
-            rows.append((lbl, f"{float(m[k]):.3f} nm"))
+            rows.append((lbl, f"{float(m[k]) * 10.0:.2f} &Aring;"))
     if s is not None:
         rows.append((f"{_SWEEP_NS} ns sweep, attack-ready", f"{float(s.frac_attack_ready):.4f}"))
         rows.append((f"{_SWEEP_NS} ns sweep, sustained visits", f"{float(s.n_visits):.0f}"))
@@ -119,15 +125,15 @@ def main() -> None:
     # own rather than in a different page design.
     mast_facts = [(args.candidate, "molecule"),
                   ("control", "role"),
-                  (f"{eng * 100:.2f}%", "100 ns engagement"),
-                  (f"{rmax:.3f} nm", "max ligand RMSD")]
+                  (f"{resident * 100:.2f}%", "100 ns pocket residence"),
+                  (f"{rmax:.2f} &Aring;", "max ligand RMSD")]
     if s is not None:
         mast_facts.append((f"{float(s.frac_attack_ready)*100:.1f}%  ·  "
                            f"{float(s.n_visits):.0f} visits", f"attack-ready ({_SWEEP_NS} ns)"))
     mast_facts.append((f"{float(m['production_ps']) / 1000:.0f} ns", "trajectory"))
 
-    stand = (f"{'Held' if held else 'Left'}. Engaged the target in "
-             f"{eng * 100:.2f}% of the 100 ns run.")
+    stand = (f"{'Held' if held else 'Left'}. Resident in the pocket for "
+             f"{resident * 100:.2f}% of the 100 ns run.")
 
     detail = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in rows)
     sweep_panel = ""
@@ -171,7 +177,7 @@ def main() -> None:
 
     dest = REPORTS / f"{args.candidate}.html"
     dest.write_text(html)
-    print(f"  {args.candidate}: {eng*100:.2f}% engaged, "
+    print(f"  {args.candidate}: {resident*100:.2f}% resident, "
           f"{'held' if held else 'left'} -> {dest}")
 
 

@@ -178,9 +178,17 @@ def survivors() -> pd.DataFrame:
         if y is None or not len(y):
             unresolved += 1
             continue
+        rmsd_max_nm, rmsd_mean_nm = float(y.max()), float(y.mean())
         rows.append({"ident": str(r.ident), "parent_ident": str(r.parent_ident),
-                     "pose_rank": int(r.pose_rank), "rmsd_max": float(y.max()),
-                     "rmsd_mean": float(y.mean()),
+                     "pose_rank": int(r.pose_rank),
+                     # BARE `rmsd_max`/`rmsd_mean` ARE NM, undocumented by the
+                     # name -- the gate below needs nm (config states the bar
+                     # in nm) so they stay. `_a` companions are for display;
+                     # see gromacs_analysis.analyse()'s "UNITS ARE THE TRAP"
+                     # note and D0119. Report the `_a` pair, not these.
+                     "rmsd_max": rmsd_max_nm, "rmsd_mean": rmsd_mean_nm,
+                     "rmsd_max_a": round(rmsd_max_nm * 10.0, 3),
+                     "rmsd_mean_a": round(rmsd_mean_nm * 10.0, 3),
                      "frac_attack_ready": float(getattr(r, "frac_attack_ready", float("nan")))})
     if not rows and unresolved:
         raise StageError(
