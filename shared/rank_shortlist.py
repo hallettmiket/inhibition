@@ -52,11 +52,46 @@ log = logging.getLogger(__name__)
 GATE_TOKEN = Path("/data/lab_vm/append_only/inhibition/00_shared_substrate"
                   "/enrichment_gate.token")
 
-# Every rank metric in this project is lower-is-better (kcal/mol). Recorded
-# explicitly so a future higher-is-better metric cannot be added silently.
-# `size_decorrelated_score` is a residual of a lower-is-better metric, so it
-# inherits the direction: below the fit is better than expected for the size.
-LOWER_IS_BETTER = {"affinity_kcal", "vina_affinity", "size_decorrelated_score"}
+# THE DIRECTION REGISTRY -- AN ALLOWLIST THAT CARRIES THE DIRECTION, NOT JUST
+# THE NAME. This is the guard that caught catalogue #4 (an analysis ranking on
+# `cnn_affinity` where the ranking column was `affinity_kcal`), and until
+# 2026-09-09 it was a bare SET of names whose members happened to share one
+# direction. Every sort below then hardcoded `ascending=True`.
+#
+# That made the obvious way to register a higher-is-better metric -- adding its
+# name to a set called LOWER_IS_BETTER, which is what the error message
+# literally invited -- silently invert the whole ranking while every number
+# stayed populated and plausible. The guard checked the name and assumed the
+# direction, which is the shape it exists to catch, one level up.
+#
+# So the direction is DECLARED per metric and READ at every sort. A metric not
+# named here is refused rather than assumed, exactly as before.
+RANK_DIRECTION = {
+    "affinity_kcal": True,              # kcal/mol, lower binds better
+    "vina_affinity": True,              # kcal/mol, lower binds better
+    "size_decorrelated_score": True,    # residual of a lower-is-better metric
+    # Ligand-based pharmacophore similarity to the held-out Pin1 actives.
+    # HIGHER IS BETTER -- a Tanimoto, not an energy. The first metric in this
+    # project whose direction differs from the rest, and the reason the
+    # registry now carries one. See shared/pharmacophore.py.
+    "ph2d_max_similarity": False,
+}
+
+#: Back-compatible view. Derived from RANK_DIRECTION so the two cannot drift;
+#: `size_decorrelated_score` inherits its direction from the metric it was
+#: computed from, which `rank()` resolves from the BASE metric rather than
+#: from this entry.
+LOWER_IS_BETTER = {m for m, lower in RANK_DIRECTION.items() if lower}
+
+
+def direction_of(metric: str) -> bool:
+    """True if lower is better for ``metric``. Refuses an unregistered name."""
+    try:
+        return RANK_DIRECTION[metric]
+    except KeyError:
+        raise ValueError(
+            f"{metric!r} is not a known rank metric; add it to RANK_DIRECTION "
+            "with its direction rather than assuming one") from None
 
 SIZE_COL = "HAC"
 
@@ -204,10 +239,11 @@ def rank(df: pd.DataFrame, *, metric: str, group_col: str | None,
     duplication BETWEEN groups and left it WITHIN one. Rows sharing an identity
     receive the same rank, so a quota of 3 means three distinct molecules.
     """
-    if metric not in LOWER_IS_BETTER:
-        raise ValueError(
-            f"{metric!r} is not a known rank metric; add it to LOWER_IS_BETTER "
-            "with its direction rather than assuming one")
+    # Refuses an unregistered metric, and RESOLVES ITS DIRECTION rather than
+    # assuming lower-is-better. `lower` is read from the BASE metric and reused
+    # for the size-decorrelated residual below, which inherits the direction of
+    # whatever it is a residual of.
+    lower = direction_of(metric)
     out = df.copy()
 
     # A RE-RANK INVALIDATES EVERYTHING DERIVED FROM THE PREVIOUS RANKING.
@@ -272,13 +308,14 @@ def rank(df: pd.DataFrame, *, metric: str, group_col: str | None,
         if identity_col:
             # One entry per MOLECULE. Several rows may reach the same product by
             # different synthetic routes; they are one candidate, not several.
-            best = (sub.groupby(identity_col)[rank_on].min()
-                    .sort_values(ascending=True))
+            best = (sub.groupby(identity_col)[rank_on].agg(
+                        "min" if lower else "max")
+                    .sort_values(ascending=lower))
             n = len(best)
             rank_of = {ident: r for r, ident in enumerate(best.index, start=1)}
             ranks_series = sub[identity_col].map(rank_of)
         else:
-            ordered = sub.sort_values(rank_on, ascending=True)
+            ordered = sub.sort_values(rank_on, ascending=lower)
             n = len(ordered)
             ranks_series = pd.Series(range(1, n + 1), index=ordered.index)
         out.loc[sub.index, "rank"] = ranks_series.reindex(sub.index)
@@ -301,12 +338,13 @@ def rank(df: pd.DataFrame, *, metric: str, group_col: str | None,
         for grp, idx in out[docked].groupby("rank_group").groups.items():
             sub = out.loc[idx]
             if identity_col:
-                best = (sub.groupby(identity_col)[metric].min()
-                        .sort_values(ascending=True))
+                best = (sub.groupby(identity_col)[metric].agg(
+                            "min" if lower else "max")
+                        .sort_values(ascending=lower))
                 rank_of = {ident: r for r, ident in enumerate(best.index, start=1)}
                 raw = sub[identity_col].map(rank_of)
             else:
-                ordered = sub.sort_values(metric, ascending=True)
+                ordered = sub.sort_values(metric, ascending=lower)
                 raw = pd.Series(range(1, len(ordered) + 1), index=ordered.index)
             out.loc[sub.index, "rank_raw_metric"] = raw.reindex(sub.index)
     else:

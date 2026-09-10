@@ -157,8 +157,16 @@ def cluster_chemotypes(smiles: list[str], threshold: float = 0.4) -> list[int]:
 # Enrichment metrics
 # ---------------------------------------------------------------------------
 
-def roc_auc(scores: list[float], labels: list[int], *, higher_is_better: bool) -> float:
-    """ROC-AUC via the Mann-Whitney statistic, ties counted as half."""
+def _roc_auc_pairwise(scores: list[float], labels: list[int], *,
+                      higher_is_better: bool) -> float:
+    """The DEFINITION, O(actives x decoys). Kept as the reference implementation.
+
+    This is what `roc_auc` was until 2026-09-09 and it is what
+    `tests/test_enrichment_gate_auc.py` checks the fast path against. It is not
+    called in anger: at 34 actives against 361,354 MEASURED inactives it is
+    12.3M Python-level comparisons per call, and `bootstrap_ci` calls it 2,000
+    times -- 24.6 billion, which does not finish.
+    """
     s = scores if higher_is_better else [-x for x in scores]
     pos = [x for x, l in zip(s, labels) if l == 1]
     neg = [x for x, l in zip(s, labels) if l == 0]
@@ -166,6 +174,42 @@ def roc_auc(scores: list[float], labels: list[int], *, higher_is_better: bool) -
         raise EnrichmentGateError("ROC-AUC needs both actives and decoys")
     wins = sum((1.0 if p > q else 0.5 if p == q else 0.0) for p in pos for q in neg)
     return wins / (len(pos) * len(neg))
+
+
+def roc_auc(scores, labels, *, higher_is_better: bool) -> float:
+    """ROC-AUC via the Mann-Whitney statistic, ties counted as half.
+
+    EXACT, NOT APPROXIMATE, AND NOT A DIFFERENT STATISTIC. Sorting the decoys
+    once and binary-searching each active into them counts precisely the same
+    pairs as the nested loop in `_roc_auc_pairwise`: `searchsorted(..., "left")`
+    is the number of decoys strictly below, and the gap to `"right"` is the
+    number tied, which is where the half weight goes. Same number, O(n log n)
+    instead of O(actives x decoys).
+
+    WHY IT HAD TO CHANGE. The pairwise form was sized for the gate's ORIGINAL
+    population -- property-matched decoys at 50 per active, ~1,700 of them.
+    Phase 1 ingested 361,354 ASSAYED inactives, 200x more, and the same
+    constant-time-per-pair code silently became a run that does not finish.
+    That is catalogue #19's shape (`timeout=86400`, sized when a pool was 1,882
+    molecules): a value that was right when written, cannot announce that it is
+    not any more, and costs a run rather than raising.
+    """
+    s = np.asarray(scores, dtype=float)
+    lab = np.asarray(labels, dtype=int)
+    if not higher_is_better:
+        s = -s
+    pos, neg = s[lab == 1], s[lab == 0]
+    if pos.size == 0 or neg.size == 0:
+        raise EnrichmentGateError("ROC-AUC needs both actives and decoys")
+    return _auc_from_arrays(pos, np.sort(neg))
+
+
+def _auc_from_arrays(pos: np.ndarray, neg_sorted: np.ndarray) -> float:
+    """AUC for actives `pos` against ALREADY-SORTED decoys, ties at half."""
+    below = np.searchsorted(neg_sorted, pos, side="left")
+    upto = np.searchsorted(neg_sorted, pos, side="right")
+    wins = float(below.sum()) + 0.5 * float((upto - below).sum())
+    return wins / (pos.size * neg_sorted.size)
 
 
 def enrichment_factor(scores: list[float], labels: list[int], *,
@@ -206,23 +250,35 @@ def bootstrap_ci(scores: list[float], labels: list[int], *, higher_is_better: bo
     finding — a 0.72 point estimate with a [0.41, 0.95] interval is not evidence
     of enrichment, and reporting only the 0.72 would imply it is.
     """
-    rng = random.Random(seed)
-    ai = [i for i, l in enumerate(labels) if l == 1]
-    di = [i for i, l in enumerate(labels) if l == 0]
-    vals: list[float] = []
-    for _ in range(n_boot):
-        sa = [rng.choice(ai) for _ in ai]
-        sd = [rng.choice(di) for _ in di]
-        try:
-            vals.append(roc_auc([scores[i] for i in sa + sd],
-                                [1] * len(sa) + [0] * len(sd),
-                                higher_is_better=higher_is_better))
-        except EnrichmentGateError:
-            continue
-    if not vals:
+    s = np.asarray(scores, dtype=float)
+    lab = np.asarray(labels, dtype=int)
+    if not higher_is_better:
+        s = -s
+    pos_all, neg_all = s[lab == 1], s[lab == 0]
+    if pos_all.size == 0 or neg_all.size == 0:
         return (float("nan"), float("nan"))
+
+    # VECTORISED RESAMPLING, AND THE RNG STREAM CHANGED WITH IT. The previous
+    # form drew each index with `random.Random.choice` in a Python loop -- at
+    # 361,354 decoys x 2,000 replicates that is 722 million calls before any
+    # AUC is computed, so it could not be kept merely to preserve the stream.
+    #
+    # A bootstrap CI is a Monte Carlo estimate, so its exact endpoints were
+    # never a fixed quantity -- they move with the stream at any n_boot. What
+    # must be preserved is the ESTIMATOR, and it is:
+    # `tests/test_enrichment_gate_auc.py` checks this against the old
+    # implementation on a small population and requires agreement to within
+    # Monte Carlo error rather than to the digit.
+    rng = np.random.default_rng(seed)
+    n_pos, n_neg = pos_all.size, neg_all.size
+    vals = np.empty(n_boot, dtype=float)
+    for b in range(n_boot):
+        pos = pos_all[rng.integers(0, n_pos, n_pos)]
+        neg = np.sort(neg_all[rng.integers(0, n_neg, n_neg)])
+        vals[b] = _auc_from_arrays(pos, neg)
     vals.sort()
-    return (vals[int(0.025 * len(vals))], vals[int(0.975 * len(vals)) - 1])
+    return (float(vals[int(0.025 * n_boot)]),
+            float(vals[int(0.975 * n_boot) - 1]))
 
 
 # ---------------------------------------------------------------------------

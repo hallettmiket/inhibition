@@ -87,14 +87,40 @@ def _summarise(prefix: str, experiment: str) -> dict | None:
     metric = "vina_affinity" if prefix in ("D1", "D2") else "affinity_kcal"
     short = ("shortlist_synth" if "shortlist_synth" in df.columns
              else "shortlist" if "shortlist" in df.columns else None)
+    # WHICH METRIC RANKED IT. `ranked` was a bare `rank.notna()` count, which
+    # silently assumed every ranking in the project came from docking -- true
+    # until 2026-09-09, when the T_2 degree-2 pools were ranked on
+    # `ph2d_max_similarity` (D0117). The ATRA degree-2 row then read
+    # "127 docked, 30,000 ranked", which is impossible under the reading that
+    # column has always had and is a perfectly plausible-looking number.
+    #
+    # `gate_metric` names the base metric the ranking was gated on;
+    # `rank_metric_used` names the column actually sorted (the size-decorrelated
+    # residual, usually), so it cannot be used to identify the metric. A
+    # ranking on anything other than this arm's docking score is LABELLED
+    # rather than blended into a column that means something else.
+    ranked_on = None
+    if "gate_metric" in df.columns and len(df):
+        v = df["gate_metric"].dropna()
+        if len(v):
+            ranked_on = str(v.iloc[0])
     return {
         "frame": path.name,
         "rows": len(df),
         "docked": int(df[metric].notna().sum()) if metric in df.columns else 0,
         "ranked": int(df["rank"].notna().sum()) if "rank" in df.columns else 0,
+        "ranked_on": ranked_on,
+        "ranked_on_docking": ranked_on in (None, metric),
         "shortlisted": int(df[short].sum()) if short else 0,
         "shortlist_col": short or "-",
     }
+
+
+def _ranked_cell(s: dict) -> str:
+    """The ranked count, carrying the metric when it is NOT the docking score."""
+    if s["ranked_on_docking"]:
+        return f"{s['ranked']:,}"
+    return f"{s['ranked']:,} ({s['ranked_on']})"
 
 
 def measure() -> dict:
@@ -124,7 +150,7 @@ def render(m: dict) -> dict[str, str]:
              "|---|---|---:|---:|---:|---:|"]
     for label, s in m["arms"].items():
         lines.append(f"| {label} | `{s['frame']}` | {s['rows']:,} | "
-                     f"{s['docked']:,} | {s['ranked']:,} | "
+                     f"{s['docked']:,} | {_ranked_cell(s)} | "
                      f"{s['shortlisted']} (`{s['shortlist_col']}`) |")
     arms_tbl = "\n".join(lines)
 
@@ -132,8 +158,16 @@ def render(m: dict) -> dict[str, str]:
              "|---|---|---:|---:|---:|"]
     for label, s in m["t2"].items():
         lines.append(f"| {label} | `{s['frame']}` | {s['docked']:,} | "
-                     f"{s['ranked']:,} | {s['shortlisted']} |")
-    lines.append(f"| **all six** | | **{m['total_t2']:,}** | | |")
+                     f"{_ranked_cell(s)} | {s['shortlisted']} |")
+    # THE COUNT OF ROWS IS COUNTED, NOT SPELLED. This said "all six" while the
+    # table rendered seven rows the moment a second degree-2 pool appeared --
+    # a hand-maintained number describing a generated table, which is the
+    # hand-maintained-list defect (#5, #16) in the document that exists to stop
+    # people being misled. It is also the DOCKED total, so it says so: the
+    # degree-2 pools are ranked on a non-docking metric and contribute 0 and
+    # 127 here, which would otherwise read as a shrinking screen.
+    lines.append(f"| **all {len(m['t2'])} pools, docked** | | "
+                 f"**{m['total_t2']:,}** | | |")
     t2_tbl = "\n".join(lines)
 
     return {"arms": arms_tbl, "t2": t2_tbl,

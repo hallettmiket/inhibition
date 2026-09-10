@@ -291,8 +291,13 @@ T_2 variants. Every one of those figures comes from the generated table in
 > any of them.**
 
 That is not pessimism; it is the measured position, and it is the project's
-central finding so far. Four levels of theory have been tested and none
-discriminates:
+central finding so far. Every level of theory tested so far has failed to
+discriminate, and as of 2026-09-09 one of those nulls is finally **well
+powered** — the pharmacophore gate ran against 361,354 ASSAYED inactives over
+27 independent chemotypes and returned a CI of width 0.185 that still includes
+0.5 (D0117). Earlier nulls could not separate "does not work" from "we cannot
+tell"; that one can, and it also removes the decoy-construction defence, since
+its negatives were measured in a real assay rather than constructed:
 
 | level | result | record |
 |---|---|---|
@@ -303,6 +308,7 @@ discriminates:
 | **100 ns non-covalent residence** | **positive control is the WORST of three** | **D0107** |
 | **All NAC geometry, nac_v5-v7** | **measured against pose 1's sulfur; re-screening** | **D0109** |
 | **BPMD (`escaped`, 10 ns)** | **positive control fails it too, 7/7 escape** | **D0107** |
+| **Pharmacophore similarity (2D)** | **AUC 0.568, CI [0.473, 0.658] — WELL POWERED null, 27 chemotypes** | **D0117** |
 | Tier-1 warhead drift, 300 ps | **works** — p = 0.007, REF median 0.102 nm | D0071, D0108 |
 
 **D0046's framing has been corrected against the literature (#66), and the
@@ -529,12 +535,13 @@ within 24 h of being written.*
 | Potter-Astex | `D2_5.parquet` | 7,376 | 7,376 | 25 |
 | Du-Xu | `D2_10.parquet` | 9,736 | 9,736 | 25 |
 | Guo-Pfizer | `D2_10.parquet` | 8,670 | 8,670 | 25 |
-| ATRA degree-2 | `D2_8.parquet` | 127 | 0 | 0 |
-| **all six** | | **44,597** | | |
+| ATRA degree-2 | `D2_9.parquet` | 127 | 30,000 (ph2d_max_similarity) | 25 |
+| Guo-Pfizer degree-2 | `D2_2.parquet` | 0 | 30,000 (ph2d_max_similarity) | 25 |
+| **all 7 pools, docked** | | **44,597** | | |
 <!-- AUTO:t2:END -->
 
 <!-- AUTO:decisions:BEGIN -->
-**113** decision records.
+**116** decision records.
 <!-- AUTO:decisions:END -->
 
 All six T_2 variants are ranked (size-decorrelated, D0049) and carry rebuilt

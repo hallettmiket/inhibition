@@ -78,8 +78,27 @@ def _t2_seeds() -> dict:
             continue
         out[key] = {"experiment": rec["experiment"],
                     "label": _T2_SHORT_LABEL.get(key) or rec.get("name") or key}
-    out["atra_degree2"] = {"experiment": "02_t2_atra_crem_degree2",
-                           "label": "ATRA degree-2"}
+    # DEGREE-2 POOLS ARE DISCOVERED, NOT LISTED. `atra_degree2` used to be one
+    # hardcoded literal here, and when the Guo-Pfizer degree-2 sample was
+    # generated on 2026-08-06 it was invisible to this app and to
+    # `refresh_orientation.py`, which reads its T_2 list from this function
+    # precisely so it cannot go stale. A 30,000-molecule ranked pool was absent
+    # from the project's own census, under a banner that lists every T_2 seed.
+    #
+    # That is catalogue #16 exactly -- `reshortlist_synthesizable.py` naming ONE
+    # T_2 experiment when five existed -- so it is fixed the way #16 should have
+    # been: derive the list from what is on disk. A degree-2 directory is
+    # `<seed experiment>_degree2` by construction (`sample_t2_degree2.py`), so
+    # each seed is asked whether its own exists rather than a second literal
+    # being added beside the first.
+    from shared import io as _dio                   # noqa: PLC0415
+    root = Path("/data/lab_vm/append_only/inhibition")
+    for key in list(out):
+        exp = f"{out[key]['experiment']}_degree2"
+        if (root / exp).is_dir():
+            out[f"{key}_degree2"] = {
+                "experiment": exp,
+                "label": f"{out[key]['label']} degree-2"}
     return out
 
 
