@@ -53,6 +53,11 @@ _PLACEHOLDER = "<!--murmurent:awaiting-stage-->"
 #: to separate a stub from a real report, and erring high means a genuinely
 #: stalled placeholder is still refreshed.
 _PLACEHOLDER_MAX_BYTES = 64 * 1024
+# MODULE-LEVEL DEFAULT, OVERRIDDEN FROM --topic IN main().
+# `reports_dir` has taken an optional topic all along and this caller did not
+# pass it, so building a page for any topic other than `run.topic` wrote it over
+# the CURRENT run's page, under the current run's title. That is catalogue #35,
+# already fixed once in `ligand_page.py` and left here.
 OUT = rp.reports_dir()
 
 #: The palette is the ranking view's, verbatim, because "uniform" is the whole
@@ -366,12 +371,21 @@ def sweep_json(d, s, worklist: Path | None) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    ap.add_argument("--topic", default=None,
+
+                    help="write into this topic's report directory; "
+
+                         "defaults to run.topic")
     ap.add_argument("--worklist", default=None,
                     help="the campaign's worklist; named rather than guessed, "
                          "because two worklists can exist and disagree")
     ap.add_argument("--json-only", action="store_true",
                     help="refresh sweep_state.json only — what a watch loop calls")
     args = ap.parse_args()
+    global OUT
+    if args.topic:
+        OUT = rp.reports_dir(args.topic)
+        OUT.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     # THE CAMPAIGN'S WORKLIST, discoverable now that it is topic-scoped and

@@ -832,12 +832,29 @@ def adaptive_extend(cand: str, rep: Path, pose: Path, pose_rank: int, gpu: int,
         chunks += 1
     else:
         log.info("%s: reached the %.0f ps cap still present", cand, max_ps)
+    # ONE RULE PER RUN, INCLUDING THIS LAST CHECK.
+    #
+    # This applied the WARHEAD test unconditionally, so a run governed by the
+    # RMSD rule that reached the cap still present was stamped `left_site=True`
+    # because its warhead happened to sit beyond 6 A in the final frame. The log
+    # said "reached the cap still present" and the row said it left --
+    # `t4_7606519fce77_m218`, 2026-09-09. Two definitions of "left" inside one
+    # run is precisely what `adaptive_extend`'s own docstring forbids.
+    #
+    # The warhead distance is still MEASURED and recorded either way; it just
+    # does not get to overrule the rule the run was asked to use.
     if not left:
         d = _equil_distance(cand, rep, pose, pose_rank, gro=rep / "prod.gro")
         if d is not None:
             last_d = d
-            if d > leave_a:
-                left, left_at = True, total
+        if leave_rmsd_nm > 0:
+            rr = _ligand_rmsd_tail(rep, chunk_ps, total)
+            if rr is not None:
+                last_rmsd = rr[2]
+                if rr[0] > leave_rmsd_nm:
+                    left, left_at = True, total
+        elif d is not None and d > leave_a:
+            left, left_at = True, total
     return {"total_ps": float(total), "left": bool(left),
             "left_at_ps": (float(left_at) if left_at is not None else None),
             "last_dist_a": (float(last_d) if last_d is not None else None),

@@ -56,6 +56,11 @@ from shared import run_paths as rp                  # noqa: E402
 
 log = logging.getLogger("sweep-combine")
 B = rp.BLACKSMITH
+# MODULE-LEVEL DEFAULT, OVERRIDDEN FROM --topic IN main().
+# `reports_dir` has taken an optional topic all along and this caller did not
+# pass it, so building a page for any topic other than `run.topic` wrote it over
+# the CURRENT run's page, under the current run's title. That is catalogue #35,
+# already fixed once in `ligand_page.py` and left here.
 REPORTS = rp.reports_dir()
 PAGES = REPORTS / "sweep_pages"
 #: Sweep length, derived -- this legend said 10 ns while the sweep has run
@@ -66,13 +71,22 @@ _SWEEP_NS = int(round(_tc.md_sweep_ps() / 1000))
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    ap.add_argument("--topic", default=None,
+
+                    help="write into this topic's report directory; "
+
+                         "defaults to run.topic")
     ap.add_argument("--worklist", required=True)
     ap.add_argument("--title", default="DWI covalent screen")
     args = ap.parse_args()
+    global REPORTS
+    if args.topic:
+        REPORTS = rp.reports_dir(args.topic)
+        REPORTS.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     wl = Path(args.worklist)
-    d = ss.state(wl)
+    d = ss.state(wl, topic=args.topic)
     summ = ss.summary(d)
     pred = ss.predicts(d)
     ok = d[d.sweep_state == "ok"].copy()

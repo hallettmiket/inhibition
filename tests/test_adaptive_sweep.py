@@ -278,3 +278,33 @@ def test_the_warhead_rule_still_applies_when_rmsd_is_off(tmp_path, monkeypatch):
                             leave_a=6.0)          # rmsd rule off
     assert out["left"] is True
     assert "warhead" in (out["leave_rule"] or "")
+
+
+def test_the_final_check_uses_the_same_rule_as_the_loop(tmp_path, monkeypatch):
+    """A run cannot be governed by one rule and judged by another.
+
+    `t4_7606519fce77_m218` (2026-09-09) logged "reached the 100000 ps cap still
+    present" and its row said `left_site = True`. The post-loop check applied
+    the WARHEAD test unconditionally, so a run governed by the RMSD rule was
+    overruled by a warhead that happened to sit beyond 6 A in the last frame.
+    """
+    a = _asw()
+    # ligand well inside the bar for the whole tail, warhead far away
+    (tmp_path / "rmsd.xvg").write_text(
+        "# c\n@ t\n" + "".join(f"{i*0.1:.1f} 0.25\n" for i in range(20)))
+    monkeypatch.setattr(a, "_equil_distance", lambda *args, **kw: 9.0)
+
+    class _NoExtend:
+        @staticmethod
+        def extend_production(rep, add, gpu_id=None, threads=8):
+            raise AssertionError("should not extend at the cap")
+
+    monkeypatch.setattr(a, "_ge", lambda: _NoExtend)
+    out = a.adaptive_extend("c", tmp_path, tmp_path / "p.sdf", 1, 0,
+                            start_ps=100000.0, max_ps=100000.0, chunk_ps=5000.0,
+                            leave_a=6.0, leave_rmsd_nm=1.0)
+    assert out["left"] is False, (
+        "the warhead test overruled the RMSD rule the run was given")
+    assert "RMSD" in (out["leave_rule"] or "")
+    # and the warhead distance is still recorded, just not decisive
+    assert out["last_dist_a"] == pytest.approx(9.0)

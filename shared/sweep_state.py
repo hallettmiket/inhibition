@@ -38,14 +38,18 @@ from . import run_paths as rp
 B = rp.BLACKSMITH
 
 
-def results() -> pd.DataFrame:
+def results(topic: str | None = None) -> pd.DataFrame:
     """Every sweep row THIS RUN has written, newest wins per mode.
 
     "Ever written" is what it used to mean, and that was the defect: the sweep
     tables were a flat directory shared by every screen, so a freshly bumped
     topic still listed 554 rows from three superseded runs.
     """
-    fs = [str(f) for f in rp.sweep_result_files()]
+    # THE TOPIC MUST REACH THE RESOLVER, not just the output path. Scoping the
+    # OUTPUT to a topic while the INPUT still comes from `run.topic` writes one
+    # run's results under another run's title -- catalogue #25, the
+    # half-moved-topic defect, which is exactly what this argument prevents.
+    fs = [str(f) for f in rp.sweep_result_files(topic)]
     if not fs:
         return pd.DataFrame()
     out = []
@@ -118,7 +122,8 @@ def results() -> pd.DataFrame:
     return d
 
 
-def state(worklist: Path | None = None) -> pd.DataFrame:
+def state(worklist: Path | None = None,
+          topic: str | None = None) -> pd.DataFrame:
     """One row per mode with a `sweep_state` column, joined to the ranking.
 
     Rows are the union of (everything on the worklist) and (everything with a
@@ -127,7 +132,7 @@ def state(worklist: Path | None = None) -> pd.DataFrame:
     """
     from shared import mode_ranking as mr
     rk = mr.gather()
-    res = results()
+    res = results(topic)
     wl = pd.DataFrame()
     if worklist and Path(worklist).is_file():
         wl = pd.read_csv(worklist)
