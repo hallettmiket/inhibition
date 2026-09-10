@@ -468,14 +468,18 @@ def test_only_one_module_computes_the_step_counts():
     assert hasattr(gs, "step_counts")
     for f in ("scripts/build_gui.py", "scripts/sweep_combine.py"):
         src = (REPO / f).read_text()
-        assert "step_counts()" in src, f
+        # DELEGATION, NOT ARITY. This asserted the literal `step_counts()`, so
+        # it failed the moment the call was given the topic it needs to scope
+        # its answer (2026-09-09). What matters is that these builders call the
+        # shared function rather than computing counts of their own.
+        assert "gs.step_counts(" in src or "GS.step_counts(" in src, f
     # and nobody may reach the unscoped reports directory for them
     mr = (REPO / "shared" / "mode_ranking.py").read_text()
     body = mr[mr.index("def _step_counts("):]
     body = body[:body.index("\n\n\n")] if "\n\n\n" in body else body
     code = "\n".join(l for l in body.splitlines() if not l.strip().startswith("#"))
     assert 'mdprio_reports" / "sweep_state.json"' not in code
-    assert "step_counts()" in code
+    assert "step_counts(" in code
 
 
 def test_the_counts_come_from_the_pipeline_probes():
@@ -821,3 +825,47 @@ def test_a_built_page_is_never_replaced_by_a_placeholder(tmp_path, monkeypatch):
     assert 0 < i < j, (
         "the size check runs after the wording check; a 32 MB page would still "
         "be parsed and could still be judged a stub")
+
+
+def test_nav_counts_are_never_borrowed_from_another_topic():
+    """A page must not display another run's numbers under its own title.
+
+    `/holders_100ns/` showed "6 of 409 at 100 ns" and "132,027 modes" -- nac_v8's
+    figures -- on a topic with four runs, because `step_counts()` probes disk
+    under `run.topic` and every caller invoked it with no argument. Catalogue
+    #25, the half-moved-topic defect: the topic reached the output path and not
+    the numbers.
+
+    Omitting is the correct answer, and the function's own docstring already
+    says so: "not measured yet" and "measured, none" are different claims.
+    """
+    from shared import gui_shell as gs, run_paths as rp
+    assert gs.step_counts("definitely_not_a_real_topic") == {}, (
+        "a foreign topic was given the current run's counts")
+    # the current topic still gets real ones
+    assert isinstance(gs.step_counts(), dict)
+    assert isinstance(gs.step_counts(rp.topic()), dict)
+
+
+def test_every_nav_call_passes_a_topic():
+    """The whole class, not the one page.
+
+    Fixing `build_gui` alone left `sweep_combine` rendering the same borrowed
+    counts into the page it owns -- which is how the first fix looked like it
+    had worked while the number on screen never changed.
+    """
+    import re
+    from pathlib import Path
+    REPO_ = Path(__file__).resolve().parents[1]
+    bad = []
+    for f in list((REPO_ / "scripts").glob("*.py")) + list((REPO_ / "shared").glob("*.py")):
+        src = f.read_text(errors="replace")
+        for n, line in enumerate(src.splitlines(), 1):
+            code = line.split("#", 1)[0]
+            if re.search(r"step_counts\(\s*\)", code) and "def step_counts" not in code:
+                # mode_ranking's delegator is the documented single source and
+                # is itself called with the run's own topic
+                if f.name == "mode_ranking.py":
+                    continue
+                bad.append(f"{f.name}:{n}: {line.strip()}")
+    assert not bad, ("step_counts() called with no topic:\n  " + "\n  ".join(bad))

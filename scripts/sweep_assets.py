@@ -44,6 +44,10 @@ sys.path.insert(0, str(REPO))
 from shared import run_paths as rp                  # noqa: E402
 
 log = logging.getLogger("sweep-assets")
+# MODULE-LEVEL DEFAULTS, REBOUND FROM --topic IN main(). `reports_dir` has
+# taken an optional topic all along; without passing it, a page built for
+# another topic lands in the CURRENT run's directory (catalogue #35) -- and its
+# absence is what made the viewer 404 on /holders_100ns/.
 OUT = rp.reports_dir() / "sweep_assets"
 SWEEP_ROOT = rp.sweep_work()
 
@@ -288,6 +292,9 @@ def _sweep_ps(ident: str, default: float = 1200.0) -> float:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    ap.add_argument("--topic", default=None,
+
+                    help="report directory to write into; defaults to run.topic")
     ap.add_argument("--worklist", required=True)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--force", action="store_true")
@@ -295,6 +302,10 @@ def main() -> None:
                     help="rebuild the figures and leave the movies alone -- "
                          "plots are ~1 s, movies ~3 s and rarely change")
     args = ap.parse_args()
+    global OUT
+    if args.topic:
+        OUT = rp.reports_dir(args.topic) / 'sweep_assets'
+        OUT.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     import pandas as pd

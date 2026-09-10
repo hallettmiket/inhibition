@@ -374,7 +374,7 @@ def main() -> None:
  <a class="mbtn lnk" href="pipeline.html">how this works &#8599;</a>
  <button id="theme" class="mbtn tbtn" onclick="toggleTheme()">dark</button>
 </div>
-{gs.nav("sweep.html", gs.step_counts())}
+{gs.nav("sweep.html", gs.step_counts(args.topic))}
 <main>
  <div id="rail">
   {rs.SEARCH_HTML}

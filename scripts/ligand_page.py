@@ -430,7 +430,7 @@ def main() -> None:
     opts = "".join(f'<option value="{html.escape(f)}">{html.escape(f)}</option>' for f in fams)
     head = "".join(f"<th>{html.escape(lbl)}</th>" for _, lbl in cols)
     from shared import gui_shell as GS
-    counts = GS.step_counts()
+    counts = GS.step_counts(topic)
     # THE STEPPER SAYS "Ranking", because that is what this is a view of. It is
     # not a new pipeline stage and must not draw as one -- the chevrons between
     # steps are the funnel, and a fifth arrow would claim a stage that does not

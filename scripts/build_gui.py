@@ -418,7 +418,7 @@ def main() -> None:
     # other builders each built theirs differently -- and one of those read an
     # unscoped path and showed a previous run's numbers. See
     # gui_shell.step_counts().
-    nav_counts = gs.step_counts()
+    nav_counts = gs.step_counts(args.topic)
     (OUT / "index.html").write_text(home(counts, s, wl, nav_counts))
     # SWEEP.HTML IS NOT WRITTEN HERE ANY MORE. `scripts/sweep_combine.py` owns
     # it and builds it on the MD results shell, which is what @tt8804 asked for.

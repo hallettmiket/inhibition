@@ -148,7 +148,7 @@ def nav(current: str, counts: dict | None = None) -> str:
     return "".join(out)
 
 
-def step_counts() -> dict:
+def step_counts(topic: str | None = None) -> dict:
     """The counts under each step label — ONE source for every page.
 
     WHY THIS EXISTS. Four builders computed these independently: `build_gui`
@@ -169,6 +169,18 @@ def step_counts() -> dict:
     "measured, none" are different claims and a bare 0 makes the second. A count
     the pipeline reports as `unknown` is omitted for the same reason.
     """
+    # A FOREIGN TOPIC GETS NO COUNTS, NOT ANOTHER RUN'S.
+    #
+    # These probes count artefacts on disk under `run.topic`. Asked for a
+    # different topic they would return the CURRENT run's numbers under the
+    # other run's title -- which is how `/holders_100ns/` came to display
+    # "6 of 409 at 100 ns", nac_v8's figures, on a topic with four runs. That is
+    # catalogue #25, and it is worse than showing nothing: the rule this
+    # function already states is that absent counts are OMITTED, because "not
+    # measured yet" and "measured, none" are different claims.
+    from . import run_paths as _rp
+    if topic and topic != _rp.topic():
+        return {}
     try:
         from . import pipeline as pl
         st = {s["name"]: s for s in pl.status()["stages"]}

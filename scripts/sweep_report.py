@@ -45,6 +45,10 @@ from shared import run_paths as rp                  # noqa: E402
 
 log = logging.getLogger("sweep-report")
 B = rp.BLACKSMITH
+# MODULE-LEVEL DEFAULTS, REBOUND FROM --topic IN main(). `reports_dir` has
+# taken an optional topic all along; without passing it, a page built for
+# another topic lands in the CURRENT run's directory (catalogue #35) -- and its
+# absence is what made the viewer 404 on /holders_100ns/.
 REPORTS = rp.reports_dir()
 ASSETS = REPORTS / "sweep_assets"
 PAGES = REPORTS / "sweep_pages"
@@ -85,8 +89,16 @@ def rank_row(ident: str):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    ap.add_argument("--topic", default=None,
+
+                    help="report directory to write into; defaults to run.topic")
     ap.add_argument("--ident", required=True)
     args = ap.parse_args()
+    global REPORTS, ASSETS, PAGES
+    if args.topic:
+        REPORTS = rp.reports_dir(args.topic)
+        ASSETS, PAGES = REPORTS/'sweep_assets', REPORTS/'sweep_pages'
+        PAGES.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     import pandas as pd
 
